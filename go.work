@@ -7,6 +7,7 @@ use (
 	./pkg/reconciler
 	./pkg/recovery
 	./pkg/worker
+	./plugins/credential-aws
 	./plugins/credential-do
 	./plugins/credential-exoscale
 	./plugins/credential-upcloud
