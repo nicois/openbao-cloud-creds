@@ -50,7 +50,7 @@ func (b *backend) pathMetricsEntity(ctx context.Context, req *logical.Request, d
 	}
 
 	now := time.Now()
-	merged, err := tracker.MergeEntity(entityID, now)
+	merged, err := tracker.MergeEntity(ctx, entityID, now)
 	if err != nil {
 		return logical.ErrorResponse("metrics query failed: %v", err), nil
 	}
@@ -70,5 +70,22 @@ func (b *backend) pathMetricsEntity(ctx context.Context, req *logical.Request, d
 }
 
 func (b *backend) pathMetricsStale(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	return logical.ListResponse([]string{}), nil
+	b.mu.RLock()
+	tracker := b.accessTracker
+	b.mu.RUnlock()
+
+	if tracker == nil {
+		return logical.ErrorResponse("metrics not initialized"), nil
+	}
+
+	olderThanSec := d.Get("older_than").(int)
+	olderThan := time.Duration(olderThanSec) * time.Second
+	now := time.Now()
+
+	stale, err := tracker.ListStaleEntities(ctx, olderThan, now)
+	if err != nil {
+		return logical.ErrorResponse("stale query failed: %v", err), nil
+	}
+
+	return logical.ListResponse(stale), nil
 }

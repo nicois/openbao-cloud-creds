@@ -35,6 +35,7 @@ func (s *DOServer) SetNextStatus(code int) {
 
 func (s *DOServer) handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v2/account", s.getAccount)
 	mux.HandleFunc("POST /v2/tokens", s.createToken)
 	mux.HandleFunc("DELETE /v2/tokens/", s.deleteToken)
 	mux.HandleFunc("GET /v2/tokens", s.listTokens)
@@ -123,4 +124,17 @@ func (s *DOServer) listTokens(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"tokens": tokens})
+}
+
+func (s *DOServer) getAccount(w http.ResponseWriter, r *http.Request) {
+	if s.checkInjectedError(w) {
+		return
+	}
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"account": map[string]interface{}{
+			"uuid":   "fake-account-uuid",
+			"status": "active",
+		},
+	})
 }
