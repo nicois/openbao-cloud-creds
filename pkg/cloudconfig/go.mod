@@ -1,3 +1,3 @@
 module github.com/nicois/openbao-cloud-creds/pkg/cloudconfig
 
-go 1.22
+go 1.26.1

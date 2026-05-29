@@ -1,6 +1,6 @@
 module github.com/nicois/openbao-cloud-creds/plugins/credential-do
 
-go 1.24.0
+go 1.26.1
 
 require (
 	github.com/armon/go-metrics v0.4.1
