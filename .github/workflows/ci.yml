@@ -23,10 +23,11 @@ jobs:
         run: go test -race -coverprofile=coverage.out github.com/nicois/openbao-cloud-creds/...
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: latest
           args: --help
+          install-mode: binary
 
       - name: Lint
         run: |
