@@ -8,4 +8,5 @@ use (
 	./pkg/recovery
 	./pkg/worker
 	./plugins/credential-do
+	./plugins/credential-upcloud
 )
