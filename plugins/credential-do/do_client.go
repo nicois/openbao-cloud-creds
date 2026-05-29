@@ -29,6 +29,15 @@ type tokenResponse struct {
 	} `json:"token"`
 }
 
+type tokenInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type listTokensResponse struct {
+	Tokens []tokenInfo `json:"tokens"`
+}
+
 func newDOClient(baseURL, token string) *doClient {
 	return &doClient{
 		baseURL: baseURL,
@@ -64,6 +73,48 @@ func (c *doClient) CreateToken(ctx context.Context, name string, scopes []string
 		return nil, resp.StatusCode, err
 	}
 	return &result, resp.StatusCode, nil
+}
+
+func (c *doClient) CheckHealth(ctx context.Context) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v2/account", nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	return resp.StatusCode, nil
+}
+
+func (c *doClient) ListTokens(ctx context.Context) ([]tokenInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v2/tokens", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("DO API list tokens returned %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result listTokensResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result.Tokens, nil
 }
 
 func (c *doClient) DeleteToken(ctx context.Context, tokenID string) (int, error) {
