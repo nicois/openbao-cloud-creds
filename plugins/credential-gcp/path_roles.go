@@ -16,12 +16,12 @@ const (
 )
 
 type gcpRole struct {
-	Name                string   `json:"name"`
+	Name                string        `json:"name"`
 	DefaultTTL          time.Duration `json:"default_ttl"`
 	MaxTTL              time.Duration `json:"max_ttl"`
-	ServiceAccountEmail string   `json:"service_account_email"`
-	Scopes              []string `json:"scopes"`
-	Disabled            bool     `json:"disabled,omitempty"`
+	ServiceAccountEmail string        `json:"service_account_email"`
+	Scopes              []string      `json:"scopes"`
+	Disabled            bool          `json:"disabled,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -147,10 +147,10 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 
 	data := map[string]interface{}{
 		"name":                  role.Name,
-		"default_ttl":          int(role.DefaultTTL.Seconds()),
-		"max_ttl":              int(role.MaxTTL.Seconds()),
+		"default_ttl":           int(role.DefaultTTL.Seconds()),
+		"max_ttl":               int(role.MaxTTL.Seconds()),
 		"service_account_email": role.ServiceAccountEmail,
-		"scopes":               role.Scopes,
+		"scopes":                role.Scopes,
 	}
 
 	return &logical.Response{Data: data}, nil

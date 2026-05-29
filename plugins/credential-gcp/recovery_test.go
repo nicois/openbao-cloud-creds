@@ -55,7 +55,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"default_ttl":           3600,
-			"max_ttl":              3600,
+			"max_ttl":               3600,
 			"service_account_email": "target-sa@test-project.iam.gserviceaccount.com",
 		},
 	}

@@ -17,9 +17,9 @@ func TestRoleCRUD(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"default_ttl":           3600,
-			"max_ttl":              3600,
+			"max_ttl":               3600,
 			"service_account_email": "deploy-sa@my-project.iam.gserviceaccount.com",
-			"scopes":               "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/compute",
+			"scopes":                "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/compute",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -119,7 +119,7 @@ func TestRoleValidation_InvalidSAEmail(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"default_ttl":           3600,
-			"max_ttl":              3600,
+			"max_ttl":               3600,
 			"service_account_email": "not-a-valid-email",
 		},
 	}
@@ -141,7 +141,7 @@ func TestRoleValidation_TTLTooHigh(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"default_ttl":           3600,
-			"max_ttl":              86400, // above 43200s maximum
+			"max_ttl":               86400, // above 43200s maximum
 			"service_account_email": "sa@my-project.iam.gserviceaccount.com",
 		},
 	}
@@ -163,7 +163,7 @@ func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"default_ttl":           7200,
-			"max_ttl":              3600,
+			"max_ttl":               3600,
 			"service_account_email": "sa@my-project.iam.gserviceaccount.com",
 		},
 	}
