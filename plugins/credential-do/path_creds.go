@@ -97,6 +97,16 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		IssuedBy:     "cloud-creds-do/v0.1",
 	})
 
+	// Track active token for reconciler
+	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+tokenResp.Token.ID, map[string]interface{}{
+		"role":    roleName,
+		"minter":  minterID,
+		"created": now.UTC().Format(time.RFC3339),
+	})
+	if activeEntry != nil {
+		req.Storage.Put(ctx, activeEntry)
+	}
+
 	resp := b.Secret("do_token").Response(env.ToMap(), map[string]interface{}{
 		"upstream_token_id": tokenResp.Token.ID,
 		"role":              roleName,
@@ -127,6 +137,9 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		return nil, fmt.Errorf("revoke failed: %v", err)
 	}
 	b.recordMinterSuccess(minterID, now)
+
+	// Remove from active tokens
+	req.Storage.Delete(ctx, "active-tokens/"+tokenID)
 
 	return nil, nil
 }

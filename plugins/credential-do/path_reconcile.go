@@ -2,7 +2,9 @@ package credentialdo
 
 import (
 	"context"
+	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -29,13 +31,38 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	mode := d.Get("mode").(string)
 	dryRun := mode == "dry_run"
 
+	_, client, err := b.selectMinter()
+	if err != nil {
+		return logical.ErrorResponse("cannot reconcile: %v", err), nil
+	}
+
+	lister := &doCloudLister{client: client}
+	registry := &leaseRegistry{storage: req.Storage, ctx: ctx}
+
+	cfg := reconciler.Config{
+		MaxDeletesPerPass: 10,
+		ConfirmationHold:  0,
+		DryRun:            dryRun,
+	}
+
+	b.mu.RLock()
+	if b.config != nil {
+		cfg.MaxDeletesPerPass = b.config.MaxDeletesPerPass
+	}
+	b.mu.RUnlock()
+
+	result, err := reconciler.New(cfg, lister, registry).Run(ctx, time.Now())
+	if err != nil {
+		return logical.ErrorResponse("reconcile failed: %v", err), nil
+	}
+
 	return &logical.Response{
 		Data: map[string]interface{}{
 			"mode":          mode,
 			"dry_run":       dryRun,
-			"orphans_found": 0,
-			"deleted":       0,
-			"hit_limit":     false,
+			"orphans_found": len(result.OrphansFound),
+			"deleted":       result.Deleted,
+			"hit_limit":     result.HitLimit,
 		},
 	}, nil
 }
