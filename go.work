@@ -10,5 +10,6 @@ use (
 	./plugins/credential-aws
 	./plugins/credential-do
 	./plugins/credential-exoscale
+	./plugins/credential-gcp
 	./plugins/credential-upcloud
 )
