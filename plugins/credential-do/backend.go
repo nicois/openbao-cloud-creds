@@ -38,6 +38,7 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		Help:        backendHelp,
 		Paths: framework.PathAppend(
 			b.configPaths(),
+			b.rolePaths(),
 		),
 	}
 
