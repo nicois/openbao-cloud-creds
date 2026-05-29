@@ -1,0 +1,76 @@
+package metrics_test
+
+import (
+	"testing"
+	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/metrics"
+)
+
+func TestRecordAccess(t *testing.T) {
+	store := metrics.NewInMemoryStore()
+	tracker := metrics.NewAccessTracker("node-1", store)
+
+	now := time.Now()
+	tracker.RecordAccess("entity-1", "role-a", now)
+	tracker.RecordAccess("entity-1", "role-a", now.Add(time.Minute))
+
+	entry := tracker.Get("entity-1", "role-a")
+	if entry == nil {
+		t.Fatal("expected entry")
+	}
+	if entry.AccessCount != 2 {
+		t.Fatalf("expected count=2, got %d", entry.AccessCount)
+	}
+	if !entry.LastAccessAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("unexpected last_access_at: %v", entry.LastAccessAt)
+	}
+}
+
+func TestFlushAndLoad(t *testing.T) {
+	store := metrics.NewInMemoryStore()
+	tracker := metrics.NewAccessTracker("node-1", store)
+
+	now := time.Now()
+	tracker.RecordAccess("entity-1", "role-a", now)
+	tracker.RecordAccess("entity-1", "role-a", now.Add(time.Minute))
+
+	if err := tracker.Flush(now.Add(2 * time.Minute)); err != nil {
+		t.Fatalf("flush failed: %v", err)
+	}
+
+	tracker2 := metrics.NewAccessTracker("node-2", store)
+	merged, err := tracker2.MergeEntity("entity-1", now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("merge failed: %v", err)
+	}
+	if merged.AccessCount != 2 {
+		t.Fatalf("expected merged count=2, got %d", merged.AccessCount)
+	}
+	if merged.StalenessSeconds > 120 {
+		t.Fatalf("unexpected staleness: %d", merged.StalenessSeconds)
+	}
+}
+
+func TestMergeMultipleNodes(t *testing.T) {
+	store := metrics.NewInMemoryStore()
+	t1 := metrics.NewAccessTracker("node-1", store)
+	t2 := metrics.NewAccessTracker("node-2", store)
+
+	now := time.Now()
+	t1.RecordAccess("entity-1", "role-a", now)
+	t1.RecordAccess("entity-1", "role-a", now.Add(time.Minute))
+	t2.RecordAccess("entity-1", "role-a", now.Add(2*time.Minute))
+
+	t1.Flush(now.Add(3 * time.Minute))
+	t2.Flush(now.Add(3 * time.Minute))
+
+	t3 := metrics.NewAccessTracker("node-3", store)
+	merged, err := t3.MergeEntity("entity-1", now.Add(4*time.Minute))
+	if err != nil {
+		t.Fatalf("merge failed: %v", err)
+	}
+	if merged.AccessCount != 3 {
+		t.Fatalf("expected merged count=3, got %d", merged.AccessCount)
+	}
+}
