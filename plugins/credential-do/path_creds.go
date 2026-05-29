@@ -77,6 +77,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	b.recordMinterSuccess(minterID, now)
 
+	if b.accessTracker != nil {
+		b.accessTracker.RecordAccess(minterID, roleName, now)
+	}
+
 	expiresAt := now.Add(role.DefaultTTL)
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: "do",
