@@ -39,7 +39,11 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		Paths: framework.PathAppend(
 			b.configPaths(),
 			b.rolePaths(),
+			b.credsPaths(),
 		),
+		Secrets: []*framework.Secret{
+			b.secretDO(),
+		},
 	}
 
 	if err := b.Setup(ctx, conf); err != nil {
