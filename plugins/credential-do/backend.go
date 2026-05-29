@@ -7,6 +7,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/metrics"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -23,6 +24,8 @@ type backend struct {
 	minters       map[string]*minterState
 	apiURL        string
 	accessTracker *metrics.AccessTracker
+	workerMgr     *worker.Manager
+	workerCancel  context.CancelFunc
 }
 
 type minterState struct {
