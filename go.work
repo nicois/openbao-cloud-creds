@@ -11,5 +11,6 @@ use (
 	./plugins/credential-do
 	./plugins/credential-exoscale
 	./plugins/credential-gcp
+	./plugins/credential-ovh
 	./plugins/credential-upcloud
 )
