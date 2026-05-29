@@ -4,12 +4,14 @@
 
 OpenBao plugins that issue short-lived, role-scoped cloud credentials with a uniform API across cloud providers. Open-source (Apache 2.0).
 
-**Authoritative specs:**
-- [`docs/techrfc.md`](docs/techrfc.md) — formal RFC (requirements, API, risks). This is the contract.
-- [`docs/design.md`](docs/design.md) — companion with worked examples and detailed rationale.
-- [`docs/decisions.md`](docs/decisions.md) — short rationale notes for design choices that aren't obvious from the spec.
+**Documents (note: the original RFC predates implementation and is partly stale):**
+- [`docs/techrfc.md`](docs/techrfc.md) — original formal RFC (requirements, API, risks). Written before any code; its per-cloud strategy table and "follow-up RFC" status notes are STALE (all 10 plugins now exist; the native-wrapper strategy was abandoned). Still authoritative for the response-envelope contract and error-code model.
+- [`docs/design.md`](docs/design.md) — companion with worked examples and detailed rationale (same caveat as the techrfc).
+- [`docs/decisions.md`](docs/decisions.md) — short rationale notes for design choices.
+- [`docs/cloud-credential-research.md`](docs/cloud-credential-research.md) — what each cloud's API actually supports; authoritative for per-cloud strategy.
+- [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md) — object-storage viability (out of scope, but analysed).
 
-If anything in this file conflicts with the techrfc, the techrfc wins. Update it instead.
+For the *envelope/error contract*, the techrfc wins. For *what is built and which strategy each cloud uses*, this file and `docs/cloud-credential-research.md` win — the techrfc's implementation-status claims are outdated.
 
 ## Mental model
 
@@ -17,23 +19,31 @@ Two strategies, chosen per cloud based on whether the cloud's native API support
 
 | Strategy | Used by | How it works |
 |----------|---------|--------------|
-| **Native** (thin envelope wrapper over upstream OpenBao engine) | AWS (STS), GCP (impersonation), Azure (dynamic SP) | OpenBao already does the right thing; this project just normalizes the response envelope. |
-| **JIT** (mint on read, revoke on lease end) | DigitalOcean (reference impl) | Plugin holds a long-lived "minter" credential; per-read it calls `POST /v2/tokens` and stores the upstream ID in lease `internal_data` for revoke. |
-| **Phased rotation** (N slots rotated on schedule with phase offsets) | UpCloud (planned) | Plugin pre-provisions N credentials per role; rotates one every T/N. Reads return the freshest. Lease TTL = time until that slot's next rotation, so TTL is always honest. |
-| (deferred) | OVH | OVH's legacy auth requires human approval at a `validationUrl`. Deferred until OAuth2 service-account coverage is verified for the OVH APIs in scope. |
+| **JIT** (mint on read, revoke on lease end) | DigitalOcean, AWS, GCP, Azure, OVH, Exoscale, Vultr, Akamai, UpCloud | Plugin holds a long-lived "minter" credential; per-read it calls the cloud API to mint a short-lived credential and stores the upstream ID in lease `internal_data` for revoke. Clouds whose tokens expire naturally (AWS STS, GCP impersonation, OVH/UpCloud tokens) need no revoke call. |
+| **Phased rotation** (N slots rotated on schedule with phase offsets) | Oracle (OCI) | Plugin pre-provisions N credentials per role; rotates one every T/N. Reads return the freshest. Lease TTL = time until that slot's next rotation, so TTL is always honest. Used where per-user credential quotas are too low for JIT (OCI caps at 2 auth tokens/user). |
 
-DO is intentionally the reference implementation: it exercises every load-bearing piece (envelope, lease tracking, recovery state machine, reconciler, metrics) without the complexity of native engine wrapping.
+DO was the reference implementation: it exercises every load-bearing piece (envelope, lease tracking, recovery state machine, reconciler, metrics). All other plugins follow its structure.
+
+**The "Native engine wrapper" strategy described in the techrfc was abandoned.** Investigation (see `docs/cloud-credential-research.md`) found OpenBao has NO GCP or Azure secrets engine, and only partial AWS support (IAM-user `iam_tags` but no STS `session_tags`). So AWS/GCP/Azure are implemented as full JIT plugins calling the cloud APIs directly, not as thin wrappers. The techrfc's strategy table is stale on this point; this file and `docs/cloud-credential-research.md` are authoritative for what was actually built.
 
 ## Status of each plugin
 
-| Plugin | State |
-|--------|-------|
-| `credential-do` | Reference implementation — to be built first |
-| `credential-aws` | Spec'd, follow-up RFC |
-| `credential-gcp` | Spec'd, follow-up RFC |
-| `credential-azure` | Spec'd, follow-up RFC |
-| `credential-upcloud` | Spec'd, follow-up RFC |
-| `credential-ovh` | Deferred (see CON-002 in techrfc) |
+All ten plugins are implemented, tested, lint-clean (golangci-lint v2), build as deployable binaries, and pass the OpenBao registration smoke test (`make smoke-test`). None are scaffolds or stubs.
+
+| Plugin | Strategy | Notes |
+|--------|----------|-------|
+| `credential-do` | JIT | Reference implementation; `POST /v2/tokens` |
+| `credential-aws` | JIT | STS AssumeRole (direct, not the OpenBao AWS engine); no revoke (STS expires) |
+| `credential-gcp` | JIT | SA impersonation, `generateAccessToken`; no revoke (token expires) |
+| `credential-azure` | JIT | Graph API `addPassword` on existing app registrations; hard revoke |
+| `credential-ovh` | JIT | OAuth2 `client_credentials` token minting; no revoke (1h tokens) |
+| `credential-upcloud` | JIT | `POST /1.3/account/tokens`, native `expires_in` TTL |
+| `credential-exoscale` | JIT | `POST /api-key` scoped to an IAM role |
+| `credential-vultr` | JIT | sub-user creation, `POST /v2/users` |
+| `credential-akamai` | JIT | EdgeGrid-signed API-client creation (CDN/Identity API — NOT Linode Object Storage) |
+| `credential-oci` | Phased rotation | OCI auth tokens, N=2 slots; the only non-JIT plugin |
+
+Object-storage credentials (S3-style backup keys) are explicitly **out of scope** — see `docs/object-storage-credential-audit.md` for the viability analysis and why.
 
 ## Genealogy
 

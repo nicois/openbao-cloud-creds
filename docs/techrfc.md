@@ -1,10 +1,12 @@
 # OpenBao Short-Lived Cloud Credentials — TECHRFC
 
+> **⚠️ IMPLEMENTATION STATUS (2026-05-30):** This RFC was written before implementation and is partly superseded. All ten plugins (DO, AWS, GCP, Azure, OVH, UpCloud, Exoscale, Vultr, Akamai, OCI) are now built and tested. Two things in this document are STALE: (1) the **native-engine-wrapper strategy** for AWS/GCP/Azure was abandoned — OpenBao has no GCP/Azure secrets engine and only partial AWS support, so those clouds use full JIT plugins calling cloud APIs directly; (2) the **per-plugin "Spec'd / follow-up RFC / Deferred" status** is obsolete — everything is implemented. The **response-envelope shape and error-code model below remain authoritative.** See `CLAUDE.md` and `docs/cloud-credential-research.md` for current strategy-per-cloud.
+
 | Author(s) | Nick Farrell |
 | :---- | :---- |
-| **Status** | draft |
+| **Status** | draft (partly superseded — see banner above) |
 | **Creation Date** | 2026-05-29 |
-| **Updates** | — |
+| **Updates** | 2026-05-30 — implementation status banner added |
 | **Updated By** | — |
 | **History** | 2026-05-29 — Initial revision |
 
