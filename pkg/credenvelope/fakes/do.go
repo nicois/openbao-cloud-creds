@@ -42,6 +42,12 @@ func (s *DOServer) handler() http.Handler {
 	return mux
 }
 
+func writeJSON(w http.ResponseWriter, v interface{}) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		panic(fmt.Sprintf("fake server: failed to encode JSON: %v", err))
+	}
+}
+
 func (s *DOServer) checkInjectedError(w http.ResponseWriter) bool {
 	s.mu.Lock()
 	status := s.nextStatus
@@ -50,7 +56,7 @@ func (s *DOServer) checkInjectedError(w http.ResponseWriter) bool {
 
 	if status != 0 {
 		w.WriteHeader(status)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, map[string]interface{}{
 			"id":      "server_error",
 			"message": fmt.Sprintf("injected %d", status),
 		})
@@ -86,7 +92,7 @@ func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	w.WriteHeader(201)
-	json.NewEncoder(w).Encode(map[string]interface{}{"token": token})
+	writeJSON(w, map[string]interface{}{"token": token})
 }
 
 func (s *DOServer) deleteToken(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +129,7 @@ func (s *DOServer) listTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	json.NewEncoder(w).Encode(map[string]interface{}{"tokens": tokens})
+	writeJSON(w, map[string]interface{}{"tokens": tokens})
 }
 
 func (s *DOServer) getAccount(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +137,7 @@ func (s *DOServer) getAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(200)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"account": map[string]interface{}{
 			"uuid":   "fake-account-uuid",
 			"status": "active",

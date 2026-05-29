@@ -12,7 +12,10 @@ test-cloud-real:
 	go test -tags=cloud_real ./plugins/credential-do/...
 
 lint:
-	golangci-lint run ./pkg/... ./plugins/...
+	@for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/worker plugins/credential-do; do \
+		echo "=== Linting $$dir ==="; \
+		(cd $$dir && golangci-lint run ./...) || exit 1; \
+	done
 
 fmt:
 	gofmt -w .

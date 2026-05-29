@@ -106,7 +106,9 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		"created": now.UTC().Format(time.RFC3339),
 	})
 	if activeEntry != nil {
-		req.Storage.Put(ctx, activeEntry)
+		if err := req.Storage.Put(ctx, activeEntry); err != nil {
+			b.Logger().Warn("failed to track active token", "token_id", tokenResp.Token.ID, "error", err)
+		}
 	}
 
 	resp := b.Secret("do_token").Response(env.ToMap(), map[string]interface{}{
@@ -144,7 +146,9 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	b.recordMinterSuccess(minterID, now)
 
 	// Remove from active tokens
-	req.Storage.Delete(ctx, "active-tokens/"+tokenID)
+	if err := req.Storage.Delete(ctx, "active-tokens/"+tokenID); err != nil {
+		b.Logger().Warn("failed to remove active token tracking", "token_id", tokenID, "error", err)
+	}
 
 	return nil, nil
 }

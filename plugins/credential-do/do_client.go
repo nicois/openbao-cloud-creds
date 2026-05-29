@@ -87,7 +87,7 @@ func (c *doClient) CheckHealth(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return resp.StatusCode, nil
 }

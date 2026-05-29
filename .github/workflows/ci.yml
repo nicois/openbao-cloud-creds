@@ -22,7 +22,15 @@ jobs:
       - name: Test
         run: go test -race -coverprofile=coverage.out github.com/nicois/openbao-cloud-creds/...
 
-      - name: Lint
+      - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          args: --help
+
+      - name: Lint
+        run: |
+          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/worker plugins/credential-do; do
+            echo "=== Linting $dir ==="
+            (cd "$dir" && golangci-lint run ./...)
+          done

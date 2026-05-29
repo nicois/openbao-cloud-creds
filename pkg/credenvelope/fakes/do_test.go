@@ -27,7 +27,9 @@ func TestDOFake_CreateToken(t *testing.T) {
 
 	var result map[string]interface{}
 	data, _ := io.ReadAll(resp.Body)
-	json.Unmarshal(data, &result)
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
 
 	token, ok := result["token"].(map[string]interface{})
 	if !ok {
@@ -50,7 +52,9 @@ func TestDOFake_DeleteToken(t *testing.T) {
 	resp, _ := http.Post(srv.URL+"/v2/tokens", "application/json", bytes.NewBufferString(body))
 	var createResult map[string]interface{}
 	data, _ := io.ReadAll(resp.Body)
-	json.Unmarshal(data, &createResult)
+	if err := json.Unmarshal(data, &createResult); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
 	resp.Body.Close()
 	tokenID := createResult["token"].(map[string]interface{})["id"].(string)
 
