@@ -77,6 +77,31 @@ func TestAuthFailingToHealthyOnHealthCheck(t *testing.T) {
 	}
 }
 
+func TestConsecutiveFailures(t *testing.T) {
+	sm := recovery.NewStateMachine(recovery.Config{
+		AuthFailThreshold:   30 * time.Second,
+		HealthCheckInterval: 5 * time.Minute,
+	})
+
+	if sm.ConsecutiveFailures() != 0 {
+		t.Fatalf("expected 0 initial failures, got %d", sm.ConsecutiveFailures())
+	}
+
+	now := time.Now()
+	sm.RecordError(500, now)
+	sm.RecordError(500, now.Add(time.Second))
+	sm.RecordError(401, now.Add(2*time.Second))
+
+	if sm.ConsecutiveFailures() != 3 {
+		t.Fatalf("expected 3 failures, got %d", sm.ConsecutiveFailures())
+	}
+
+	sm.RecordSuccess(now.Add(3 * time.Second))
+	if sm.ConsecutiveFailures() != 0 {
+		t.Fatalf("expected 0 after success, got %d", sm.ConsecutiveFailures())
+	}
+}
+
 func TestNeedsHealthCheck(t *testing.T) {
 	sm := recovery.NewStateMachine(recovery.Config{
 		AuthFailThreshold:   30 * time.Second,

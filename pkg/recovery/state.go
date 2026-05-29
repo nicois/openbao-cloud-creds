@@ -20,13 +20,14 @@ type Config struct {
 }
 
 type StateMachine struct {
-	mu                sync.RWMutex
-	state             State
-	config            Config
-	firstAuthErrorAt  time.Time
-	lastErrorAt       time.Time
-	lastSuccessAt     time.Time
-	enteredAuthFailed time.Time
+	mu                  sync.RWMutex
+	state               State
+	config              Config
+	firstAuthErrorAt    time.Time
+	lastErrorAt         time.Time
+	lastSuccessAt       time.Time
+	enteredAuthFailed   time.Time
+	consecutiveFailures int
 }
 
 func NewStateMachine(cfg Config) *StateMachine {
@@ -51,14 +52,22 @@ func (sm *StateMachine) LastSuccessAt() time.Time {
 func (sm *StateMachine) RecordSuccess(at time.Time) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	sm.consecutiveFailures = 0
 	sm.lastSuccessAt = at
 	sm.firstAuthErrorAt = time.Time{}
 	sm.state = Healthy
 }
 
+func (sm *StateMachine) ConsecutiveFailures() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.consecutiveFailures
+}
+
 func (sm *StateMachine) RecordError(httpStatus int, at time.Time) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	sm.consecutiveFailures++
 	sm.lastErrorAt = at
 
 	switch sm.state {
