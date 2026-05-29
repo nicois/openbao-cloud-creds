@@ -8,6 +8,7 @@ use (
 	./pkg/recovery
 	./pkg/worker
 	./plugins/credential-aws
+	./plugins/credential-azure
 	./plugins/credential-do
 	./plugins/credential-exoscale
 	./plugins/credential-gcp
