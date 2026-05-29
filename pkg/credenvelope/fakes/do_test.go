@@ -72,7 +72,10 @@ func TestDOFake_ErrorInjection(t *testing.T) {
 	srv.SetNextStatus(429)
 
 	body := `{"name":"test","scopes":["read"]}`
-	resp, _ := http.Post(srv.URL+"/v2/tokens", "application/json", bytes.NewBufferString(body))
+	resp, err := http.Post(srv.URL+"/v2/tokens", "application/json", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 429 {

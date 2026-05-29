@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
-	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 )
 
 type doRole struct {

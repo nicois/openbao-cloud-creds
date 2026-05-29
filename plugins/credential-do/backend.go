@@ -4,11 +4,11 @@ import (
 	"context"
 	"sync"
 
-	"github.com/openbao/openbao/sdk/v2/framework"
-	"github.com/openbao/openbao/sdk/v2/logical"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/metrics"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/openbao/openbao/sdk/v2/framework"
+	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
 const backendHelp = `

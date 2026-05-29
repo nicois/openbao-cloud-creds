@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/openbao/openbao/sdk/v2/logical"
 	credentialdo "github.com/nicois/openbao-cloud-creds/plugins/credential-do"
+	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
 func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {

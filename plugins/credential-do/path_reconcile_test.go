@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/openbao/openbao/sdk/v2/logical"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
+	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
 func TestReconcileEndpoint_DryRun(t *testing.T) {
