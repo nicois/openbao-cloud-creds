@@ -1,8 +1,11 @@
 package metrics
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,9 +24,9 @@ type MergedEntry struct {
 }
 
 type MetricsStore interface {
-	Put(key string, value []byte) error
-	Get(key string) ([]byte, error)
-	List(prefix string) ([]string, error)
+	Put(ctx context.Context, key string, value []byte) error
+	Get(ctx context.Context, key string) ([]byte, error)
+	List(ctx context.Context, prefix string) ([]string, error)
 }
 
 type accessKey struct {
@@ -67,7 +70,7 @@ func (t *AccessTracker) Get(entityID, role string) *AccessEntry {
 	return t.entries[accessKey{EntityID: entityID, Role: role}]
 }
 
-func (t *AccessTracker) Flush(now time.Time) error {
+func (t *AccessTracker) Flush(ctx context.Context, now time.Time) error {
 	t.mu.Lock()
 	snapshot := make(map[accessKey]*AccessEntry, len(t.entries))
 	for k, v := range t.entries {
@@ -83,16 +86,16 @@ func (t *AccessTracker) Flush(now time.Time) error {
 		if err != nil {
 			return err
 		}
-		if err := t.store.Put(storageKey, data); err != nil {
+		if err := t.store.Put(ctx, storageKey, data); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (t *AccessTracker) MergeEntity(entityID string, now time.Time) (*MergedEntry, error) {
+func (t *AccessTracker) MergeEntity(ctx context.Context, entityID string, now time.Time) (*MergedEntry, error) {
 	prefix := fmt.Sprintf("metrics/%s/", entityID)
-	keys, err := t.store.List(prefix)
+	keys, err := t.store.List(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +104,7 @@ func (t *AccessTracker) MergeEntity(entityID string, now time.Time) (*MergedEntr
 	var latestFlush time.Time
 
 	for _, key := range keys {
-		data, err := t.store.Get(key)
+		data, err := t.store.Get(ctx, key)
 		if err != nil {
 			return nil, err
 		}
@@ -148,14 +151,14 @@ func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{data: make(map[string][]byte)}
 }
 
-func (s *InMemoryStore) Put(key string, value []byte) error {
+func (s *InMemoryStore) Put(ctx context.Context, key string, value []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data[key] = value
 	return nil
 }
 
-func (s *InMemoryStore) Get(key string) ([]byte, error) {
+func (s *InMemoryStore) Get(ctx context.Context, key string) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	v, ok := s.data[key]
@@ -165,7 +168,7 @@ func (s *InMemoryStore) Get(key string) ([]byte, error) {
 	return v, nil
 }
 
-func (s *InMemoryStore) List(prefix string) ([]string, error) {
+func (s *InMemoryStore) List(ctx context.Context, prefix string) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var keys []string
@@ -175,4 +178,46 @@ func (s *InMemoryStore) List(prefix string) ([]string, error) {
 		}
 	}
 	return keys, nil
+}
+
+func (t *AccessTracker) ListStaleEntities(ctx context.Context, olderThan time.Duration, now time.Time) ([]string, error) {
+	prefix := "metrics/"
+	keys, err := t.store.List(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	entityAccess := make(map[string]time.Time)
+	for _, key := range keys {
+		data, err := t.store.Get(ctx, key)
+		if err != nil {
+			continue
+		}
+		var entry AccessEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			continue
+		}
+		parts := strings.SplitN(strings.TrimPrefix(key, "metrics/"), "/", 3)
+		if len(parts) < 1 {
+			continue
+		}
+		entityID := parts[0]
+		if existing, ok := entityAccess[entityID]; !ok || entry.LastAccessAt.After(existing) {
+			entityAccess[entityID] = entry.LastAccessAt
+		}
+	}
+
+	threshold := now.Add(-olderThan)
+	var stale []string
+	for entityID, lastAccess := range entityAccess {
+		if lastAccess.Before(threshold) {
+			stale = append(stale, entityID)
+		}
+	}
+
+	sort.Slice(stale, func(i, j int) bool {
+		return entityAccess[stale[i]].Before(entityAccess[stale[j]])
+	})
+
+	return stale, nil
 }
