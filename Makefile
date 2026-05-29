@@ -16,6 +16,9 @@ lint:
 
 fmt:
 	gofmt -w .
+	go fix
+	go fix
+	go fix
 	goimports -w .
 
 clean:
