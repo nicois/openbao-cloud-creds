@@ -63,8 +63,12 @@ func TestMergeMultipleNodes(t *testing.T) {
 	t1.RecordAccess("entity-1", "role-a", now.Add(time.Minute))
 	t2.RecordAccess("entity-1", "role-a", now.Add(2*time.Minute))
 
-	t1.Flush(context.Background(), now.Add(3*time.Minute))
-	t2.Flush(context.Background(), now.Add(3*time.Minute))
+	if err := t1.Flush(context.Background(), now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("t1 flush failed: %v", err)
+	}
+	if err := t2.Flush(context.Background(), now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("t2 flush failed: %v", err)
+	}
 
 	t3 := metrics.NewAccessTracker("node-3", store)
 	merged, err := t3.MergeEntity(context.Background(), "entity-1", now.Add(4*time.Minute))
@@ -84,7 +88,9 @@ func TestListStaleEntities(t *testing.T) {
 	tracker.RecordAccess("old-entity", "role-a", now.Add(-10*24*time.Hour))
 	tracker.RecordAccess("fresh-entity", "role-a", now.Add(-1*time.Hour))
 
-	tracker.Flush(context.Background(), now)
+	if err := tracker.Flush(context.Background(), now); err != nil {
+		t.Fatalf("flush failed: %v", err)
+	}
 
 	stale, err := tracker.ListStaleEntities(context.Background(), 7*24*time.Hour, now)
 	if err != nil {
