@@ -1,0 +1,26 @@
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.so
+*.test
+*.out
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local env / secrets
+.env
+.env.local
+*.pem
+*.key
+credentials.json
+
+# Go module cache
+go.sum.bak
+
+# OS
+.DS_Store
