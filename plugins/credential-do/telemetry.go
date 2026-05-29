@@ -3,7 +3,7 @@ package credentialdo
 import (
 	"time"
 
-	"github.com/armon/go-metrics"
+	"github.com/hashicorp/go-metrics"
 )
 
 func emitGauge(key []string, val float32, labels []metrics.Label) {
