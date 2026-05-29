@@ -15,4 +15,5 @@ use (
 	./plugins/credential-ovh
 	./plugins/credential-upcloud
 	./plugins/credential-vultr
+	./plugins/credential-akamai
 )
