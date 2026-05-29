@@ -81,6 +81,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		b.accessTracker.RecordAccess(minterID, roleName, now)
 	}
 
+	emitLeaseIssued(roleName)
+
 	expiresAt := now.Add(role.DefaultTTL)
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: "do",
@@ -130,10 +132,13 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		return nil, err
 	}
 
+	roleName, _ := req.Secret.InternalData["role"].(string)
+
 	now := time.Now()
 	httpStatus, err := client.DeleteToken(ctx, tokenID)
 	if err != nil {
 		b.recordMinterError(minterID, httpStatus, now)
+		emitLeaseRevokeFailed(roleName)
 		return nil, fmt.Errorf("revoke failed: %v", err)
 	}
 	b.recordMinterSuccess(minterID, now)

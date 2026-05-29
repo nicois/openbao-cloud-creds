@@ -56,6 +56,8 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("reconcile failed: %v", err), nil
 	}
 
+	emitOrphansFound(len(result.OrphansFound))
+
 	return &logical.Response{
 		Data: map[string]interface{}{
 			"mode":          mode,

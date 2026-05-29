@@ -30,5 +30,7 @@ func (b *backend) healthCheckWorker(ctx context.Context) error {
 		}
 	}
 
+	b.emitMinterMetrics()
+
 	return nil
 }
