@@ -1,0 +1,10 @@
+go 1.22
+
+use (
+	./pkg/cloudconfig
+	./pkg/credenvelope
+	./pkg/metrics
+	./pkg/reconciler
+	./pkg/recovery
+	./plugins/credential-do
+)
