@@ -6,5 +6,6 @@ use (
 	./pkg/metrics
 	./pkg/reconciler
 	./pkg/recovery
+	./pkg/worker
 	./plugins/credential-do
 )
