@@ -41,6 +41,11 @@ func (s *OVHServer) TokenCount() int64 {
 	return s.tokenCount.Load()
 }
 
+// ProvisionedCount returns the number of tokens issued by the fake.
+func (s *OVHServer) ProvisionedCount() int {
+	return int(s.TokenCount())
+}
+
 func (s *OVHServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/oauth2/token", s.tokenEndpoint)
