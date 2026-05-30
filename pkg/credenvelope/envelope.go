@@ -4,12 +4,20 @@ package credenvelope
 
 import "time"
 
+// APIVersion is the current envelope schema version. Clients pin to this.
+// v2 added minter_set / minter_id provenance fields to metadata.
+const APIVersion = "2"
+
 // Metadata holds per-response metadata that clients use for version pinning
 // and auditing.
 type Metadata struct {
 	Scope      string `json:"scope"`
 	IssuedBy   string `json:"issued_by"`
 	APIVersion string `json:"api_version"`
+	// MinterSet and MinterID record which minting credential issued this
+	// credential, for audit provenance.
+	MinterSet string `json:"minter_set"`
+	MinterID  string `json:"minter_id"`
 }
 
 // Envelope is the uniform response shape returned by all cloud credential
@@ -36,6 +44,8 @@ type EnvelopeParams struct {
 	CredentialID string
 	Scope        string
 	IssuedBy     string
+	MinterSet    string
+	MinterID     string
 }
 
 // NewEnvelope constructs an Envelope from the given parameters, stamping the
@@ -52,7 +62,9 @@ func NewEnvelope(p EnvelopeParams) *Envelope {
 		Metadata: Metadata{
 			Scope:      p.Scope,
 			IssuedBy:   p.IssuedBy,
-			APIVersion: "1",
+			APIVersion: APIVersion,
+			MinterSet:  p.MinterSet,
+			MinterID:   p.MinterID,
 		},
 	}
 }
@@ -72,6 +84,8 @@ func (e *Envelope) ToMap() map[string]interface{} {
 			"scope":       e.Metadata.Scope,
 			"issued_by":   e.Metadata.IssuedBy,
 			"api_version": e.Metadata.APIVersion,
+			"minter_set":  e.Metadata.MinterSet,
+			"minter_id":   e.Metadata.MinterID,
 		},
 	}
 }

@@ -2,6 +2,7 @@ package cloudconfig
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"time"
 )
@@ -15,6 +16,27 @@ type Minter struct {
 	ExpiresSource string    `json:"expires_at_source,omitempty"`
 	NeverExpires  bool      `json:"never_expires,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
+}
+
+// MinterSet is a named, independently-validated group of minter credentials.
+// Roles bind to exactly one set; the plugin mints only from that set's minters.
+type MinterSet struct {
+	Name    string   `json:"name"`
+	Minters []Minter `json:"minters"`
+}
+
+var setNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// ValidateSetName checks that a minter-set name is non-empty and uses only
+// the characters permitted in an OpenBao path segment.
+func ValidateSetName(name string) error {
+	if name == "" {
+		return fmt.Errorf("minter set name must not be empty")
+	}
+	if !setNameRe.MatchString(name) {
+		return fmt.Errorf("minter set name %q must match [a-zA-Z0-9_-]+", name)
+	}
+	return nil
 }
 
 func ValidateMinterSet(minters []Minter) error {
