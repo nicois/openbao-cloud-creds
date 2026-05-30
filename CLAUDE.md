@@ -19,7 +19,7 @@ Two strategies, chosen per cloud based on whether the cloud's native API support
 
 | Strategy | Used by | How it works |
 |----------|---------|--------------|
-| **JIT** (mint on read, revoke on lease end) | DigitalOcean, AWS, GCP, Azure, OVH, Exoscale, Vultr, Akamai, UpCloud | Plugin holds a long-lived "minter" credential; per-read it calls the cloud API to mint a short-lived credential and stores the upstream ID in lease `internal_data` for revoke. Clouds whose tokens expire naturally (AWS STS, GCP impersonation, OVH/UpCloud tokens) need no revoke call. |
+| **JIT** (mint on read, revoke on lease end) | DigitalOcean, AWS, GCP, Azure, OVH, Exoscale, Vultr, Akamai, UpCloud | Plugin holds a long-lived "minter" credential; per-read it calls the cloud API to mint a short-lived credential and stores the upstream ID in lease `internal_data` for revoke. Clouds whose tokens expire naturally (AWS STS, GCP impersonation, OVH OAuth2 tokens) need no revoke call; the rest (DO, UpCloud, Azure, Exoscale, Vultr, Akamai) hard-revoke the upstream credential on lease end. |
 | **Phased rotation** (N slots rotated on schedule with phase offsets) | Oracle (OCI) | Plugin pre-provisions N credentials per role; rotates one every T/N. Reads return the freshest. Lease TTL = time until that slot's next rotation, so TTL is always honest. Used where per-user credential quotas are too low for JIT (OCI caps at 2 auth tokens/user). |
 
 DO was the reference implementation: it exercises every load-bearing piece (envelope, lease tracking, recovery state machine, reconciler, metrics). All other plugins follow its structure.
@@ -32,16 +32,18 @@ All ten plugins are implemented, tested, lint-clean (golangci-lint v2), build as
 
 | Plugin | Strategy | Notes |
 |--------|----------|-------|
-| `credential-do` | JIT | Reference implementation; `POST /v2/tokens` |
-| `credential-aws` | JIT | STS AssumeRole (direct, not the OpenBao AWS engine); no revoke (STS expires) |
-| `credential-gcp` | JIT | SA impersonation, `generateAccessToken`; no revoke (token expires) |
-| `credential-azure` | JIT | Graph API `addPassword` on existing app registrations; hard revoke |
-| `credential-ovh` | JIT | OAuth2 `client_credentials` token minting; no revoke (1h tokens) |
-| `credential-upcloud` | JIT | `POST /1.3/account/tokens`, native `expires_in` TTL |
-| `credential-exoscale` | JIT | `POST /api-key` scoped to an IAM role |
-| `credential-vultr` | JIT | sub-user creation, `POST /v2/users` |
-| `credential-akamai` | JIT | EdgeGrid-signed API-client creation (CDN/Identity API — NOT Linode Object Storage) |
-| `credential-oci` | Phased rotation | OCI auth tokens, N=2 slots; the only non-JIT plugin |
+| `credential-do` | JIT | Reference implementation; `POST /v2/tokens`; **hard revoke** (`DELETE /v2/tokens/{id}`) |
+| `credential-aws` | JIT | STS AssumeRole (direct, not the OpenBao AWS engine); **no revoke** (STS expires) |
+| `credential-gcp` | JIT | SA impersonation, `generateAccessToken`; **no revoke** (token expires) |
+| `credential-azure` | JIT | Graph API `addPassword` on existing app registrations; **hard revoke** (`removePassword`) |
+| `credential-ovh` | JIT | OAuth2 `client_credentials` token minting; **no revoke** (1h tokens) |
+| `credential-upcloud` | JIT | `POST /1.3/account/tokens`, native `expires_in` TTL; **hard revoke** (`DELETE .../tokens/{id}`) |
+| `credential-exoscale` | JIT | `POST /api-key` scoped to an IAM role; **hard revoke** (`DELETE /api-key/{id}`) |
+| `credential-vultr` | JIT | sub-user creation, `POST /v2/users`; **hard revoke** (`DELETE /v2/users/{id}`) |
+| `credential-akamai` | JIT | EdgeGrid-signed API-client creation (CDN/Identity API — NOT Linode Object Storage); **hard revoke** (delete API client) |
+| `credential-oci` | Phased rotation | OCI auth tokens, N=2 slots; the only non-JIT plugin; **soft revoke** (slot lives until scheduled rotation) |
+
+Revoke summary: **hard revoke** (deletes upstream on lease end) — DO, UpCloud, Azure, Exoscale, Vultr, Akamai. **No revoke** (credential expires naturally) — AWS, GCP, OVH. **Soft revoke** (phased rotation) — OCI.
 
 Object-storage credentials (S3-style backup keys) are explicitly **out of scope** — see `docs/object-storage-credential-audit.md` for the viability analysis and why.
 

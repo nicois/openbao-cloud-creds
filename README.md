@@ -8,7 +8,7 @@ Short-lived, role-based cloud credentials for [OpenBao](https://openbao.org/), w
 
 Control-plane services and CI jobs need short-lived, role-scoped credentials for the cloud APIs they call. This project is a set of OpenBao plugins that present a single uniform `bao read cloud-creds/<cloud>/creds/<role>` API regardless of cloud, hiding per-cloud divergence behind one of two strategies:
 
-- **JIT** (mint on read, revoke on lease end) — the strategy for nine of ten clouds. The plugin holds a long-lived "minter" credential and calls the cloud API per request to mint a short-lived credential. Clouds whose tokens expire naturally (AWS STS, GCP impersonation, OVH/UpCloud tokens) need no revoke call; others (DO, Azure, Exoscale, Vultr, Akamai) hard-revoke on lease end.
+- **JIT** (mint on read, revoke on lease end) — the strategy for nine of ten clouds. The plugin holds a long-lived "minter" credential and calls the cloud API per request to mint a short-lived credential. Clouds whose tokens expire naturally (AWS STS, GCP impersonation, OVH OAuth2 tokens) need no revoke call; the rest (DO, UpCloud, Azure, Exoscale, Vultr, Akamai) hard-revoke the upstream credential on lease end.
 - **Phased rotation** — N pre-provisioned credential slots rotated on schedule with phase offsets, so the freshest slot's TTL is always honest. Used only by Oracle (OCI), whose 2-token-per-user quota rules out per-request minting.
 
 Every issued lease's `expires_at` reflects actual remaining validity. Steady-state rotation is fully headless. Auto-deletion of expired or rotated-out credentials is bounded by an owner-tag scheme — the reconciler will only ever touch entities the plugin itself created.
