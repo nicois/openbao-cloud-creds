@@ -1,8 +1,9 @@
 # Known Issues / Follow-ups
 
-Issues found during live testing that are not yet fixed. Each entry has a
-precise root cause and a proposed fix. Found during the SRE-12109 OpenBao
-multi-cloud spike's resilience assessment (against a live raft cluster, UpCloud).
+Issues found during live testing, each with a precise root cause and the fix.
+Found during the SRE-12109 OpenBao multi-cloud spike's resilience assessment
+(against a live raft cluster, UpCloud). Both entries below are now **RESOLVED**
+(fix + red-baseline regression tests); kept for the rationale and history.
 
 ---
 
