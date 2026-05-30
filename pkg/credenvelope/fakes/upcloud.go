@@ -28,6 +28,13 @@ func NewUpCloudServer() *UpCloudServer {
 	return s
 }
 
+// ProvisionedCount returns the number of tokens currently held by the fake.
+func (s *UpCloudServer) ProvisionedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.tokens)
+}
+
 func (s *UpCloudServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
