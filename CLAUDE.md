@@ -55,12 +55,13 @@ If you find references in commit history or older notes to:
 
 ## Build / test / lint
 
-No code exists yet. Once the Go module is initialized:
+Go workspace (`go.work`) with per-module `go.mod`; use the full module path, not `./...` (which doesn't resolve across workspace modules):
 
 ```bash
-go build ./...
-go test ./...
-golangci-lint run
+go build github.com/nicois/openbao-cloud-creds/...
+go test -race github.com/nicois/openbao-cloud-creds/...
+make lint          # golangci-lint v2 across every module
+make smoke-test    # build each plugin + register/enable in a live OpenBao dev server (needs `bao` on PATH)
 ```
 
 For a real-cloud integration test (calls actual cloud APIs, requires a dedicated test account):

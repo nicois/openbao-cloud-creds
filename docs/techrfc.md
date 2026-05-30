@@ -140,8 +140,9 @@ Each plugin instance accumulates access events in memory and flushes to a per-no
 
 | Path | Operation | Purpose |
 | :---- | :---- | :---- |
-| `cloud-creds/<cloud>/config` | write | Configure plugin: minters, default `flush_interval`, `reconcile_cadence`, etc. |
-| `cloud-creds/<cloud>/roles/<name>` | write/read/delete/list | CRUD on credential roles |
+| `cloud-creds/<cloud>/config` | write | Configure plugin: operational + cloud settings (`flush_interval`, `reconcile_cadence`, region/endpoints). **Minters are NOT configured here** — see minter-sets. |
+| `cloud-creds/<cloud>/minter-sets/<name>` | write/read/delete/list | CRUD on named minter sets. Each set independently validated by the OBC-006 rule. Roles bind to a set. |
+| `cloud-creds/<cloud>/roles/<name>` | write/read/delete/list | CRUD on credential roles. Each role has a **required** `minter_set` field naming the set it mints from. |
 | `cloud-creds/<cloud>/creds/<role>` | read | Issue a credential lease |
 | `cloud-creds/<cloud>/rotate-slot/<role>/<slot_id>` | write | Force immediate rotation (phased-rotation only) |
 | `cloud-creds/<cloud>/reconcile` | write | Trigger reconciliation; supports `mode=dry_run` |
@@ -199,13 +200,13 @@ Returns a short-lived credential plus a uniform envelope so clients dispatch on 
 
 ### Configure a role {#configure-a-role}
 
-Creates or updates a role definition. Role fields are per-cloud; common fields include `default_ttl` and `max_ttl`.
+Creates or updates a role definition. Role fields are per-cloud; common fields include `default_ttl`, `max_ttl`, and the required `minter_set`.
 
 | Endpoint | POST /v1/cloud-creds/<cloud>/roles/<name> |
 | :---- | :---- |
-| **Request** | JSON body with `default_ttl` (e.g. `15m`), `max_ttl` (e.g. `1h`), and cloud-specific fields. AWS: `iam_role_arn`, `policy_arns[]`, `inline_policy`. GCP: `service_account_email`, `scopes[]`. DO: `scopes[]`. UpCloud: `permissions`. |
-| **Responses** | On success: `200 OK` with the stored role definition in the body. On failure: `400 BAD REQUEST` for invalid field values; `403 FORBIDDEN` if the caller's policy does not permit role configuration. |
-| **Additional Details** | `default_ttl` MUST be ≤ `max_ttl`. For phased-rotation clouds, `default_ttl` MUST be ≤ `T/N` (the minimum slot freshness), or the plugin returns `400 BAD REQUEST`. |
+| **Request** | JSON body with `minter_set` (REQUIRED — name of the minter set this role mints from), `default_ttl` (e.g. `15m`), `max_ttl` (e.g. `1h`), and cloud-specific fields. AWS: `iam_role_arn`, `policy_arns[]`, `inline_policy`. GCP: `service_account_email`, `scopes[]`. DO: `scopes[]`. UpCloud: `permissions`. |
+| **Responses** | On success: `200 OK` with the stored role definition in the body. On failure: `400 BAD REQUEST` for invalid field values, a missing `minter_set`, or a `minter_set` that does not exist; `403 FORBIDDEN` if the caller's policy does not permit role configuration. |
+| **Additional Details** | `minter_set` MUST name an existing set (write fails otherwise). The role mints only from that set; there is no cross-set failover at issuance (it is the isolation boundary). `default_ttl` MUST be ≤ `max_ttl`. For phased-rotation clouds, `default_ttl` MUST be ≤ `T/N` (the minimum slot freshness), or the plugin returns `400 BAD REQUEST`. |
 
 ### Query entity access metrics {#query-entity-access-metrics}
 
