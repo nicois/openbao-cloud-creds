@@ -22,20 +22,13 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 func TestConfigWriteRead(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	// Write config
+	// Write config (cloud settings only; minters live in minter sets)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"tenant_id": "test-tenant-id",
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":            "minter-1",
-					"token":         "client-id-1:client-secret-1",
-					"never_expires": true,
-				},
-			},
 		},
 	}
 
@@ -60,27 +53,6 @@ func TestConfigWriteRead(t *testing.T) {
 	}
 }
 
-func TestConfigWrite_MissingMinters(t *testing.T) {
-	b, storage := getTestBackend(t)
-
-	req := &logical.Request{
-		Operation: logical.UpdateOperation,
-		Path:      "config",
-		Storage:   storage,
-		Data: map[string]interface{}{
-			"tenant_id": "test-tenant-id",
-		},
-	}
-
-	resp, err := b.HandleRequest(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || !resp.IsError() {
-		t.Fatal("expected error for missing minters")
-	}
-}
-
 func TestConfigWrite_MissingTenantID(t *testing.T) {
 	b, storage := getTestBackend(t)
 
@@ -88,15 +60,7 @@ func TestConfigWrite_MissingTenantID(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":            "minter-1",
-					"token":         "client-id-1:client-secret-1",
-					"never_expires": true,
-				},
-			},
-		},
+		Data:      map[string]interface{}{},
 	}
 
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -105,33 +69,5 @@ func TestConfigWrite_MissingTenantID(t *testing.T) {
 	}
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected error for missing tenant_id")
-	}
-}
-
-func TestConfigWrite_InvalidTokenFormat(t *testing.T) {
-	b, storage := getTestBackend(t)
-
-	req := &logical.Request{
-		Operation: logical.UpdateOperation,
-		Path:      "config",
-		Storage:   storage,
-		Data: map[string]interface{}{
-			"tenant_id": "test-tenant-id",
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":            "minter-1",
-					"token":         "no-colon-here",
-					"never_expires": true,
-				},
-			},
-		},
-	}
-
-	resp, err := b.HandleRequest(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || !resp.IsError() {
-		t.Fatal("expected error for invalid token format")
 	}
 }

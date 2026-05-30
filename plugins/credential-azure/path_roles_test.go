@@ -7,8 +7,26 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Storage) {
+	t.Helper()
+	req := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"minters": []interface{}{
+				map[string]interface{}{"id": "minter-1", "token": "cid:secret", "never_expires": true},
+			},
+		},
+	}
+	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
+	}
+}
+
 func TestRoleCRUD(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	// Create role
 	req := &logical.Request{
@@ -20,6 +38,7 @@ func TestRoleCRUD(t *testing.T) {
 			"max_ttl":       86400,
 			"app_object_id": "app-obj-id-123",
 			"client_id":     "client-id-456",
+			"minter_set":    "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -45,6 +64,9 @@ func TestRoleCRUD(t *testing.T) {
 	}
 	if resp.Data["client_id"] != "client-id-456" {
 		t.Fatalf("unexpected client_id: %v", resp.Data["client_id"])
+	}
+	if resp.Data["minter_set"] != "default" {
+		t.Fatalf("unexpected minter_set: %v", resp.Data["minter_set"])
 	}
 
 	// List roles
@@ -90,6 +112,7 @@ func TestRoleCRUD(t *testing.T) {
 
 func TestRoleValidation_TTL(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
@@ -100,6 +123,7 @@ func TestRoleValidation_TTL(t *testing.T) {
 			"max_ttl":       3600,
 			"app_object_id": "app-obj-id-123",
 			"client_id":     "client-id-456",
+			"minter_set":    "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -152,5 +176,42 @@ func TestRoleValidation_MissingClientID(t *testing.T) {
 	}
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected error for missing client_id")
+	}
+}
+
+func TestRoleRequiresMinterSet(t *testing.T) {
+	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
+	req := &logical.Request{
+		Operation: logical.UpdateOperation, Path: "roles/no-set", Storage: storage,
+		Data: map[string]interface{}{
+			"default_ttl": 3600, "max_ttl": 86400,
+			"app_object_id": "app-obj-id-123", "client_id": "client-id-456",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatal("expected error when minter_set is omitted")
+	}
+}
+
+func TestRoleRequiresExistingMinterSet(t *testing.T) {
+	b, storage := getTestBackend(t)
+	req := &logical.Request{
+		Operation: logical.UpdateOperation, Path: "roles/orphan", Storage: storage,
+		Data: map[string]interface{}{
+			"default_ttl": 3600, "max_ttl": 86400,
+			"app_object_id": "app-obj-id-123", "client_id": "client-id-456", "minter_set": "nonexistent",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatal("expected error binding role to nonexistent minter set")
 	}
 }

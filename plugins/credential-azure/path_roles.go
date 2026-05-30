@@ -17,6 +17,7 @@ type azureRole struct {
 	AppObjectID    string        `json:"app_object_id"`
 	ClientID       string        `json:"client_id"`
 	SubscriptionID string        `json:"subscription_id,omitempty"`
+	MinterSet      string        `json:"minter_set"`
 	Disabled       bool          `json:"disabled,omitempty"`
 }
 
@@ -51,6 +52,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Optional Azure subscription ID (returned in envelope for convenience)",
 				},
+				"minter_set": {
+					Type:        framework.TypeString,
+					Description: "Name of the minter set this role mints from (required)",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -81,6 +86,18 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("client_id is required"), nil
 	}
 
+	minterSet := d.Get("minter_set").(string)
+	if minterSet == "" {
+		return logical.ErrorResponse("minter_set is required"), nil
+	}
+	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
+	}
+
 	role := &cloudconfig.Role{
 		Name:       name,
 		Cloud:      "azure",
@@ -107,6 +124,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		AppObjectID:    appObjectID,
 		ClientID:       clientID,
 		SubscriptionID: subscriptionID,
+		MinterSet:      minterSet,
 	}
 
 	entry, err := logical.StorageEntryJSON("roles/"+name, azRole)
@@ -143,6 +161,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 			"app_object_id":   role.AppObjectID,
 			"client_id":       role.ClientID,
 			"subscription_id": role.SubscriptionID,
+			"minter_set":      role.MinterSet,
 		},
 	}, nil
 }

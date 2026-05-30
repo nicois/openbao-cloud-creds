@@ -3,60 +3,43 @@ package credentialazure
 import (
 	"context"
 	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 )
 
 func (b *backend) healthCheckWorker(ctx context.Context) error {
+	now := time.Now()
+
+	// Build each minter's client while holding the read lock so endpoint
+	// fields aren't read concurrently with a config write. Each minter gets
+	// its own *azureClient, so its Graph token cache stays isolated to that
+	// minter's client_secret — no cross-minter token bleed.
 	b.mu.RLock()
-	minters := b.minters
+	type probe struct {
+		client *azureClient
+		sm     *recovery.StateMachine
+	}
+	var probes []probe
+	for _, states := range b.minterSets {
+		for _, ms := range states {
+			if ms.sm.NeedsHealthCheck(now) {
+				probes = append(probes, probe{b.newClientForMinter(ms.minter), ms.sm})
+			}
+		}
+	}
 	b.mu.RUnlock()
 
-	// We need at least one role's app_object_id to check health
-	// Use the first app_object_id found among roles
-	appObjectID := b.getFirstAppObjectID(ctx)
-
-	now := time.Now()
-	for _, ms := range minters {
-		if !ms.sm.NeedsHealthCheck(now) {
-			continue
-		}
-
-		client := b.newClientForMinter(ms.minter)
-
-		if appObjectID == "" {
-			// No roles configured yet, just try to get a token
-			_, err := client.getToken(ctx)
-			if err != nil {
-				ms.sm.RecordError(0, now)
-			} else {
-				ms.sm.RecordSuccess(now)
-			}
-			continue
-		}
-
-		status, err := client.CheckHealth(ctx, appObjectID)
-		if err != nil {
-			ms.sm.RecordError(status, now)
-			continue
-		}
-
-		if status == 200 {
-			ms.sm.RecordSuccess(now)
+	for _, p := range probes {
+		// We have no per-set app_object_id here, so health is a token-only
+		// probe: can this minter authenticate to Graph at all?
+		if _, err := p.client.getToken(ctx); err != nil {
+			p.sm.RecordError(0, now)
 		} else {
-			ms.sm.RecordError(status, now)
+			p.sm.RecordSuccess(now)
 		}
 	}
 
 	b.emitMinterMetrics()
 
 	return nil
-}
-
-func (b *backend) getFirstAppObjectID(_ context.Context) string {
-	// This is only used by the health check worker; it runs within the backend
-	// so we can use the Backend's storage if available. Since health check
-	// workers don't have direct storage access, we cache from roles.
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	// Return empty if not set — health check will fall back to token-only check
-	return ""
 }

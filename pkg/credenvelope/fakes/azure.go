@@ -21,6 +21,10 @@ type AzureServer struct {
 	validClientID     string
 	validClientSecret string
 	appObjectID       string
+	// tokenCreds records every (client_id, client_secret) pair presented to
+	// the OAuth2 token endpoint, in order. Tests use this to prove which
+	// minter's credentials actually reached Graph (no cross-minter bleed).
+	tokenCreds [][2]string
 }
 
 func NewAzureServer() *AzureServer {
@@ -49,6 +53,16 @@ func (s *AzureServer) PasswordCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.passwords)
+}
+
+// TokenCreds returns a copy of every (client_id, client_secret) pair presented
+// to the OAuth2 token endpoint, in request order.
+func (s *AzureServer) TokenCreds() [][2]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([][2]string, len(s.tokenCreds))
+	copy(out, s.tokenCreds)
+	return out
 }
 
 func (s *AzureServer) handler() http.Handler {
@@ -124,6 +138,10 @@ func (s *AzureServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	clientID := r.FormValue("client_id")
 	clientSecret := r.FormValue("client_secret")
+
+	s.mu.Lock()
+	s.tokenCreds = append(s.tokenCreds, [2]string{clientID, clientSecret})
+	s.mu.Unlock()
 
 	if clientID == "" || clientSecret == "" {
 		w.WriteHeader(401)

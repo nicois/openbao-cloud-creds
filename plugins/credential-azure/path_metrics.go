@@ -11,7 +11,7 @@ import (
 func (b *backend) metricsPaths() []*framework.Path {
 	return []*framework.Path{
 		{
-			Pattern: "metrics/entity/" + framework.GenericNameRegex("entity_id"),
+			Pattern: "metrics/entity/" + framework.MatchAllRegex("entity_id"),
 			Fields: map[string]*framework.FieldSchema{
 				"entity_id": {
 					Type:        framework.TypeString,

@@ -60,8 +60,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
 	}
 
-	// Select a healthy minter
-	minterID, client, err := b.selectMinter()
+	// Select a healthy minter from the role's bound set
+	setName, minterID, client, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		return logical.ErrorResponse(err.Error()), nil
 	}
@@ -73,13 +73,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 	pwResp, httpStatus, err := client.AddPassword(ctx, role.AppObjectID, displayName, endDateTime)
 	if err != nil {
-		b.recordMinterError(minterID, httpStatus, now)
+		b.recordMinterError(setName, minterID, httpStatus, now)
 		return logical.ErrorResponse("upstream error: %v", err), nil
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(setName, minterID, now)
 
 	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(minterID, roleName, now)
+		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
 	}
 
 	emitLeaseIssued(roleName)
@@ -112,6 +112,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		CredentialID: pwResp.KeyID,
 		Scope:        role.AppObjectID,
 		IssuedBy:     "cloud-creds-azure/v0.1",
+		MinterSet:    setName,
+		MinterID:     minterID,
 	})
 
 	// Track active credential for reconciler
@@ -130,6 +132,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	resp := b.Secret("azure_client_secret").Response(env.ToMap(), map[string]interface{}{
 		"upstream_key_id": pwResp.KeyID,
 		"role":            roleName,
+		"minter_set":      setName,
 		"minter_id":       minterID,
 		"app_object_id":   role.AppObjectID,
 	})
@@ -150,8 +153,9 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		return nil, fmt.Errorf("missing app_object_id in internal_data")
 	}
 
+	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
 	minterID, _ := req.Secret.InternalData["minter_id"].(string)
-	_, client, err := b.getMinter(minterID)
+	client, err := b.getMinter(minterSet, minterID)
 	if err != nil {
 		return nil, err
 	}
@@ -161,11 +165,11 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	now := time.Now()
 	httpStatus, err := client.RemovePassword(ctx, appObjectID, keyID)
 	if err != nil {
-		b.recordMinterError(minterID, httpStatus, now)
+		b.recordMinterError(minterSet, minterID, httpStatus, now)
 		emitLeaseRevokeFailed(roleName)
 		return nil, fmt.Errorf("revoke failed: %v", err)
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(minterSet, minterID, now)
 
 	// Remove from active tokens
 	if err := req.Storage.Delete(ctx, "active-tokens/"+keyID); err != nil {
@@ -182,42 +186,48 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *f
 	return resp, nil
 }
 
-func (b *backend) selectMinter() (string, *azureClient, error) {
+func (b *backend) selectMinter(setName string) (setID, minterID string, client *azureClient, err error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if b.config == nil {
-		return "", nil, fmt.Errorf("upstream_auth_failed: plugin not configured")
+	states, ok := b.minterSets[setName]
+	if !ok {
+		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
-
-	for _, ms := range b.minters {
+	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			return ms.minter.ID, b.newClientForMinter(ms.minter), nil
+			return setName, id, b.newClientForMinter(ms.minter), nil
 		}
 	}
-
-	return "", nil, fmt.Errorf("upstream_auth_failed: all minters are failing")
+	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
 }
 
-func (b *backend) getMinter(id string) (string, *azureClient, error) {
+// anyHealthyMinter returns a client for any healthy minter across all sets.
+// Used by the reconciler, which lists owner-tagged credentials regardless of set.
+func (b *backend) anyHealthyMinter() (*azureClient, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if b.config == nil {
-		return "", nil, fmt.Errorf("plugin not configured")
-	}
-
-	if ms, ok := b.minters[id]; ok {
-		return id, b.newClientForMinter(ms.minter), nil
-	}
-
-	// Fallback to any healthy minter
-	for _, ms := range b.minters {
-		if ms.sm.State() == recovery.Healthy {
-			return ms.minter.ID, b.newClientForMinter(ms.minter), nil
+	for _, states := range b.minterSets {
+		for _, ms := range states {
+			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+				return b.newClientForMinter(ms.minter), nil
+			}
 		}
 	}
-	return "", nil, fmt.Errorf("no healthy minter available")
+	return nil, fmt.Errorf("upstream_auth_failed: no healthy minter available")
+}
+
+func (b *backend) getMinter(setName, id string) (*azureClient, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			return b.newClientForMinter(ms.minter), nil
+		}
+	}
+	return nil, fmt.Errorf("minter %q not found in set %q", id, setName)
 }
 
 func (b *backend) newClientForMinter(m cloudconfig.Minter) *azureClient {
@@ -251,18 +261,22 @@ func (b *backend) getLoginEndpoint() string {
 	return "https://login.microsoftonline.com"
 }
 
-func (b *backend) recordMinterSuccess(id string, at time.Time) {
+func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordSuccess(at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordSuccess(at)
+		}
 	}
 }
 
-func (b *backend) recordMinterError(id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordError(httpStatus, at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordError(httpStatus, at)
+		}
 	}
 }
