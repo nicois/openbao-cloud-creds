@@ -10,6 +10,21 @@ import (
 func TestRoleCRUD(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create the minter set the role binds to
+	setReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"minters": []interface{}{
+				map[string]interface{}{"id": "minter-1", "token": "vultr_test_key", "never_expires": true},
+			},
+		},
+	}
+	if resp, err := b.HandleRequest(context.Background(), setReq); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
+	}
+
 	// Create role
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
@@ -20,6 +35,7 @@ func TestRoleCRUD(t *testing.T) {
 			"max_ttl":      3600,
 			"acls":         "subscriptions,provisioning",
 			"email_domain": "managed.local",
+			"minter_set":   "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -45,6 +61,9 @@ func TestRoleCRUD(t *testing.T) {
 	}
 	if resp.Data["email_domain"] != "managed.local" {
 		t.Fatalf("unexpected email_domain: %v", resp.Data["email_domain"])
+	}
+	if resp.Data["minter_set"] != "default" {
+		t.Fatalf("unexpected minter_set: %v", resp.Data["minter_set"])
 	}
 
 	// List roles
@@ -91,6 +110,20 @@ func TestRoleCRUD(t *testing.T) {
 func TestRoleValidation_TTL(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	setReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"minters": []interface{}{
+				map[string]interface{}{"id": "minter-1", "token": "vultr_test_key", "never_expires": true},
+			},
+		},
+	}
+	if resp, err := b.HandleRequest(context.Background(), setReq); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
+	}
+
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
@@ -99,6 +132,7 @@ func TestRoleValidation_TTL(t *testing.T) {
 			"default_ttl": 7200,
 			"max_ttl":     3600,
 			"acls":        "subscriptions",
+			"minter_set":  "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -107,5 +141,20 @@ func TestRoleValidation_TTL(t *testing.T) {
 	}
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected error for default_ttl > max_ttl")
+	}
+}
+
+func TestRoleRequiresExistingMinterSet(t *testing.T) {
+	b, storage := getTestBackend(t)
+	req := &logical.Request{
+		Operation: logical.UpdateOperation, Path: "roles/orphan", Storage: storage,
+		Data: map[string]interface{}{"default_ttl": 900, "max_ttl": 3600, "acls": "subscriptions", "minter_set": "nonexistent"},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatal("expected error binding role to nonexistent minter set")
 	}
 }

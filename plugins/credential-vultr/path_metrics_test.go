@@ -28,7 +28,7 @@ func TestMetricsEntityEndpoint(t *testing.T) {
 	// Query metrics
 	req := &logical.Request{
 		Operation: logical.ReadOperation,
-		Path:      "metrics/entity/minter-1",
+		Path:      "metrics/entity/default/minter-1",
 		Storage:   storage,
 	}
 	resp, err := b.HandleRequest(context.Background(), req)

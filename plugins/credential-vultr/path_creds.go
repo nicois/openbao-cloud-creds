@@ -59,8 +59,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
 	}
 
-	// Select a healthy minter
-	minterID, client, err := b.selectMinter()
+	// Select a healthy minter from the role's bound set
+	setName, minterID, client, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		return logical.ErrorResponse(err.Error()), nil
 	}
@@ -87,13 +87,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 	userResp, httpStatus, err := client.CreateUser(ctx, userName, userEmail, acls)
 	if err != nil {
-		b.recordMinterError(minterID, httpStatus, now)
+		b.recordMinterError(setName, minterID, httpStatus, now)
 		return logical.ErrorResponse("upstream error: %v", err), nil
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(setName, minterID, now)
 
 	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(minterID, roleName, now)
+		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
 	}
 
 	emitLeaseIssued(roleName)
@@ -111,6 +111,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		CredentialID: userResp.User.ID,
 		Scope:        role.ACLs,
 		IssuedBy:     "cloud-creds-vultr/v0.1",
+		MinterSet:    setName,
+		MinterID:     minterID,
 	})
 
 	// Track active user for reconciler
@@ -128,6 +130,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	resp := b.Secret("vultr_user").Response(env.ToMap(), map[string]interface{}{
 		"upstream_user_id": userResp.User.ID,
 		"role":             roleName,
+		"minter_set":       setName,
 		"minter_id":        minterID,
 	})
 	resp.Secret.TTL = role.DefaultTTL
@@ -142,8 +145,9 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		return nil, fmt.Errorf("missing upstream_user_id in internal_data")
 	}
 
+	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
 	minterID, _ := req.Secret.InternalData["minter_id"].(string)
-	_, client, err := b.getMinter(minterID)
+	client, err := b.getMinter(minterSet, minterID)
 	if err != nil {
 		return nil, err
 	}
@@ -153,11 +157,11 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	now := time.Now()
 	httpStatus, err := client.DeleteUser(ctx, userID)
 	if err != nil {
-		b.recordMinterError(minterID, httpStatus, now)
+		b.recordMinterError(minterSet, minterID, httpStatus, now)
 		emitLeaseRevokeFailed(roleName)
 		return nil, fmt.Errorf("revoke failed: %v", err)
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(minterSet, minterID, now)
 
 	// Remove from active users
 	if err := req.Storage.Delete(ctx, "active-users/"+userID); err != nil {
@@ -174,48 +178,55 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *f
 	return resp, nil
 }
 
-func (b *backend) selectMinter() (string, *vultrClient, error) {
+func (b *backend) selectMinter(setName string) (setID, minterID string, client *vultrClient, err error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if b.config == nil {
-		return "", nil, fmt.Errorf("upstream_auth_failed: plugin not configured")
+	states, ok := b.minterSets[setName]
+	if !ok {
+		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
-
 	apiURL := b.vultrAPIURL()
-
-	for _, ms := range b.minters {
+	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			return ms.minter.ID, newVultrClient(apiURL, ms.minter.Token), nil
+			return setName, id, newVultrClient(apiURL, ms.minter.Token), nil
 		}
 	}
-
-	return "", nil, fmt.Errorf("upstream_auth_failed: all minters are failing")
+	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
 }
 
-func (b *backend) getMinter(id string) (string, *vultrClient, error) {
+// anyHealthyMinter returns a client for any healthy minter across all sets.
+// Used by the reconciler, which lists owner-tagged sub-users regardless of set.
+func (b *backend) anyHealthyMinter() (*vultrClient, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if b.config == nil {
-		return "", nil, fmt.Errorf("plugin not configured")
-	}
-
 	apiURL := b.vultrAPIURL()
-
-	if ms, ok := b.minters[id]; ok {
-		return id, newVultrClient(apiURL, ms.minter.Token), nil
-	}
-
-	// Fallback to any healthy minter
-	for _, ms := range b.minters {
-		if ms.sm.State() == recovery.Healthy {
-			return ms.minter.ID, newVultrClient(apiURL, ms.minter.Token), nil
+	for _, states := range b.minterSets {
+		for _, ms := range states {
+			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+				return newVultrClient(apiURL, ms.minter.Token), nil
+			}
 		}
 	}
-	return "", nil, fmt.Errorf("no healthy minter available")
+	return nil, fmt.Errorf("upstream_auth_failed: no healthy minter available")
 }
 
+func (b *backend) getMinter(setName, id string) (*vultrClient, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	apiURL := b.vultrAPIURL()
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			return newVultrClient(apiURL, ms.minter.Token), nil
+		}
+	}
+	return nil, fmt.Errorf("minter %q not found in set %q", id, setName)
+}
+
+// vultrAPIURL returns the configured API base URL. Callers MUST hold b.mu
+// (read or write). It performs no locking of its own.
 func (b *backend) vultrAPIURL() string {
 	if b.apiURL != "" {
 		return b.apiURL
@@ -223,18 +234,22 @@ func (b *backend) vultrAPIURL() string {
 	return "https://api.vultr.com"
 }
 
-func (b *backend) recordMinterSuccess(id string, at time.Time) {
+func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordSuccess(at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordSuccess(at)
+		}
 	}
 }
 
-func (b *backend) recordMinterError(id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordError(httpStatus, at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordError(httpStatus, at)
+		}
 	}
 }

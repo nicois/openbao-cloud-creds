@@ -16,6 +16,7 @@ type vultrRole struct {
 	MaxTTL      time.Duration `json:"max_ttl"`
 	ACLs        string        `json:"acls"`
 	EmailDomain string        `json:"email_domain"`
+	MinterSet   string        `json:"minter_set"`
 	Disabled    bool          `json:"disabled,omitempty"`
 }
 
@@ -47,6 +48,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Default:     "managed.local",
 					Description: "Domain for generated user emails",
 				},
+				"minter_set": {
+					Type:        framework.TypeString,
+					Description: "Name of the minter set this role mints from (required)",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -70,6 +75,18 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	acls := d.Get("acls").(string)
 	emailDomain := d.Get("email_domain").(string)
 
+	minterSet := d.Get("minter_set").(string)
+	if minterSet == "" {
+		return logical.ErrorResponse("minter_set is required"), nil
+	}
+	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
+	}
+
 	role := &cloudconfig.Role{
 		Name:       name,
 		Cloud:      "vultr",
@@ -90,6 +107,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MaxTTL:      maxTTL,
 		ACLs:        acls,
 		EmailDomain: emailDomain,
+		MinterSet:   minterSet,
 	}
 
 	entry, err := logical.StorageEntryJSON("roles/"+name, vr)
@@ -125,6 +143,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 			"max_ttl":      int(role.MaxTTL.Seconds()),
 			"acls":         role.ACLs,
 			"email_domain": role.EmailDomain,
+			"minter_set":   role.MinterSet,
 		},
 	}, nil
 }

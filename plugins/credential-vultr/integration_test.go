@@ -33,8 +33,11 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatal("missing expires_at")
 	}
 	meta, ok := issueResp.Data["metadata"].(map[string]interface{})
-	if !ok || meta["api_version"] != "1" {
+	if !ok || meta["api_version"] != "2" {
 		t.Fatalf("bad metadata: %v", issueResp.Data["metadata"])
+	}
+	if meta["minter_set"] != "default" || meta["minter_id"] != "minter-1" {
+		t.Fatalf("bad provenance: set=%v id=%v", meta["minter_set"], meta["minter_id"])
 	}
 	if meta["issued_by"] != "cloud-creds-vultr/v0.1" {
 		t.Fatalf("bad issued_by: %v", meta["issued_by"])
@@ -100,7 +103,7 @@ func TestFullLifecycle(t *testing.T) {
 	// 6. Metrics query
 	metricsReq := &logical.Request{
 		Operation: logical.ReadOperation,
-		Path:      "metrics/entity/minter-1",
+		Path:      "metrics/entity/default/minter-1",
 		Storage:   storage,
 	}
 	metricsResp, err := b.HandleRequest(context.Background(), metricsReq)
