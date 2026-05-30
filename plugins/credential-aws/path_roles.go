@@ -17,6 +17,7 @@ type awsRole struct {
 	IAMRoleARN  string            `json:"iam_role_arn"`
 	SessionTags map[string]string `json:"session_tags,omitempty"`
 	ExternalID  string            `json:"external_id,omitempty"`
+	MinterSet   string            `json:"minter_set"`
 	Disabled    bool              `json:"disabled,omitempty"`
 }
 
@@ -51,6 +52,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "External ID for cross-account assume role",
 				},
+				"minter_set": {
+					Type:        framework.TypeString,
+					Description: "Name of the minter set this role mints from (required)",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -75,6 +80,18 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	if iamRoleARN == "" {
 		return logical.ErrorResponse("iam_role_arn is required"), nil
+	}
+
+	minterSet := d.Get("minter_set").(string)
+	if minterSet == "" {
+		return logical.ErrorResponse("minter_set is required"), nil
+	}
+	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
 	}
 
 	// AWS STS minimum session duration is 15 minutes (900 seconds)
@@ -117,6 +134,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		IAMRoleARN:  iamRoleARN,
 		SessionTags: sessionTags,
 		ExternalID:  externalID,
+		MinterSet:   minterSet,
 	}
 
 	entry, err := logical.StorageEntryJSON("roles/"+name, awsR)
@@ -150,6 +168,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 		"default_ttl":  int(role.DefaultTTL.Seconds()),
 		"max_ttl":      int(role.MaxTTL.Seconds()),
 		"iam_role_arn": role.IAMRoleARN,
+		"minter_set":   role.MinterSet,
 	}
 	if role.SessionTags != nil {
 		data["session_tags"] = role.SessionTags

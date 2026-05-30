@@ -5,25 +5,32 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 )
 
 func (b *backend) healthCheckWorker(ctx context.Context) error {
 	b.mu.RLock()
-	minters := b.minters
+	type probe struct {
+		sm     *recovery.StateMachine
+		client STSClient
+	}
+	var probes []probe
+	now := time.Now()
+	for _, states := range b.minterSets {
+		for _, ms := range states {
+			if ms.sm.NeedsHealthCheck(now) {
+				probes = append(probes, probe{sm: ms.sm, client: b.buildSTSClient(ms.minter)})
+			}
+		}
+	}
 	b.mu.RUnlock()
 
-	now := time.Now()
-	for _, ms := range minters {
-		if !ms.sm.NeedsHealthCheck(now) {
-			continue
-		}
-
-		client := b.buildSTSClient(ms.minter)
-		_, err := client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	for _, p := range probes {
+		_, err := p.client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 		if err != nil {
-			ms.sm.RecordError(classifyAWSError(err), now)
+			p.sm.RecordError(classifyAWSError(err), now)
 		} else {
-			ms.sm.RecordSuccess(now)
+			p.sm.RecordSuccess(now)
 		}
 	}
 

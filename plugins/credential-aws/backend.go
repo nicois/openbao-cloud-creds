@@ -21,7 +21,7 @@ type backend struct {
 	*framework.Backend
 	mu            sync.RWMutex
 	config        *cloudconfig.PluginConfig
-	minters       map[string]*minterState
+	minterSets    map[string]map[string]*minterState // setName -> minterID -> state
 	region        string
 	stsEndpoint   string
 	accessTracker *metrics.AccessTracker
@@ -31,6 +31,7 @@ type backend struct {
 }
 
 type minterState struct {
+	set    string
 	minter cloudconfig.Minter
 	sm     *recovery.StateMachine
 }
@@ -40,7 +41,7 @@ type STSClientFactory func(accessKeyID, secretAccessKey, region, endpoint string
 
 func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend, error) {
 	b := &backend{
-		minters: make(map[string]*minterState),
+		minterSets: make(map[string]map[string]*minterState),
 	}
 
 	b.Backend = &framework.Backend{
@@ -48,6 +49,7 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		Help:        backendHelp,
 		Paths: framework.PathAppend(
 			b.configPaths(),
+			b.minterSetPaths(),
 			b.rolePaths(),
 			b.credsPaths(),
 			b.reconcilePaths(),
@@ -64,6 +66,10 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 
 	store := metrics.NewInMemoryStore()
 	b.accessTracker = metrics.NewAccessTracker("local", store)
+
+	if conf.StorageView != nil {
+		_ = b.loadAllMinterSets(ctx, conf.StorageView)
+	}
 
 	return b, nil
 }

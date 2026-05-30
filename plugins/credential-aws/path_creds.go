@@ -63,8 +63,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
 	}
 
-	// Select a healthy minter
-	minterID, client, err := b.selectMinter()
+	// Select a healthy minter from the role's bound set
+	setName, minterID, client, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		return logical.ErrorResponse(err.Error()), nil
 	}
@@ -103,13 +103,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 	output, err := client.AssumeRole(ctx, input)
 	if err != nil {
-		b.recordMinterError(minterID, classifyAWSError(err), now)
+		b.recordMinterError(setName, minterID, classifyAWSError(err), now)
 		return logical.ErrorResponse("upstream error: %v", err), nil
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(setName, minterID, now)
 
 	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(minterID, roleName, now)
+		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
 	}
 
 	emitLeaseIssued(roleName)
@@ -134,6 +134,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		CredentialID: accessKeyID,
 		Scope:        role.IAMRoleARN,
 		IssuedBy:     "cloud-creds-aws/v0.1",
+		MinterSet:    setName,
+		MinterID:     minterID,
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)
@@ -152,6 +154,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	resp := b.Secret("aws_sts_credentials").Response(env.ToMap(), map[string]interface{}{
 		"access_key_id": accessKeyID,
 		"role":          roleName,
+		"minter_set":    setName,
 		"minter_id":     minterID,
 	})
 	resp.Secret.TTL = role.DefaultTTL
@@ -161,12 +164,16 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 }
 
 // pathCredsRevoke is a no-op for AWS STS credentials — they expire naturally.
-// We just remove the tracking entry.
+// We just remove the tracking entry. Unlike the JIT clouds (e.g. DigitalOcean),
+// there is no upstream entity to delete, so we do NOT resolve the minter that
+// issued this credential; minter_set is read only for log context.
 func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
 	accessKeyID, _ := req.Secret.InternalData["access_key_id"].(string)
+	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
 	if accessKeyID != "" {
 		if err := req.Storage.Delete(ctx, "active-tokens/"+accessKeyID); err != nil {
-			b.Logger().Warn("failed to remove active credential tracking", "access_key_id", accessKeyID, "error", err)
+			b.Logger().Warn("failed to remove active credential tracking",
+				"access_key_id", accessKeyID, "minter_set", minterSet, "error", err)
 		}
 	}
 	// STS credentials cannot be revoked — they expire at the time AWS set.
@@ -179,26 +186,25 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, _ *f
 	return logical.ErrorResponse("aws STS credentials cannot be renewed; issue a new credential instead"), nil
 }
 
-func (b *backend) selectMinter() (string, STSClient, error) {
+func (b *backend) selectMinter(setName string) (setID, minterID string, client STSClient, err error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if b.config == nil {
-		return "", nil, fmt.Errorf("upstream_auth_failed: plugin not configured")
+	states, ok := b.minterSets[setName]
+	if !ok {
+		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
-
-	for _, ms := range b.minters {
+	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			client := b.buildSTSClient(ms.minter)
-			return ms.minter.ID, client, nil
+			return setName, id, b.buildSTSClient(ms.minter), nil
 		}
 	}
-
-	return "", nil, fmt.Errorf("upstream_auth_failed: all minters are failing")
+	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
 }
 
 // buildSTSClient creates an STS client from a minter. The token field stores
-// "access_key_id:secret_access_key".
+// "access_key_id:secret_access_key". Callers MUST hold b.mu (read or write);
+// it reads b.region/b.stsEndpoint without locking of its own.
 func (b *backend) buildSTSClient(m cloudconfig.Minter) STSClient {
 	parts := strings.SplitN(m.Token, ":", 2)
 	accessKeyID := parts[0]
@@ -218,19 +224,23 @@ func (b *backend) buildSTSClient(m cloudconfig.Minter) STSClient {
 	return newRealSTSClient(accessKeyID, secretAccessKey, region, b.stsEndpoint)
 }
 
-func (b *backend) recordMinterSuccess(id string, at time.Time) {
+func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordSuccess(at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordSuccess(at)
+		}
 	}
 }
 
-func (b *backend) recordMinterError(id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordError(httpStatus, at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordError(httpStatus, at)
+		}
 	}
 }
 

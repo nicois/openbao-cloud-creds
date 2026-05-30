@@ -22,10 +22,24 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		return credentialaws.NewFakeSTSClient(nil, nil)
 	})
 
-	// Write config with minter
+	// Write config: operational settings only
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"region": "us-east-1",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
@@ -36,15 +50,14 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 					"never_expires":     true,
 				},
 			},
-			"region": "us-east-1",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
-	// Write role
+	// Write role bound to the set
 	req = &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
@@ -53,6 +66,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",
+			"minter_set":   "default",
 			"session_tags": map[string]interface{}{
 				"owner": "cloud-creds",
 			},
@@ -115,6 +129,24 @@ func TestCredsIssue(t *testing.T) {
 	}
 	if resp.Secret.InternalData["access_key_id"] == nil {
 		t.Fatal("expected access_key_id in internal_data")
+	}
+	if resp.Secret.InternalData["minter_set"] != "default" {
+		t.Fatalf("expected minter_set=default in internal_data, got %v", resp.Secret.InternalData["minter_set"])
+	}
+	if resp.Secret.InternalData["minter_id"] != "minter-1" {
+		t.Fatalf("expected minter_id=minter-1 in internal_data, got %v", resp.Secret.InternalData["minter_id"])
+	}
+
+	// Verify provenance in the envelope metadata
+	meta := resp.Data["metadata"].(map[string]interface{})
+	if meta["minter_set"] != "default" {
+		t.Fatalf("expected minter_set=default, got %v", meta["minter_set"])
+	}
+	if meta["minter_id"] != "minter-1" {
+		t.Fatalf("expected minter_id=minter-1, got %v", meta["minter_id"])
+	}
+	if meta["api_version"] != "2" {
+		t.Fatalf("expected api_version=2, got %v", meta["api_version"])
 	}
 }
 
@@ -213,6 +245,18 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
+		Data:      map[string]interface{}{},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
 				map[string]interface{}{
@@ -224,9 +268,9 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Write role
@@ -238,6 +282,7 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",
+			"minter_set":   "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)
@@ -293,6 +338,18 @@ func TestCredsIssue_SessionTags(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
+		Data:      map[string]interface{}{},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
 				map[string]interface{}{
@@ -304,9 +361,9 @@ func TestCredsIssue_SessionTags(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Write role with session tags
@@ -318,6 +375,7 @@ func TestCredsIssue_SessionTags(t *testing.T) {
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/tagged",
+			"minter_set":   "default",
 			"session_tags": map[string]interface{}{
 				"team":  "platform",
 				"owner": "cloud-creds",
@@ -350,5 +408,74 @@ func TestCredsIssue_SessionTags(t *testing.T) {
 	}
 	if capturedInput.ExternalId == nil || *capturedInput.ExternalId != "ext-456" {
 		t.Fatalf("expected external_id=ext-456, got %v", capturedInput.ExternalId)
+	}
+}
+
+// TestMinterSetIsolation proves a role bound to a second, independent set mints
+// from that set's minter — not the default set's — both in provenance metadata
+// and in the actual access key handed to the STS client factory.
+func TestMinterSetIsolation(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Capture which access key id the factory is constructed with.
+	var lastAccessKeyID string
+	credentialaws.SetSTSClientFactory(b, func(accessKeyID, secretAccessKey, region, endpoint string) credentialaws.STSClient {
+		lastAccessKeyID = accessKeyID
+		return credentialaws.NewFakeSTSClient(nil, nil)
+	})
+
+	// config
+	req := &logical.Request{
+		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
+		Data: map[string]interface{}{},
+	}
+	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write: err=%v resp=%v", err, resp)
+	}
+
+	// default set + role
+	req = &logical.Request{
+		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
+		Data: map[string]interface{}{"minters": []interface{}{
+			map[string]interface{}{"id": "minter-1", "access_key_id": "AKIADEFAULT", "secret_access_key": "s1", "never_expires": true},
+		}},
+	}
+	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("default set write: err=%v resp=%v", err, resp)
+	}
+
+	// secondary set + role
+	req = &logical.Request{
+		Operation: logical.UpdateOperation, Path: "minter-sets/secondary", Storage: storage,
+		Data: map[string]interface{}{"minters": []interface{}{
+			map[string]interface{}{"id": "minter-2", "access_key_id": "AKIASECONDARY", "secret_access_key": "s2", "never_expires": true},
+		}},
+	}
+	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("secondary set write: err=%v resp=%v", err, resp)
+	}
+	req = &logical.Request{
+		Operation: logical.UpdateOperation, Path: "roles/role2", Storage: storage,
+		Data: map[string]interface{}{
+			"default_ttl": 900, "max_ttl": 3600,
+			"iam_role_arn": "arn:aws:iam::123456789012:role/role2", "minter_set": "secondary",
+		},
+	}
+	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("role2 write: err=%v resp=%v", err, resp)
+	}
+
+	// role2 must mint via minter-2 / AKIASECONDARY.
+	req = &logical.Request{Operation: logical.ReadOperation, Path: "creds/role2", Storage: storage}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || resp == nil || resp.IsError() {
+		t.Fatalf("role2 issue failed: err=%v resp=%v", err, resp)
+	}
+	meta := resp.Data["metadata"].(map[string]interface{})
+	if meta["minter_set"] != "secondary" || meta["minter_id"] != "minter-2" {
+		t.Fatalf("role2 used wrong minter: set=%v id=%v", meta["minter_set"], meta["minter_id"])
+	}
+	if lastAccessKeyID != "AKIASECONDARY" {
+		t.Fatalf("role2 minted with wrong access key: %q", lastAccessKeyID)
 	}
 }

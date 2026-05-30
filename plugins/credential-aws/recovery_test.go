@@ -42,10 +42,22 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		)
 	})
 
-	// Write config
+	// Write config: operational settings only
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
+		Storage:   storage,
+		Data:      map[string]interface{}{},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
@@ -58,12 +70,12 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
-	// Write role
+	// Write role bound to the set
 	req = &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
@@ -72,6 +84,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",
+			"minter_set":   "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)

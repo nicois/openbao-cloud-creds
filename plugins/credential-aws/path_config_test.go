@@ -22,20 +22,12 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 func TestConfigWriteRead(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	// Write config
+	// Write config: operational settings only (minters live in minter sets)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":                "minter-1",
-					"access_key_id":     "AKIAIOSFODNN7EXAMPLE",
-					"secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-					"never_expires":     true,
-				},
-			},
 			"region": "eu-west-1",
 		},
 	}
@@ -61,24 +53,5 @@ func TestConfigWriteRead(t *testing.T) {
 	}
 	if resp.Data["region"] != "eu-west-1" {
 		t.Fatalf("expected region=eu-west-1, got %v", resp.Data["region"])
-	}
-}
-
-func TestConfigWrite_MissingMinters(t *testing.T) {
-	b, storage := getTestBackend(t)
-
-	req := &logical.Request{
-		Operation: logical.UpdateOperation,
-		Path:      "config",
-		Storage:   storage,
-		Data:      map[string]interface{}{},
-	}
-
-	resp, err := b.HandleRequest(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || !resp.IsError() {
-		t.Fatal("expected error for missing minters")
 	}
 }

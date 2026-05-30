@@ -10,6 +10,21 @@ import (
 func TestRoleCRUD(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create the minter set the role binds to
+	setReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"minters": []interface{}{
+				map[string]interface{}{"id": "minter-1", "access_key_id": "AKIA1", "secret_access_key": "s1", "never_expires": true},
+			},
+		},
+	}
+	if resp, err := b.HandleRequest(context.Background(), setReq); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
+	}
+
 	// Create role
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
@@ -19,6 +34,7 @@ func TestRoleCRUD(t *testing.T) {
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/deploy",
+			"minter_set":   "default",
 			"session_tags": map[string]interface{}{
 				"team": "platform",
 			},
@@ -48,6 +64,9 @@ func TestRoleCRUD(t *testing.T) {
 	}
 	if resp.Data["external_id"] != "ext-123" {
 		t.Fatalf("unexpected external_id: %v", resp.Data["external_id"])
+	}
+	if resp.Data["minter_set"] != "default" {
+		t.Fatalf("unexpected minter_set: %v", resp.Data["minter_set"])
 	}
 
 	// List roles
@@ -88,6 +107,28 @@ func TestRoleCRUD(t *testing.T) {
 	}
 	if resp != nil {
 		t.Fatal("expected nil response for deleted role")
+	}
+}
+
+func TestRoleRequiresExistingMinterSet(t *testing.T) {
+	b, storage := getTestBackend(t)
+	req := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "roles/orphan",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"default_ttl":  900,
+			"max_ttl":      3600,
+			"iam_role_arn": "arn:aws:iam::123456789012:role/orphan",
+			"minter_set":   "nonexistent",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatal("expected error binding role to nonexistent minter set")
 	}
 }
 
