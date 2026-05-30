@@ -80,6 +80,45 @@ func TestMergeMultipleNodes(t *testing.T) {
 	}
 }
 
+func TestMergeEntity_NoDoubleCountOnLocalNode(t *testing.T) {
+	store := metrics.NewInMemoryStore()
+	tr := metrics.NewAccessTracker("node-1", store)
+	now := time.Now()
+	tr.RecordAccess("set-a/minter-1", "role-x", now)
+	tr.RecordAccess("set-a/minter-1", "role-x", now.Add(time.Minute))
+	if err := tr.Flush(context.Background(), now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	merged, err := tr.MergeEntity(context.Background(), "set-a/minter-1", now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if merged.AccessCount != 2 {
+		t.Fatalf("double-count: expected 2, got %d", merged.AccessCount)
+	}
+}
+
+func TestListStaleEntities_EntityIDWithSlash(t *testing.T) {
+	store := metrics.NewInMemoryStore()
+	tr := metrics.NewAccessTracker("node-1", store)
+	now := time.Now()
+	tr.RecordAccess("set-a/minter-old", "role-x", now.Add(-10*24*time.Hour))
+	tr.RecordAccess("set-a/minter-new", "role-x", now.Add(-1*time.Hour))
+	if err := tr.Flush(context.Background(), now); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	stale, err := tr.ListStaleEntities(context.Background(), 7*24*time.Hour, now)
+	if err != nil {
+		t.Fatalf("stale: %v", err)
+	}
+	if len(stale) != 1 {
+		t.Fatalf("expected 1 stale entity, got %d: %v", len(stale), stale)
+	}
+	if stale[0] != "set-a/minter-old" {
+		t.Fatalf("expected set-a/minter-old, got %q", stale[0])
+	}
+}
+
 func TestListStaleEntities(t *testing.T) {
 	store := metrics.NewInMemoryStore()
 	tracker := metrics.NewAccessTracker("node-1", store)
