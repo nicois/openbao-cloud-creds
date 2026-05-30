@@ -49,7 +49,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return nil, err
 	}
 	if entry == nil {
-		return logical.ErrorResponse("role_not_found: role %q does not exist", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
 	}
 
 	var role gcpRole
@@ -58,20 +58,20 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	if role.Disabled {
-		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
 	}
 
 	// Select a healthy minter from the role's bound set
 	setName, minterID, client, err := b.selectMinter(role.MinterSet)
 	if err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", err.Error()), nil
 	}
 
 	now := time.Now()
 	accessToken, expiresAt, err := client.GenerateAccessToken(ctx, role.ServiceAccountEmail, role.Scopes, role.DefaultTTL)
 	if err != nil {
 		b.recordMinterError(setName, minterID, classifyGCPError(err), now)
-		return logical.ErrorResponse("upstream error: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "upstream error: %v", err), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
