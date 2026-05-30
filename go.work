@@ -4,9 +4,11 @@ use (
 	./pkg/cloudconfig
 	./pkg/credenvelope
 	./pkg/metrics
+	./pkg/plugintest
 	./pkg/reconciler
 	./pkg/recovery
 	./pkg/worker
+	./plugins/credential-akamai
 	./plugins/credential-aws
 	./plugins/credential-azure
 	./plugins/credential-do
@@ -16,5 +18,4 @@ use (
 	./plugins/credential-ovh
 	./plugins/credential-upcloud
 	./plugins/credential-vultr
-	./plugins/credential-akamai
 )
