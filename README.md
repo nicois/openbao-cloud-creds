@@ -30,6 +30,18 @@ Every issued lease's `expires_at` reflects actual remaining validity. Steady-sta
 
 Object-storage credentials (S3-style backup keys) are **out of scope** — see [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md). DigitalOcean Spaces is not supported because DO exposes no public API for managing Spaces access keys.
 
+## Configuration flow
+
+Each mount is configured in three steps:
+
+```bash
+bao write cloud-creds/<cloud>/config <operational + cloud settings>     # no minters here
+bao write cloud-creds/<cloud>/minter-sets/<set> minters=...             # one or more named minter sets
+bao write cloud-creds/<cloud>/roles/<role> minter_set=<set> <role fields>
+```
+
+Minters live in named **minter sets**, not in `config`. Every role is bound to a required `minter_set` and mints only from that set's credentials — the isolation boundary for least-privilege and audit provenance. Each issued credential records its `minter_set` and `minter_id` in the response envelope metadata (`api_version` 2). Each set must independently satisfy the minter-validation rule (at least one `never_expires` minter, or at least two with ≥7-day expiry separation).
+
 ## Build and test
 
 ```bash

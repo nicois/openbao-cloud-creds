@@ -70,13 +70,17 @@ go test -tags=cloud_real ./plugins/credential-do/...
 
 ## Conventions
 
-- Go 1.22+ when initialized
+- Go 1.26.1 (workspace `go.work` + per-module `go.mod`)
 - One plugin = one Go module under `plugins/<name>/`
 - Shared code under `pkg/` — plugins import; never the other way around
 - Mount path is always `cloud-creds/<cloud>/...`
 - Owner-tag scheme always uses prefix `cloud-creds-<role>-` or label `owner=cloud-creds`
 - Every error response includes a stable `error_code` (Go constants in `pkg/credenvelope/errors.go`); adding one is a spec change
-- Clients pin to `metadata.api_version` in the response envelope
+- Clients pin to `metadata.api_version` in the response envelope (currently `"2"`)
+
+## Minter sets
+
+Minters are grouped into named **sets** at `cloud-creds/<cloud>/minter-sets/<name>` (write/read/delete/list), each independently validated by the `(≥1 never_expires) OR (≥2 with ≥7d gap)` rule. The bare `config` endpoint holds operational + cloud settings only (NO minters). Every role has a **required** `minter_set` field and mints only from that set — there is no cross-set failover for issuance, by design (it is the isolation boundary). The reconciler, by contrast, cleans orphans across all sets by owner-tag (`anyHealthyMinter`). The issuing set+minter are recorded in `metadata.minter_set`/`minter_id` (envelope api_version 2) and in lease internal_data. OCI (phased rotation) binds each rotation slot to the role's set and records the provisioning set+minter on the slot. For capability isolation, give each set's minters only the upstream rights its bound roles need (e.g. an Azure SP authorized for one app registration). Backend worker lifecycle is serialized by a per-backend `workerLifecycleMu` (start/stop never overlap).
 
 ## Don't
 
