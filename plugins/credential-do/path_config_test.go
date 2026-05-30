@@ -27,15 +27,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":            "minter-1",
-					"token":         "dop_v1_abc123",
-					"never_expires": true,
-				},
-			},
-		},
+		Data:      map[string]interface{}{},
 	}
 
 	resp, err := b.HandleRequest(context.Background(), req)

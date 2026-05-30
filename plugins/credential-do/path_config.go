@@ -3,11 +3,9 @@ package credentialdo
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
-	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -17,10 +15,6 @@ func (b *backend) configPaths() []*framework.Path {
 		{
 			Pattern: "config",
 			Fields: map[string]*framework.FieldSchema{
-				"minters": {
-					Type:        framework.TypeSlice,
-					Description: "List of minter credentials",
-				},
 				"flush_interval": {
 					Type:        framework.TypeDurationSecond,
 					Default:     900,
@@ -46,50 +40,11 @@ func (b *backend) configPaths() []*framework.Path {
 }
 
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	mintersRaw := d.Get("minters")
-	if mintersRaw == nil {
-		return logical.ErrorResponse("minters is required"), nil
-	}
-
-	mintersSlice, ok := mintersRaw.([]interface{})
-	if !ok {
-		return logical.ErrorResponse("minters must be an array"), nil
-	}
-
-	var minters []cloudconfig.Minter
-	for _, m := range mintersSlice {
-		mMap, ok := m.(map[string]interface{})
-		if !ok {
-			return logical.ErrorResponse("each minter must be an object"), nil
-		}
-		minter := cloudconfig.Minter{
-			ID:        fmt.Sprintf("%v", mMap["id"]),
-			Token:     fmt.Sprintf("%v", mMap["token"]),
-			CreatedAt: time.Now(),
-		}
-		if ne, ok := mMap["never_expires"].(bool); ok && ne {
-			minter.NeverExpires = true
-		}
-		if exp, ok := mMap["expires_at"].(string); ok {
-			t, err := time.Parse(time.RFC3339, exp)
-			if err != nil {
-				return logical.ErrorResponse("invalid expires_at for minter %s: %v", minter.ID, err), nil
-			}
-			minter.ExpiresAt = t
-		}
-		minters = append(minters, minter)
-	}
-
-	if err := cloudconfig.ValidateMinterSet(minters); err != nil {
-		return logical.ErrorResponse("invalid minter set: %v", err), nil
-	}
-
 	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             "do",
-		Minters:           minters,
 		FlushInterval:     flushInterval,
 		ReconcileCadence:  reconcileCadence,
 		BootstrapDelay:    24 * time.Hour,
@@ -106,16 +61,6 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	b.mu.Lock()
 	b.config = cfg
-	b.minters = make(map[string]*minterState)
-	for _, m := range minters {
-		b.minters[m.ID] = &minterState{
-			minter: m,
-			sm: recovery.NewStateMachine(recovery.Config{
-				AuthFailThreshold:   30 * time.Second,
-				HealthCheckInterval: 5 * time.Minute,
-			}),
-		}
-	}
 	if url, ok := d.GetOk("do_api_url"); ok {
 		b.apiURL = url.(string)
 	}
@@ -143,7 +88,6 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 	return &logical.Response{
 		Data: map[string]interface{}{
 			"cloud":             cfg.Cloud,
-			"minter_count":      len(cfg.Minters),
 			"flush_interval":    int(cfg.FlushInterval.Seconds()),
 			"reconcile_cadence": int(cfg.ReconcileCadence.Seconds()),
 		},

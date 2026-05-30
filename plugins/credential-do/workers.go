@@ -61,7 +61,7 @@ func (b *backend) stopWorkers() {
 }
 
 func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) error {
-	_, client, err := b.selectMinter()
+	client, err := b.anyHealthyMinter()
 	if err != nil {
 		return err
 	}

@@ -19,25 +19,28 @@ func (b *backend) emitMinterMetrics() {
 	defer b.mu.RUnlock()
 
 	now := time.Now()
-	for id, ms := range b.minters {
-		labels := []metrics.Label{
-			{Name: "cloud", Value: "do"},
-			{Name: "cred_id", Value: id},
-		}
+	for setName, states := range b.minterSets {
+		for id, ms := range states {
+			labels := []metrics.Label{
+				{Name: "cloud", Value: "do"},
+				{Name: "minter_set", Value: setName},
+				{Name: "cred_id", Value: id},
+			}
 
-		state := string(ms.sm.State())
-		emitGauge([]string{"cloud_creds", "upstream_state"}, 1, append(labels, metrics.Label{Name: "state", Value: state}))
+			state := string(ms.sm.State())
+			emitGauge([]string{"cloud_creds", "upstream_state"}, 1, append(labels, metrics.Label{Name: "state", Value: state}))
 
-		emitGauge([]string{"cloud_creds", "upstream_consecutive_failures"}, float32(ms.sm.ConsecutiveFailures()), labels)
+			emitGauge([]string{"cloud_creds", "upstream_consecutive_failures"}, float32(ms.sm.ConsecutiveFailures()), labels)
 
-		lastSuccess := ms.sm.LastSuccessAt()
-		if !lastSuccess.IsZero() {
-			emitGauge([]string{"cloud_creds", "upstream_last_success_seconds_ago"}, float32(now.Sub(lastSuccess).Seconds()), labels)
-		}
+			lastSuccess := ms.sm.LastSuccessAt()
+			if !lastSuccess.IsZero() {
+				emitGauge([]string{"cloud_creds", "upstream_last_success_seconds_ago"}, float32(now.Sub(lastSuccess).Seconds()), labels)
+			}
 
-		if !ms.minter.ExpiresAt.IsZero() {
-			expiresIn := ms.minter.ExpiresAt.Sub(now).Seconds()
-			emitGauge([]string{"cloud_creds", "upstream_expires_in_seconds"}, float32(expiresIn), labels)
+			if !ms.minter.ExpiresAt.IsZero() {
+				expiresIn := ms.minter.ExpiresAt.Sub(now).Seconds()
+				emitGauge([]string{"cloud_creds", "upstream_expires_in_seconds"}, float32(expiresIn), labels)
+			}
 		}
 	}
 }
