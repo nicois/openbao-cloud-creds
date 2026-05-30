@@ -80,6 +80,7 @@ go test -tags=cloud_real ./plugins/credential-do/...
 - Owner-tag scheme always uses prefix `cloud-creds-<role>-` or label `owner=cloud-creds`
 - Every error response includes a stable `error_code` (Go constants in `pkg/credenvelope/errors.go`); adding one is a spec change
 - Clients pin to `metadata.api_version` in the response envelope (currently `"2"`)
+- Every plugin MUST have a `resilience_test.go` wiring `pkg/plugintest` (reload, mid-lease perturbation, revoke-resilience categories). A new plugin is not complete without it. The reload category catches "config field set only in `pathConfigWrite`, not reloaded in `Factory`" bugs (KI-001 class); the perturbation/revoke categories catch revoke-wedging bugs (KI-002 class). See `docs/superpowers/specs/2026-05-30-resilience-test-taxonomy-design.md`. Injected-client plugins (AWS/GCP/OCI) `t.Skip` the reload category — their config-reload path is not covered, a known residual gap.
 
 ## Minter sets
 

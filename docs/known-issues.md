@@ -6,7 +6,17 @@ multi-cloud spike's resilience assessment (against a live raft cluster, UpCloud)
 
 ---
 
-## KI-001 — `config`/`username` not loaded on backend init (credential-upcloud)
+## KI-001 — `config`/`username` not loaded on backend init (credential-upcloud) — [RESOLVED 2026-05-30]
+
+**Resolved:** `Factory` now calls `loadConfig` (before `loadAllMinterSets`) to
+rehydrate config-derived backend fields from storage. Turned out to affect **7
+plugins**, not just UpCloud — every HTTP-fake plugin stashed a config field
+(api URL, username, region, endpoints, tenant) set only in `pathConfigWrite`.
+Akamai's pre-existing `loadHost` was partial (restored `host` but not `apiURL`)
+and was replaced by a full `loadConfig`. Regression: `TestResilience_Reload` in
+each plugin's `resilience_test.go` (via `pkg/plugintest`). The injected-client
+plugins (AWS/GCP/OCI) can't exercise reload through the fake and `t.Skip` it —
+residual risk noted in the taxonomy spec.
 
 **Severity:** High — breaks issuance on every plugin reload / raft failover until
 `config` is re-written.
@@ -58,7 +68,17 @@ same fix.)
 
 ---
 
-## KI-002 — revoke retries forever when the issuing minter is gone (all JIT plugins)
+## KI-002 — revoke retries forever when the issuing minter is gone (all JIT plugins) — [RESOLVED 2026-05-30]
+
+**Resolved:** the 6 hard-revoke plugins (do, upcloud, exoscale, azure, vultr,
+akamai) now tolerate a removed issuing minter — `pathCredsRevoke` falls back to
+any healthy minter in the same set via `anyHealthyMinterInSet`, and if none
+remains, no-ops (logging) and releases the lease. A related bug surfaced by the
+same suite: a 404 on the upstream delete (double-revoke / already-deleted) is
+now treated as success rather than an error. Rationale in `docs/decisions.md`.
+Regression: `TestResilience_Perturbation` and `TestResilience_Revoke` in each
+hard-revoke plugin's `resilience_test.go`. (No-revoke/soft-revoke plugins —
+aws, gcp, ovh, oci — were never affected: their revoke makes no upstream call.)
 
 **Severity:** Medium — noisy failing revokes; upstream credential still expires
 via TTL, so not a security hole, but it leaks revoke-retry work indefinitely.
