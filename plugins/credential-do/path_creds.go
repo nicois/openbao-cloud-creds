@@ -211,6 +211,8 @@ func (b *backend) getMinter(setName, id string) (*doClient, error) {
 	return nil, fmt.Errorf("minter %q not found in set %q", id, setName)
 }
 
+// doAPIURL returns the configured API base URL. Callers MUST hold b.mu
+// (read or write). It performs no locking of its own.
 func (b *backend) doAPIURL() string {
 	if b.apiURL != "" {
 		return b.apiURL

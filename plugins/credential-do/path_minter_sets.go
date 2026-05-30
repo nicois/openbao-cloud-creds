@@ -161,11 +161,16 @@ func (b *backend) loadAllMinterSets(ctx context.Context, storage logical.Storage
 	}
 	for _, name := range names {
 		entry, err := storage.Get(ctx, "minter-sets/"+name)
-		if err != nil || entry == nil {
+		if err != nil {
+			b.Logger().Warn("skipping minter set: storage read failed", "name", name, "error", err)
+			continue
+		}
+		if entry == nil {
 			continue
 		}
 		var set cloudconfig.MinterSet
 		if err := json.Unmarshal(entry.Value, &set); err != nil {
+			b.Logger().Warn("skipping unparseable minter set", "name", name, "error", err)
 			continue
 		}
 		b.loadMinterSet(&set)
