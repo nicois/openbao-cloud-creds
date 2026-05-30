@@ -51,9 +51,11 @@ jobs:
 
       - name: Install OpenBao
         run: |
-          BAO_VERSION=2.5.3
+          # Release assets are named openbao_<ver>_linux_amd64.deb (not bao_…),
+          # and v2.5.3 shipped no .deb (404). Use 2.5.4 (matches the spike cluster).
+          BAO_VERSION=2.5.4
           curl -fsSL -o /tmp/bao.deb \
-            "https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}/bao_${BAO_VERSION}_linux_amd64.deb"
+            "https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}/openbao_${BAO_VERSION}_linux_amd64.deb"
           sudo dpkg -i /tmp/bao.deb
           bao version
 
