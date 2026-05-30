@@ -15,6 +15,7 @@ type upcloudRole struct {
 	DefaultTTL time.Duration `json:"default_ttl"`
 	MaxTTL     time.Duration `json:"max_ttl"`
 	Scopes     string        `json:"scopes"`
+	MinterSet  string        `json:"minter_set"`
 	Disabled   bool          `json:"disabled,omitempty"`
 }
 
@@ -41,6 +42,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Comma-separated UpCloud token scopes",
 				},
+				"minter_set": {
+					Type:        framework.TypeString,
+					Description: "Name of the minter set this role mints from (required)",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -63,6 +68,18 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
 	scopes := d.Get("scopes").(string)
 
+	minterSet := d.Get("minter_set").(string)
+	if minterSet == "" {
+		return logical.ErrorResponse("minter_set is required"), nil
+	}
+	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
+	}
+
 	role := &cloudconfig.Role{
 		Name:       name,
 		Cloud:      "upcloud",
@@ -81,6 +98,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
 		Scopes:     scopes,
+		MinterSet:  minterSet,
 	}
 
 	entry, err := logical.StorageEntryJSON("roles/"+name, ucRole)
@@ -115,6 +133,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 			"default_ttl": int(role.DefaultTTL.Seconds()),
 			"max_ttl":     int(role.MaxTTL.Seconds()),
 			"scopes":      role.Scopes,
+			"minter_set":  role.MinterSet,
 		},
 	}, nil
 }
