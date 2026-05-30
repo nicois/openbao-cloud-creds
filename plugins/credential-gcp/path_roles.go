@@ -21,6 +21,7 @@ type gcpRole struct {
 	MaxTTL              time.Duration `json:"max_ttl"`
 	ServiceAccountEmail string        `json:"service_account_email"`
 	Scopes              []string      `json:"scopes"`
+	MinterSet           string        `json:"minter_set"`
 	Disabled            bool          `json:"disabled,omitempty"`
 }
 
@@ -52,6 +53,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Default:     []string{defaultScope},
 					Description: "OAuth2 scopes for the generated access token",
 				},
+				"minter_set": {
+					Type:        framework.TypeString,
+					Description: "Name of the minter set this role mints from (required)",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -76,6 +81,18 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	if serviceAccountEmail == "" {
 		return logical.ErrorResponse("service_account_email is required"), nil
+	}
+
+	minterSet := d.Get("minter_set").(string)
+	if minterSet == "" {
+		return logical.ErrorResponse("minter_set is required"), nil
+	}
+	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
 	}
 
 	// Validate service account email format
@@ -117,6 +134,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MaxTTL:              maxTTL,
 		ServiceAccountEmail: serviceAccountEmail,
 		Scopes:              scopes,
+		MinterSet:           minterSet,
 	}
 
 	entry, err := logical.StorageEntryJSON("roles/"+name, gcpR)
@@ -151,6 +169,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 		"max_ttl":               int(role.MaxTTL.Seconds()),
 		"service_account_email": role.ServiceAccountEmail,
 		"scopes":                role.Scopes,
+		"minter_set":            role.MinterSet,
 	}
 
 	return &logical.Response{Data: data}, nil

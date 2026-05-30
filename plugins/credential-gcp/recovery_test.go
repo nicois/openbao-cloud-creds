@@ -33,6 +33,18 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
+		Data:      map[string]interface{}{},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
 				map[string]interface{}{
@@ -43,9 +55,9 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Write role
@@ -57,6 +69,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "target-sa@test-project.iam.gserviceaccount.com",
+			"minter_set":            "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)

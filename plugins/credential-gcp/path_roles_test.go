@@ -7,8 +7,28 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+// writeDefaultMinterSet creates a "default" minter set so roles can bind to it.
+func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Storage) {
+	t.Helper()
+	req := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"minters": []interface{}{
+				map[string]interface{}{"id": "minter-1", "credentials_json": testCredentialsJSON, "never_expires": true},
+			},
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
+	}
+}
+
 func TestRoleCRUD(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	// Create role
 	req := &logical.Request{
@@ -20,6 +40,7 @@ func TestRoleCRUD(t *testing.T) {
 			"max_ttl":               3600,
 			"service_account_email": "deploy-sa@my-project.iam.gserviceaccount.com",
 			"scopes":                "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/compute",
+			"minter_set":            "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -42,6 +63,9 @@ func TestRoleCRUD(t *testing.T) {
 	}
 	if resp.Data["service_account_email"] != "deploy-sa@my-project.iam.gserviceaccount.com" {
 		t.Fatalf("unexpected service_account_email: %v", resp.Data["service_account_email"])
+	}
+	if resp.Data["minter_set"] != "default" {
+		t.Fatalf("unexpected minter_set: %v", resp.Data["minter_set"])
 	}
 	scopes, ok := resp.Data["scopes"].([]string)
 	if !ok || len(scopes) != 2 {
@@ -134,6 +158,7 @@ func TestRoleValidation_InvalidSAEmail(t *testing.T) {
 
 func TestRoleValidation_TTLTooHigh(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
@@ -143,6 +168,7 @@ func TestRoleValidation_TTLTooHigh(t *testing.T) {
 			"default_ttl":           3600,
 			"max_ttl":               86400, // above 43200s maximum
 			"service_account_email": "sa@my-project.iam.gserviceaccount.com",
+			"minter_set":            "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -156,6 +182,7 @@ func TestRoleValidation_TTLTooHigh(t *testing.T) {
 
 func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
@@ -165,6 +192,7 @@ func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 			"default_ttl":           7200,
 			"max_ttl":               3600,
 			"service_account_email": "sa@my-project.iam.gserviceaccount.com",
+			"minter_set":            "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)

@@ -19,17 +19,22 @@ by impersonating service accounts via the IAM Credentials API (JIT strategy).
 
 type backend struct {
 	*framework.Backend
-	mu            sync.RWMutex
-	config        *cloudconfig.PluginConfig
-	minters       map[string]*minterState
-	project       string
-	accessTracker *metrics.AccessTracker
-	workerMgr     *worker.Manager
-	workerCancel  context.CancelFunc
-	iamClientFn   IAMClientFactory
+	mu sync.RWMutex
+	// workerLifecycleMu serializes startWorkers so a manager is never Wait()ed
+	// by one goroutine while another is still Start()ing it. Multiple writes
+	// (config + each minter set) each fire startWorkers, so overlap is common.
+	workerLifecycleMu sync.Mutex
+	config            *cloudconfig.PluginConfig
+	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
+	project           string
+	accessTracker     *metrics.AccessTracker
+	workerMgr         *worker.Manager
+	workerCancel      context.CancelFunc
+	iamClientFn       IAMClientFactory
 }
 
 type minterState struct {
+	set    string
 	minter cloudconfig.Minter
 	sm     *recovery.StateMachine
 }
@@ -39,7 +44,7 @@ type IAMClientFactory func(credentialsJSON string) IAMCredentialsClient
 
 func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend, error) {
 	b := &backend{
-		minters: make(map[string]*minterState),
+		minterSets: make(map[string]map[string]*minterState),
 	}
 
 	b.Backend = &framework.Backend{
@@ -47,6 +52,7 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		Help:        backendHelp,
 		Paths: framework.PathAppend(
 			b.configPaths(),
+			b.minterSetPaths(),
 			b.rolePaths(),
 			b.credsPaths(),
 			b.reconcilePaths(),
@@ -63,6 +69,10 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 
 	store := metrics.NewInMemoryStore()
 	b.accessTracker = metrics.NewAccessTracker("local", store)
+
+	if conf.StorageView != nil {
+		_ = b.loadAllMinterSets(ctx, conf.StorageView)
+	}
 
 	return b, nil
 }

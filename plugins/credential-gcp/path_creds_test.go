@@ -21,10 +21,24 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		return credentialgcp.NewFakeIAMClient(nil, nil)
 	})
 
-	// Write config with minter
+	// Write config: operational settings only
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"project": "test-project",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
@@ -34,15 +48,14 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 					"never_expires":    true,
 				},
 			},
-			"project": "test-project",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
-	// Write role
+	// Write role bound to the set
 	req = &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
@@ -51,6 +64,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "target-sa@test-project.iam.gserviceaccount.com",
+			"minter_set":            "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)
@@ -107,6 +121,24 @@ func TestCredsIssue(t *testing.T) {
 	}
 	if resp.Secret.InternalData["credential_id"] == nil {
 		t.Fatal("expected credential_id in internal_data")
+	}
+	if resp.Secret.InternalData["minter_set"] != "default" {
+		t.Fatalf("expected minter_set=default in internal_data, got %v", resp.Secret.InternalData["minter_set"])
+	}
+	if resp.Secret.InternalData["minter_id"] != "minter-1" {
+		t.Fatalf("expected minter_id=minter-1 in internal_data, got %v", resp.Secret.InternalData["minter_id"])
+	}
+
+	// Verify provenance in the envelope metadata
+	meta := resp.Data["metadata"].(map[string]interface{})
+	if meta["minter_set"] != "default" {
+		t.Fatalf("expected minter_set=default, got %v", meta["minter_set"])
+	}
+	if meta["minter_id"] != "minter-1" {
+		t.Fatalf("expected minter_id=minter-1, got %v", meta["minter_id"])
+	}
+	if meta["api_version"] != "2" {
+		t.Fatalf("expected api_version=2, got %v", meta["api_version"])
 	}
 }
 
@@ -205,6 +237,18 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
+		Data:      map[string]interface{}{},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
 				map[string]interface{}{
@@ -215,9 +259,9 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Write role
@@ -229,6 +273,7 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "target-sa@test-project.iam.gserviceaccount.com",
+			"minter_set":            "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)
@@ -273,6 +318,18 @@ func TestCredsIssue_CustomScopes(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
+		Data:      map[string]interface{}{},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
 				map[string]interface{}{
@@ -283,9 +340,9 @@ func TestCredsIssue_CustomScopes(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Write role with custom scopes
@@ -298,6 +355,7 @@ func TestCredsIssue_CustomScopes(t *testing.T) {
 			"max_ttl":               3600,
 			"service_account_email": "target-sa@test-project.iam.gserviceaccount.com",
 			"scopes":                "https://www.googleapis.com/auth/compute,https://www.googleapis.com/auth/devstorage.read_only",
+			"minter_set":            "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)
