@@ -73,6 +73,7 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 	b.accessTracker = metrics.NewAccessTracker("local", store)
 
 	if conf.StorageView != nil {
+		_ = b.loadConfig(ctx, conf.StorageView)
 		_ = b.loadAllMinterSets(ctx, conf.StorageView)
 	}
 

@@ -68,8 +68,14 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return nil, err
 	}
 
-	// Store host separately
-	hostEntry, err := logical.StorageEntryJSON("config/host", map[string]string{"host": host})
+	apiURL := d.Get("akamai_api_url").(string)
+
+	// Store host and api url separately so a reloaded backend (failover/restart)
+	// can rehydrate them before any config write happens. KI-001.
+	hostEntry, err := logical.StorageEntryJSON("config/host", map[string]string{
+		"host":    host,
+		"api_url": apiURL,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +86,8 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	b.mu.Lock()
 	b.config = cfg
 	b.host = host
-	if url, ok := d.GetOk("akamai_api_url"); ok {
-		b.apiURL = url.(string)
+	if apiURL != "" {
+		b.apiURL = apiURL
 	}
 	b.mu.Unlock()
 
@@ -90,22 +96,37 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	return nil, nil
 }
 
-// loadHost restores the configured Akamai host from storage so the EdgeGrid
-// signer has it after a process restart, before any config write happens.
-func (b *backend) loadHost(ctx context.Context, storage logical.Storage) error {
-	entry, err := storage.Get(ctx, "config/host")
-	if err != nil {
+// loadConfig restores the operational config (host, api url, plugin config)
+// from storage so the EdgeGrid signer and HTTP client have them after a
+// process restart / failover, before any config write happens. KI-001.
+func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error {
+	if entry, err := storage.Get(ctx, "config"); err == nil && entry != nil {
+		var cfg cloudconfig.PluginConfig
+		if err := json.Unmarshal(entry.Value, &cfg); err != nil {
+			return err
+		}
+		b.mu.Lock()
+		b.config = &cfg
+		b.mu.Unlock()
+	} else if err != nil {
 		return err
 	}
-	if entry == nil {
-		return nil
+
+	entry, err := storage.Get(ctx, "config/host")
+	if err != nil || entry == nil {
+		return err
 	}
 	var h map[string]string
 	if err := json.Unmarshal(entry.Value, &h); err != nil {
 		return err
 	}
 	b.mu.Lock()
-	b.host = h["host"]
+	if h["host"] != "" {
+		b.host = h["host"]
+	}
+	if h["api_url"] != "" {
+		b.apiURL = h["api_url"]
+	}
 	b.mu.Unlock()
 	return nil
 }

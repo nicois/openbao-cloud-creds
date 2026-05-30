@@ -30,7 +30,7 @@ func newResilienceHarness(t *testing.T) (plugintest.Harness, *fakes.ExoscaleServ
 			},
 		})
 		write("roles/test-role", map[string]interface{}{
-			"default_ttl": 900, "max_ttl": 3600, "role_id": "iam-role-uuid-test", "minter_set": "default",
+			"default_ttl": 900, "max_ttl": 3600, "role_id": "11111111-1111-1111-1111-111111111111", "minter_set": "default",
 		})
 	}
 

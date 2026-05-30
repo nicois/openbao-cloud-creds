@@ -84,6 +84,19 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		tokenEndpoint = regionEndpoints[region]
 	}
 
+	// Persist region + token endpoint separately so a reloaded backend
+	// (failover/restart) can rehydrate them before any config write. KI-001.
+	metaEntry, err := logical.StorageEntryJSON("config_meta", map[string]string{
+		"region":         region,
+		"token_endpoint": tokenEndpoint,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := req.Storage.Put(ctx, metaEntry); err != nil {
+		return nil, err
+	}
+
 	b.mu.Lock()
 	b.config = cfg
 	b.region = region
@@ -93,6 +106,40 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	go b.startWorkers(context.Background(), req.Storage)
 
 	return nil, nil
+}
+
+// loadConfig rehydrates operational config from storage into the backend, so a
+// reloaded backend (failover/restart) matches one that just had config written. KI-001.
+func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error {
+	entry, err := storage.Get(ctx, "config")
+	if err != nil || entry == nil {
+		return err
+	}
+	var cfg cloudconfig.PluginConfig
+	if err := json.Unmarshal(entry.Value, &cfg); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	b.config = &cfg
+	b.mu.Unlock()
+
+	metaEntry, err := storage.Get(ctx, "config_meta")
+	if err != nil || metaEntry == nil {
+		return err
+	}
+	var meta map[string]string
+	if err := json.Unmarshal(metaEntry.Value, &meta); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	if meta["region"] != "" {
+		b.region = meta["region"]
+	}
+	if meta["token_endpoint"] != "" {
+		b.tokenEndpoint = meta["token_endpoint"]
+	}
+	b.mu.Unlock()
+	return nil
 }
 
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {

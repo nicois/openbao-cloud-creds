@@ -68,8 +68,14 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return nil, err
 	}
 
-	// Store username separately (sensitive config)
-	usernameEntry, err := logical.StorageEntryJSON("config/username", map[string]string{"username": username})
+	apiURL := d.Get("upcloud_api_url").(string)
+
+	// Store username and api url separately so a reloaded backend (failover/
+	// restart) can rehydrate them before any config write happens. KI-001.
+	usernameEntry, err := logical.StorageEntryJSON("config/username", map[string]string{
+		"username": username,
+		"api_url":  apiURL,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -80,14 +86,48 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	b.mu.Lock()
 	b.config = cfg
 	b.username = username
-	if url, ok := d.GetOk("upcloud_api_url"); ok {
-		b.apiURL = url.(string)
+	if apiURL != "" {
+		b.apiURL = apiURL
 	}
 	b.mu.Unlock()
 
 	go b.startWorkers(context.Background(), req.Storage)
 
 	return nil, nil
+}
+
+// loadConfig rehydrates operational config from storage into the backend, so a
+// reloaded backend (failover/restart) matches one that just had config written. KI-001.
+func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error {
+	entry, err := storage.Get(ctx, "config")
+	if err != nil || entry == nil {
+		return err
+	}
+	var cfg cloudconfig.PluginConfig
+	if err := json.Unmarshal(entry.Value, &cfg); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	b.config = &cfg
+	b.mu.Unlock()
+
+	metaEntry, err := storage.Get(ctx, "config/username")
+	if err != nil || metaEntry == nil {
+		return err
+	}
+	var meta map[string]string
+	if err := json.Unmarshal(metaEntry.Value, &meta); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	if meta["username"] != "" {
+		b.username = meta["username"]
+	}
+	if meta["api_url"] != "" {
+		b.apiURL = meta["api_url"]
+	}
+	b.mu.Unlock()
+	return nil
 }
 
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {

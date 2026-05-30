@@ -59,16 +59,59 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return nil, err
 	}
 
+	apiURL := d.Get("vultr_api_url").(string)
+
+	// Persist operational config separately so a reloaded backend (failover/
+	// restart) can rehydrate it before any config write happens. KI-001.
+	metaEntry, err := logical.StorageEntryJSON("config_meta", map[string]string{"api_url": apiURL})
+	if err != nil {
+		return nil, err
+	}
+	if err := req.Storage.Put(ctx, metaEntry); err != nil {
+		return nil, err
+	}
+
 	b.mu.Lock()
 	b.config = cfg
-	if url, ok := d.GetOk("vultr_api_url"); ok {
-		b.apiURL = url.(string)
+	if apiURL != "" {
+		b.apiURL = apiURL
 	}
 	b.mu.Unlock()
 
 	go b.startWorkers(context.Background(), req.Storage)
 
 	return nil, nil
+}
+
+// loadConfig rehydrates operational config from storage into the backend, so a
+// reloaded backend (failover/restart) matches one that just had config written. KI-001.
+func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error {
+	entry, err := storage.Get(ctx, "config")
+	if err != nil || entry == nil {
+		return err
+	}
+	var cfg cloudconfig.PluginConfig
+	if err := json.Unmarshal(entry.Value, &cfg); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	b.config = &cfg
+	b.mu.Unlock()
+
+	metaEntry, err := storage.Get(ctx, "config_meta")
+	if err != nil || metaEntry == nil {
+		return err
+	}
+	var meta map[string]string
+	if err := json.Unmarshal(metaEntry.Value, &meta); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	if meta["api_url"] != "" {
+		b.apiURL = meta["api_url"]
+	}
+	b.mu.Unlock()
+	return nil
 }
 
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
