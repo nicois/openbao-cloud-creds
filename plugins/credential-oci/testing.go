@@ -1,10 +1,12 @@
 package credentialoci
 
-// TestSetClient allows tests to inject a fake OCI client into the backend.
-// This is exported for use by external test packages (_test).
+// TestSetClient routes every per-set minter through the given fake OCI client.
+// It registers a client factory that ignores the minter token and returns the
+// fake, so slot provisioning/rotation exercises the set-aware selector against
+// an in-memory backend. Exported for use by external test packages (_test).
 func TestSetClient(b interface{}, client OCIIAMClient) {
 	if bb, ok := b.(*backend); ok {
-		bb.SetClient(client)
+		bb.SetClientFactory(func(string) OCIIAMClient { return client })
 	}
 }
 

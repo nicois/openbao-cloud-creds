@@ -21,10 +21,10 @@ func TestMetricsEntity(t *testing.T) {
 		t.Fatalf("creds read failed: %v", err)
 	}
 
-	// Query metrics for the minter
+	// Query metrics for the minter (composite set/minter entity key)
 	metricsReq := &logical.Request{
 		Operation: logical.ReadOperation,
-		Path:      "metrics/entity/minter-1",
+		Path:      "metrics/entity/default/minter-1",
 		Storage:   storage,
 	}
 	resp, err := b.HandleRequest(context.Background(), metricsReq)

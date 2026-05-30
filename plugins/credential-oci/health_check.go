@@ -3,31 +3,35 @@ package credentialoci
 import (
 	"context"
 	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 )
 
 func (b *backend) healthCheckWorker(ctx context.Context) error {
 	b.mu.RLock()
-	minters := b.minters
+	type probe struct {
+		set, id, token string
+		sm             *recovery.StateMachine
+	}
+	var probes []probe
+	for setName, states := range b.minterSets {
+		for id, ms := range states {
+			if ms.sm.NeedsHealthCheck(time.Now()) {
+				probes = append(probes, probe{setName, id, ms.minter.Token, ms.sm})
+			}
+		}
+	}
 	b.mu.RUnlock()
 
-	client := b.getClient()
-	if client == nil {
-		return nil
-	}
-
 	now := time.Now()
-	for _, ms := range minters {
-		if !ms.sm.NeedsHealthCheck(now) {
-			continue
-		}
-
-		// Use the first role's user OCID for health check
-		// In practice, GetUser checks that the minter credentials are valid
-		err := client.GetUser(ctx, ms.minter.ID)
-		if err != nil {
-			ms.sm.RecordError(401, now)
+	for _, p := range probes {
+		client := b.newOCIClient(p.token)
+		// GetUser verifies the minter credentials are valid. The minter ID is the
+		// configured credential identifier, used as a stand-in user reference.
+		if err := client.GetUser(ctx, p.id); err != nil {
+			p.sm.RecordError(401, now)
 		} else {
-			ms.sm.RecordSuccess(now)
+			p.sm.RecordSuccess(now)
 		}
 	}
 

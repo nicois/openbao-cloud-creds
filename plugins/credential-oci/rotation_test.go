@@ -97,10 +97,22 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 	fakeClient := credentialoci.NewTestFakeClient()
 	credentialoci.TestSetClient(b, fakeClient)
 
-	// Write config
+	// Write config (operational settings only)
 	configReq := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
+		Storage:   storage,
+		Data:      map[string]interface{}{},
+	}
+	resp, err := b.HandleRequest(context.Background(), configReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Create the minter set the role binds to
+	setReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
@@ -112,12 +124,11 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), configReq)
-	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	if resp, err := b.HandleRequest(context.Background(), setReq); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
-	// Write role - should initialize 2 slots (create 2 tokens)
+	// Write role - should initialize 2 slots (create 2 tokens) via the bound set
 	roleReq := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "roles/init-test",
@@ -128,6 +139,7 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 			"rotation_period": 604800,
 			"default_ttl":     302400,
 			"max_ttl":         604800,
+			"minter_set":      "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), roleReq)

@@ -30,6 +30,36 @@ type OCIIAMClient interface {
 	GetUser(ctx context.Context, userID string) error
 }
 
+// signingOCIClient is the production OCIIAMClient. It parses a minter token of
+// the form "tenancy_ocid:user_ocid:fingerprint:private_key_pem" and signs OCI
+// IAM requests with RSA-SHA256. The signing transport is intentionally not yet
+// implemented in this open-source extraction; real-cloud integration tests
+// (build tag cloud_real) exercise it against a dedicated test tenancy.
+type signingOCIClient struct {
+	token  string
+	region string
+}
+
+func newSigningOCIClient(token, region string) *signingOCIClient {
+	return &signingOCIClient{token: token, region: region}
+}
+
+func (c *signingOCIClient) CreateAuthToken(_ context.Context, _, _ string) (string, string, error) {
+	return "", "", fmt.Errorf("upstream_auth_failed: OCI request signing not implemented in this build")
+}
+
+func (c *signingOCIClient) DeleteAuthToken(_ context.Context, _, _ string) error {
+	return fmt.Errorf("upstream_auth_failed: OCI request signing not implemented in this build")
+}
+
+func (c *signingOCIClient) ListAuthTokens(_ context.Context, _ string) ([]AuthTokenInfo, error) {
+	return nil, fmt.Errorf("upstream_auth_failed: OCI request signing not implemented in this build")
+}
+
+func (c *signingOCIClient) GetUser(_ context.Context, _ string) error {
+	return fmt.Errorf("upstream_auth_failed: OCI request signing not implemented in this build")
+}
+
 // fakeOCIClient is an in-memory implementation of OCIIAMClient for testing.
 type fakeOCIClient struct {
 	tokens   map[string]map[string]*fakeToken // userID -> tokenID -> token

@@ -10,7 +10,10 @@ import (
 )
 
 func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
-	b.stopWorkers()
+	b.workerLifecycleMu.Lock()
+	defer b.workerLifecycleMu.Unlock()
+
+	b.stopWorkersLocked()
 
 	b.mu.RLock()
 	cfg := b.config
@@ -59,7 +62,10 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 	wm.Start(workerCtx)
 }
 
-func (b *backend) stopWorkers() {
+// stopWorkersLocked tears down the running worker manager. Callers MUST hold
+// b.workerLifecycleMu so this never overlaps a concurrent startWorkers that is
+// still inside wm.Start().
+func (b *backend) stopWorkersLocked() {
 	b.mu.Lock()
 	cancel := b.workerCancel
 	wm := b.workerMgr
@@ -130,11 +136,6 @@ func (b *backend) rotationWorker(ctx context.Context, storage logical.Storage) e
 
 // reconcileWorker runs the reconciliation logic from the background worker.
 func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) error {
-	client := b.getClient()
-	if client == nil {
-		return nil
-	}
-
 	roleNames, err := storage.List(ctx, "roles/")
 	if err != nil {
 		return err
@@ -185,6 +186,12 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		}
 		var role ociRole
 		if err := json.Unmarshal(roleEntry.Value, &role); err != nil {
+			continue
+		}
+
+		// List/delete via a healthy minter from the role's bound set.
+		_, client, selErr := b.selectMinterForSet(role.MinterSet)
+		if selErr != nil {
 			continue
 		}
 

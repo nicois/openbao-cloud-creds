@@ -34,9 +34,8 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	mode := d.Get("mode").(string)
 	dryRun := mode == "dry_run"
 
-	client := b.getClient()
-	if client == nil {
-		return logical.ErrorResponse("cannot reconcile: OCI client not configured"), nil
+	if b.anyHealthyMinter() == nil {
+		return logical.ErrorResponse("cannot reconcile: no healthy minter available"), nil
 	}
 
 	// List all roles
@@ -91,6 +90,12 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 		}
 		var role ociRole
 		if err := json.Unmarshal(roleEntry.Value, &role); err != nil {
+			continue
+		}
+
+		// List/delete via a healthy minter from the role's bound set.
+		_, client, selErr := b.selectMinterForSet(role.MinterSet)
+		if selErr != nil {
 			continue
 		}
 

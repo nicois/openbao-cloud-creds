@@ -84,17 +84,9 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	expiresAt := best.NextRotationAt
 
-	if b.accessTracker != nil {
-		b.mu.RLock()
-		var minterID string
-		for id := range b.minters {
-			minterID = id
-			break
-		}
-		b.mu.RUnlock()
-		if minterID != "" {
-			b.accessTracker.RecordAccess(minterID, roleName, now)
-		}
+	// Provenance comes from the slot itself — the read does not call the cloud.
+	if b.accessTracker != nil && best.MinterSet != "" && best.MinterID != "" {
+		b.accessTracker.RecordAccess(best.MinterSet+"/"+best.MinterID, roleName, now)
 	}
 
 	emitLeaseIssued(roleName)
@@ -112,12 +104,16 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		CredentialID: best.TokenID,
 		Scope:        role.UserOCID,
 		IssuedBy:     "cloud-creds-oci/v0.1",
+		MinterSet:    best.MinterSet,
+		MinterID:     best.MinterID,
 	})
 
 	resp := b.Secret("oci_auth_token").Response(env.ToMap(), map[string]interface{}{
 		"role":       roleName,
 		"slot_index": best.SlotIndex,
 		"token_id":   best.TokenID,
+		"minter_set": best.MinterSet,
+		"minter_id":  best.MinterID,
 	})
 	resp.Secret.TTL = time.Duration(ttlSeconds) * time.Second
 	resp.Secret.MaxTTL = role.MaxTTL

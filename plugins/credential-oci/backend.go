@@ -17,21 +17,34 @@ The OCI credential backend issues short-lived auth tokens via phased rotation.
 Unlike JIT plugins, it pre-provisions credential slots and rotates them on a schedule.
 OCI limits each user to max 2 auth tokens, so this plugin manages 2 slots per role-user
 and rotates one every T/2 (default T=7d).
+
+Slots are provisioned and rotated using a healthy minter from the role's bound minter set.
+Each slot records the set + minter that provisioned it so rotation and cleanup stay within
+the role's set.
 `
 
 type backend struct {
 	*framework.Backend
-	mu            sync.RWMutex
-	config        *cloudconfig.PluginConfig
-	minters       map[string]*minterState
-	client        OCIIAMClient
-	region        string
-	accessTracker *metrics.AccessTracker
-	workerMgr     *worker.Manager
-	workerCancel  context.CancelFunc
+	mu sync.RWMutex
+	// workerLifecycleMu serializes startWorkers so a manager is never Wait()ed
+	// by one goroutine while another is still Start()ing it. Multiple writes
+	// (config + each minter set) each fire startWorkers, so overlap is common.
+	workerLifecycleMu sync.Mutex
+	config            *cloudconfig.PluginConfig
+	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
+	region            string
+	accessTracker     *metrics.AccessTracker
+	workerMgr         *worker.Manager
+	workerCancel      context.CancelFunc
+
+	// clientFactory builds an OCIIAMClient from a minter token
+	// ("tenancy_ocid:user_ocid:fingerprint:private_key_pem"). Tests override this
+	// to route every per-set minter through an in-memory fake.
+	clientFactory func(token string) OCIIAMClient
 }
 
 type minterState struct {
+	set    string
 	minter cloudconfig.Minter
 	sm     *recovery.StateMachine
 }
@@ -39,7 +52,7 @@ type minterState struct {
 // Factory creates the OCI credential backend.
 func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend, error) {
 	b := &backend{
-		minters: make(map[string]*minterState),
+		minterSets: make(map[string]map[string]*minterState),
 	}
 
 	b.Backend = &framework.Backend{
@@ -47,6 +60,7 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		Help:        backendHelp,
 		Paths: framework.PathAppend(
 			b.configPaths(),
+			b.minterSetPaths(),
 			b.rolePaths(),
 			b.credsPaths(),
 			b.rotateSlotPaths(),
@@ -65,18 +79,32 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 	store := metrics.NewInMemoryStore()
 	b.accessTracker = metrics.NewAccessTracker("local", store)
 
+	if conf.StorageView != nil {
+		_ = b.loadAllMinterSets(ctx, conf.StorageView)
+	}
+
 	return b, nil
 }
 
-// SetClient allows tests to inject a fake OCI client.
-func (b *backend) SetClient(client OCIIAMClient) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.client = client
+// newOCIClient builds an OCIIAMClient for the given minter token. The token is
+// the opaque "tenancy_ocid:user_ocid:fingerprint:private_key_pem" string. When a
+// clientFactory is registered (tests), it is used; otherwise a real signing
+// client is constructed.
+func (b *backend) newOCIClient(token string) OCIIAMClient {
+	b.mu.RLock()
+	factory := b.clientFactory
+	region := b.region
+	b.mu.RUnlock()
+	if factory != nil {
+		return factory(token)
+	}
+	return newSigningOCIClient(token, region)
 }
 
-func (b *backend) getClient() OCIIAMClient {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.client
+// SetClientFactory registers a factory used to build OCI clients from minter
+// tokens. Tests use this to route the per-set minter through an in-memory fake.
+func (b *backend) SetClientFactory(factory func(token string) OCIIAMClient) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.clientFactory = factory
 }

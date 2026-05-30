@@ -4,11 +4,33 @@ import (
 	"context"
 	"testing"
 
+	credentialoci "github.com/nicois/openbao-cloud-creds/plugins/credential-oci"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+// writeDefaultMinterSet creates a minter set named "default" that role-write
+// tests bind their roles to.
+func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Storage) {
+	t.Helper()
+	req := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"minters": []interface{}{
+				map[string]interface{}{"id": "minter-1", "token": "tenancy:user:fingerprint:key", "never_expires": true},
+			},
+		},
+	}
+	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
+	}
+}
+
 func TestRoleCRUD(t *testing.T) {
 	b, storage := getTestBackend(t)
+	credentialoci.TestSetClient(b, credentialoci.NewTestFakeClient())
+	writeDefaultMinterSet(t, b, storage)
 
 	// Create role
 	req := &logical.Request{
@@ -21,6 +43,7 @@ func TestRoleCRUD(t *testing.T) {
 			"rotation_period": 604800, // 7 days
 			"default_ttl":     302400, // 3.5 days
 			"max_ttl":         604800,
+			"minter_set":      "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -112,8 +135,34 @@ func TestRoleValidation_MissingUserOCID(t *testing.T) {
 	}
 }
 
+func TestRoleRequiresExistingMinterSet(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	req := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "roles/orphan",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"user_ocid":       "ocid1.user.oc1..testuser",
+			"slot_count":      2,
+			"rotation_period": 604800,
+			"default_ttl":     302400,
+			"max_ttl":         604800,
+			"minter_set":      "nonexistent",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatal("expected error binding role to nonexistent minter set")
+	}
+}
+
 func TestRoleValidation_TTLExceedsRotationInterval(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	// default_ttl (4d) > rotation_period/slot_count (3.5d) should fail
 	req := &logical.Request{
@@ -126,6 +175,7 @@ func TestRoleValidation_TTLExceedsRotationInterval(t *testing.T) {
 			"rotation_period": 604800, // 7 days
 			"default_ttl":     345600, // 4 days — exceeds 7d/2 = 3.5d
 			"max_ttl":         604800,
+			"minter_set":      "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -139,6 +189,7 @@ func TestRoleValidation_TTLExceedsRotationInterval(t *testing.T) {
 
 func TestRoleValidation_SlotCountExceedsMax(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
@@ -150,6 +201,7 @@ func TestRoleValidation_SlotCountExceedsMax(t *testing.T) {
 			"rotation_period": 604800,
 			"default_ttl":     100000,
 			"max_ttl":         604800,
+			"minter_set":      "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -163,6 +215,7 @@ func TestRoleValidation_SlotCountExceedsMax(t *testing.T) {
 
 func TestRoleValidation_DefaultTTLGtMaxTTL(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
@@ -174,6 +227,7 @@ func TestRoleValidation_DefaultTTLGtMaxTTL(t *testing.T) {
 			"rotation_period": 604800,
 			"default_ttl":     700000,
 			"max_ttl":         300000,
+			"minter_set":      "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)

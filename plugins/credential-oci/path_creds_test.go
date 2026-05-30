@@ -12,13 +12,27 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	t.Helper()
 	b, storage := getTestBackend(t)
 
-	// Inject fake client
+	// Route every per-set minter through an in-memory fake OCI client.
 	credentialoci.TestSetClient(b, credentialoci.NewTestFakeClient())
 
-	// Write config
+	// Write config (operational settings only — no minters here)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"region": "us-ashburn-1",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Create the minter set the role binds to
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
@@ -28,15 +42,14 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 					"never_expires": true,
 				},
 			},
-			"region": "us-ashburn-1",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
-	// Write role (this will also initialize slots since client is present)
+	// Write role bound to the set (this initializes slots via the set's minter)
 	req = &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
@@ -47,6 +60,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 			"rotation_period": 604800,
 			"default_ttl":     302400,
 			"max_ttl":         604800,
+			"minter_set":      "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)
@@ -98,13 +112,19 @@ func TestCredsRead(t *testing.T) {
 		t.Fatalf("expected credential.user_id = user OCID, got %v", cred["user_id"])
 	}
 
-	// Verify metadata
+	// Verify metadata, including minter-set provenance recorded on the slot.
 	meta, ok := resp.Data["metadata"].(map[string]interface{})
-	if !ok || meta["api_version"] != "1" {
+	if !ok || meta["api_version"] != "2" {
 		t.Fatalf("bad metadata: %v", resp.Data["metadata"])
 	}
 	if meta["issued_by"] != "cloud-creds-oci/v0.1" {
 		t.Fatalf("bad issued_by: %v", meta["issued_by"])
+	}
+	if meta["minter_set"] != "default" {
+		t.Fatalf("expected metadata.minter_set=default, got %v", meta["minter_set"])
+	}
+	if meta["minter_id"] != "minter-1" {
+		t.Fatalf("expected metadata.minter_id=minter-1, got %v", meta["minter_id"])
 	}
 
 	// Verify secret/lease exists

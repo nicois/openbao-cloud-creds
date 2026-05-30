@@ -19,6 +19,7 @@ type ociRole struct {
 	RotationPeriod time.Duration `json:"rotation_period"`
 	DefaultTTL     time.Duration `json:"default_ttl"`
 	MaxTTL         time.Duration `json:"max_ttl"`
+	MinterSet      string        `json:"minter_set"`
 	Disabled       bool          `json:"disabled,omitempty"`
 }
 
@@ -61,6 +62,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Default:     int(defaultRotationPeriod.Seconds()),
 					Description: "Maximum lease TTL",
 				},
+				"minter_set": {
+					Type:        framework.TypeString,
+					Description: "Name of the minter set used to provision and rotate this role's slots (required)",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -87,6 +92,18 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	if userOCID == "" {
 		return logical.ErrorResponse("user_ocid is required"), nil
+	}
+
+	minterSet := d.Get("minter_set").(string)
+	if minterSet == "" {
+		return logical.ErrorResponse("minter_set is required"), nil
+	}
+	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
 	}
 
 	if slotCount < 1 || slotCount > maxSlotCount {
@@ -129,6 +146,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		RotationPeriod: rotationPeriod,
 		DefaultTTL:     defaultTTL,
 		MaxTTL:         maxTTL,
+		MinterSet:      minterSet,
 	}
 
 	entry, err := logical.StorageEntryJSON("roles/"+name, ociR)
@@ -139,8 +157,9 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return nil, err
 	}
 
-	// Initialize slots if they don't exist yet and a client is configured
-	if b.getClient() != nil {
+	// Initialize slots if they don't exist yet and the role's bound set has a
+	// healthy minter to provision with.
+	if _, _, selErr := b.selectMinterForSet(minterSet); selErr == nil {
 		existingSlots, err := loadAllSlots(ctx, req.Storage, name, slotCount)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check existing slots: %w", err)
@@ -191,6 +210,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 			"rotation_period": int(role.RotationPeriod.Seconds()),
 			"default_ttl":     int(role.DefaultTTL.Seconds()),
 			"max_ttl":         int(role.MaxTTL.Seconds()),
+			"minter_set":      role.MinterSet,
 			"disabled":        role.Disabled,
 			"slots":           slotStatus,
 		},
@@ -208,14 +228,17 @@ func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *f
 	if entry != nil {
 		var role ociRole
 		if err := json.Unmarshal(entry.Value, &role); err == nil {
-			// Clean up slots — delete upstream tokens
-			client := b.getClient()
-			if client != nil {
-				slots, _ := loadAllSlots(ctx, req.Storage, name, role.SlotCount)
-				for _, s := range slots {
-					if s.TokenID != "" {
-						_ = client.DeleteAuthToken(ctx, role.UserOCID, s.TokenID)
-					}
+			// Clean up slots — delete each upstream token via the minter that
+			// provisioned it (recorded provenance), falling back to any healthy
+			// minter in the role's bound set.
+			slots, _ := loadAllSlots(ctx, req.Storage, name, role.SlotCount)
+			for _, s := range slots {
+				if s.TokenID == "" {
+					continue
+				}
+				client := b.clientForSlot(s, role.MinterSet)
+				if client != nil {
+					_ = client.DeleteAuthToken(ctx, role.UserOCID, s.TokenID)
 				}
 			}
 			// Remove slot storage

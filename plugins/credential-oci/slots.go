@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -20,6 +21,9 @@ const (
 )
 
 // slot represents a single credential slot in phased rotation.
+//
+// MinterSet and MinterID record which minter set + minter provisioned this
+// slot, so rotation and cleanup of the slot use a minter from the same set.
 type slot struct {
 	TokenID        string    `json:"token_id"`
 	TokenValue     string    `json:"token_value"`
@@ -28,6 +32,8 @@ type slot struct {
 	State          slotState `json:"state"`
 	SlotIndex      int       `json:"slot_index"`
 	Description    string    `json:"description"`
+	MinterSet      string    `json:"minter_set"`
+	MinterID       string    `json:"minter_id"`
 }
 
 // storageKeyForSlot returns the storage key for a slot.
@@ -104,9 +110,9 @@ func freshestSlot(slots []*slot) *slot {
 // initializeSlots provisions the initial credential slots for a role.
 // This is called on first role write when slots don't exist yet.
 func (b *backend) initializeSlots(ctx context.Context, storage logical.Storage, role *ociRole) error {
-	client := b.getClient()
-	if client == nil {
-		return fmt.Errorf("OCI client not configured")
+	minterID, client, err := b.selectMinterForSet(role.MinterSet)
+	if err != nil {
+		return err
 	}
 
 	now := time.Now()
@@ -132,6 +138,8 @@ func (b *backend) initializeSlots(ctx context.Context, storage logical.Storage, 
 			State:          slotActive,
 			SlotIndex:      i,
 			Description:    description,
+			MinterSet:      role.MinterSet,
+			MinterID:       minterID,
 		}
 
 		if err := saveSlot(ctx, storage, role.Name, s); err != nil {
@@ -144,17 +152,18 @@ func (b *backend) initializeSlots(ctx context.Context, storage logical.Storage, 
 
 // rotateSlot rotates a single slot: creates a new token, updates storage, deletes the old one.
 func (b *backend) rotateSlot(ctx context.Context, storage logical.Storage, role *ociRole, slotIndex int) error {
-	client := b.getClient()
-	if client == nil {
-		return fmt.Errorf("OCI client not configured")
-	}
-
 	existing, err := loadSlot(ctx, storage, role.Name, slotIndex)
 	if err != nil {
 		return fmt.Errorf("failed to load slot %d: %w", slotIndex, err)
 	}
 	if existing == nil {
 		return fmt.Errorf("slot %d does not exist for role %s", slotIndex, role.Name)
+	}
+
+	// Provision the replacement using a healthy minter from the role's bound set.
+	minterID, client, err := b.selectMinterForSet(role.MinterSet)
+	if err != nil {
+		return err
 	}
 
 	// Create new token
@@ -167,7 +176,7 @@ func (b *backend) rotateSlot(ctx context.Context, storage logical.Storage, role 
 	now := time.Now()
 	rotationInterval := role.RotationPeriod / time.Duration(role.SlotCount)
 
-	// Update slot with new token
+	// Update slot with new token, recording the provisioning set + minter.
 	updated := &slot{
 		TokenID:        tokenID,
 		TokenValue:     tokenValue,
@@ -176,6 +185,8 @@ func (b *backend) rotateSlot(ctx context.Context, storage logical.Storage, role 
 		State:          slotActive,
 		SlotIndex:      slotIndex,
 		Description:    description,
+		MinterSet:      role.MinterSet,
+		MinterID:       minterID,
 	}
 
 	if err := saveSlot(ctx, storage, role.Name, updated); err != nil {
@@ -184,18 +195,107 @@ func (b *backend) rotateSlot(ctx context.Context, storage logical.Storage, role 
 		return fmt.Errorf("failed to save rotated slot %d: %w", slotIndex, err)
 	}
 
-	// Delete old token (best effort — if this fails, the reconciler will clean it up)
+	// Delete old token via the minter that provisioned it (best effort — if this
+	// fails, the reconciler will clean it up).
 	if existing.TokenID != "" {
-		if err := client.DeleteAuthToken(ctx, role.UserOCID, existing.TokenID); err != nil {
-			b.Logger().Warn("failed to delete old auth token during rotation",
-				"role", role.Name,
-				"slot", slotIndex,
-				"old_token_id", existing.TokenID,
-				"error", err,
-			)
+		oldClient := b.clientForSlot(existing, role.MinterSet)
+		if oldClient != nil {
+			if err := oldClient.DeleteAuthToken(ctx, role.UserOCID, existing.TokenID); err != nil {
+				b.Logger().Warn("failed to delete old auth token during rotation",
+					"role", role.Name,
+					"slot", slotIndex,
+					"old_token_id", existing.TokenID,
+					"error", err,
+				)
+			}
 		}
 	}
 
 	emitSlotRotated(role.Name, slotIndex)
 	return nil
+}
+
+// selectMinterForSet returns the ID and client of a healthy minter in the named
+// set. Slots for a role are always provisioned and rotated using a minter from
+// the role's bound set.
+func (b *backend) selectMinterForSet(setName string) (minterID string, client OCIIAMClient, err error) {
+	b.mu.RLock()
+	states, ok := b.minterSets[setName]
+	if !ok {
+		b.mu.RUnlock()
+		return "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+	}
+	var token string
+	for id, ms := range states {
+		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+			minterID = id
+			token = ms.minter.Token
+			break
+		}
+	}
+	b.mu.RUnlock()
+	if minterID == "" {
+		return "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q failing", setName)
+	}
+	return minterID, b.newOCIClient(token), nil
+}
+
+// getMinterClient returns a client for a specific minter in a set, regardless of
+// health. Used to operate on a slot via the exact minter that provisioned it.
+func (b *backend) getMinterClient(setName, minterID string) OCIIAMClient {
+	b.mu.RLock()
+	var token string
+	found := false
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[minterID]; ok {
+			token = ms.minter.Token
+			found = true
+		}
+	}
+	b.mu.RUnlock()
+	if !found {
+		return nil
+	}
+	return b.newOCIClient(token)
+}
+
+// anyHealthyMinter returns a client for any healthy minter across all sets.
+// Used by the reconciler, which lists owner-tagged tokens regardless of set.
+func (b *backend) anyHealthyMinter() OCIIAMClient {
+	b.mu.RLock()
+	var token string
+	found := false
+	for _, states := range b.minterSets {
+		for _, ms := range states {
+			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+				token = ms.minter.Token
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	b.mu.RUnlock()
+	if !found {
+		return nil
+	}
+	return b.newOCIClient(token)
+}
+
+// clientForSlot returns the client to operate on the given slot's upstream
+// token: the exact minter that provisioned it if still present, otherwise any
+// healthy minter in the role's bound set.
+func (b *backend) clientForSlot(s *slot, roleSet string) OCIIAMClient {
+	if s.MinterSet != "" && s.MinterID != "" {
+		if c := b.getMinterClient(s.MinterSet, s.MinterID); c != nil {
+			return c
+		}
+	}
+	_, c, err := b.selectMinterForSet(roleSet)
+	if err != nil {
+		return nil
+	}
+	return c
 }
