@@ -33,6 +33,13 @@ func NewAkamaiServer() *AkamaiServer {
 	return s
 }
 
+// ProvisionedCount returns the number of API clients currently held by the fake.
+func (s *AkamaiServer) ProvisionedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.clients)
+}
+
 func (s *AkamaiServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
