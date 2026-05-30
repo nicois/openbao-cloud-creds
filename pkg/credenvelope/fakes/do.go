@@ -27,6 +27,13 @@ func NewDOServer() *DOServer {
 	return s
 }
 
+// ProvisionedCount returns the number of tokens currently held by the fake.
+func (s *DOServer) ProvisionedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.tokens)
+}
+
 func (s *DOServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
