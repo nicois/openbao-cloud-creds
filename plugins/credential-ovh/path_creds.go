@@ -49,7 +49,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return nil, err
 	}
 	if entry == nil {
-		return logical.ErrorResponse("role_not_found: role %q does not exist", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
 	}
 
 	var role ovhRole
@@ -58,20 +58,27 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	if role.Disabled {
-		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
 	}
 
 	// Select a healthy minter from the role's bound set
 	setName, minterID, client, err := b.selectMinter(role.MinterSet)
 	if err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		// selectMinter fails when the set is unloaded or every minter in it is
+		// failing — both surface to the client as an upstream auth failure. The
+		// error string carries an "upstream_auth_failed: " prefix for internal
+		// use; strip it so the envelope helper doesn't double-prefix.
+		msg := strings.TrimPrefix(err.Error(), string(credenvelope.ErrUpstreamAuthFailed)+": ")
+		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", msg), nil
 	}
 
 	now := time.Now()
 	accessToken, expiresIn, err := client.MintToken(ctx)
 	if err != nil {
 		b.recordMinterError(setName, minterID, classifyOVHError(err), now)
-		return logical.ErrorResponse("upstream error: %v", err), nil
+		// We can't reliably classify the OAuth2 token-minting failure at this
+		// layer, so ErrInternal is the honest, stable code to return.
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "upstream error: %v", err), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
