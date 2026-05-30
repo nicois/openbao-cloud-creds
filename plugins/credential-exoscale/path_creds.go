@@ -58,8 +58,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
 	}
 
-	// Select a healthy minter
-	minterID, client, err := b.selectMinter()
+	// Select a healthy minter from the role's bound set
+	setName, minterID, client, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		return logical.ErrorResponse(err.Error()), nil
 	}
@@ -70,13 +70,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 	keyResp, httpStatus, err := client.CreateAPIKey(ctx, keyName, role.RoleID)
 	if err != nil {
-		b.recordMinterError(minterID, httpStatus, now)
+		b.recordMinterError(setName, minterID, httpStatus, now)
 		return logical.ErrorResponse("upstream error: %v", err), nil
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(setName, minterID, now)
 
 	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(minterID, roleName, now)
+		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
 	}
 
 	emitLeaseIssued(roleName)
@@ -96,6 +96,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		CredentialID: keyResp.KeyID,
 		Scope:        role.RoleID,
 		IssuedBy:     "cloud-creds-exoscale/v0.1",
+		MinterSet:    setName,
+		MinterID:     minterID,
 	})
 
 	// Track active key for reconciler
@@ -113,6 +115,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	resp := b.Secret("exoscale_api_key").Response(env.ToMap(), map[string]interface{}{
 		"upstream_key_id": keyResp.KeyID,
 		"role":            roleName,
+		"minter_set":      setName,
 		"minter_id":       minterID,
 	})
 	resp.Secret.TTL = role.DefaultTTL
@@ -127,8 +130,9 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		return nil, fmt.Errorf("missing upstream_key_id in internal_data")
 	}
 
+	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
 	minterID, _ := req.Secret.InternalData["minter_id"].(string)
-	_, client, err := b.getMinter(minterID)
+	client, err := b.getMinter(minterSet, minterID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +142,11 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	now := time.Now()
 	httpStatus, err := client.DeleteAPIKey(ctx, keyID)
 	if err != nil {
-		b.recordMinterError(minterID, httpStatus, now)
+		b.recordMinterError(minterSet, minterID, httpStatus, now)
 		emitLeaseRevokeFailed(roleName)
 		return nil, fmt.Errorf("revoke failed: %v", err)
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(minterSet, minterID, now)
 
 	// Remove from active tokens
 	if err := req.Storage.Delete(ctx, "active-tokens/"+keyID); err != nil {
@@ -159,48 +163,55 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *f
 	return resp, nil
 }
 
-func (b *backend) selectMinter() (string, *exoscaleClient, error) {
+func (b *backend) selectMinter(setName string) (setID, minterID string, client *exoscaleClient, err error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if b.config == nil {
-		return "", nil, fmt.Errorf("upstream_auth_failed: plugin not configured")
+	states, ok := b.minterSets[setName]
+	if !ok {
+		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
-
 	apiURL := b.exoscaleAPIURL()
-
-	for _, ms := range b.minters {
+	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			return ms.minter.ID, newExoscaleClient(apiURL, ms.minter.Token), nil
+			return setName, id, newExoscaleClient(apiURL, ms.minter.Token), nil
 		}
 	}
-
-	return "", nil, fmt.Errorf("upstream_auth_failed: all minters are failing")
+	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
 }
 
-func (b *backend) getMinter(id string) (string, *exoscaleClient, error) {
+// anyHealthyMinter returns a client for any healthy minter across all sets.
+// Used by the reconciler, which lists owner-tagged keys regardless of set.
+func (b *backend) anyHealthyMinter() (*exoscaleClient, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if b.config == nil {
-		return "", nil, fmt.Errorf("plugin not configured")
-	}
-
 	apiURL := b.exoscaleAPIURL()
-
-	if ms, ok := b.minters[id]; ok {
-		return id, newExoscaleClient(apiURL, ms.minter.Token), nil
-	}
-
-	// Fallback to any healthy minter
-	for _, ms := range b.minters {
-		if ms.sm.State() == recovery.Healthy {
-			return ms.minter.ID, newExoscaleClient(apiURL, ms.minter.Token), nil
+	for _, states := range b.minterSets {
+		for _, ms := range states {
+			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+				return newExoscaleClient(apiURL, ms.minter.Token), nil
+			}
 		}
 	}
-	return "", nil, fmt.Errorf("no healthy minter available")
+	return nil, fmt.Errorf("upstream_auth_failed: no healthy minter available")
 }
 
+func (b *backend) getMinter(setName, id string) (*exoscaleClient, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	apiURL := b.exoscaleAPIURL()
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			return newExoscaleClient(apiURL, ms.minter.Token), nil
+		}
+	}
+	return nil, fmt.Errorf("minter %q not found in set %q", id, setName)
+}
+
+// exoscaleAPIURL returns the configured API base URL. Callers MUST hold b.mu
+// (read or write). It performs no locking of its own.
 func (b *backend) exoscaleAPIURL() string {
 	if b.apiURL != "" {
 		return b.apiURL
@@ -208,18 +219,22 @@ func (b *backend) exoscaleAPIURL() string {
 	return "https://api-ch-gva-2.exoscale.com"
 }
 
-func (b *backend) recordMinterSuccess(id string, at time.Time) {
+func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordSuccess(at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordSuccess(at)
+		}
 	}
 }
 
-func (b *backend) recordMinterError(id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordError(httpStatus, at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordError(httpStatus, at)
+		}
 	}
 }

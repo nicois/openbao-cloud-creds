@@ -31,7 +31,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	mode := d.Get("mode").(string)
 	dryRun := mode == "dry_run"
 
-	_, client, err := b.selectMinter()
+	client, err := b.anyHealthyMinter()
 	if err != nil {
 		return logical.ErrorResponse("cannot reconcile: %v", err), nil
 	}
