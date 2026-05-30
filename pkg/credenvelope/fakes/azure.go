@@ -55,6 +55,11 @@ func (s *AzureServer) PasswordCount() int {
 	return len(s.passwords)
 }
 
+// ProvisionedCount returns the number of password credentials currently held by the fake.
+func (s *AzureServer) ProvisionedCount() int {
+	return s.PasswordCount()
+}
+
 // TokenCreds returns a copy of every (client_id, client_secret) pair presented
 // to the OAuth2 token endpoint, in request order.
 func (s *AzureServer) TokenCreds() [][2]string {
