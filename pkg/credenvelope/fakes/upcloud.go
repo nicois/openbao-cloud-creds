@@ -35,6 +35,26 @@ func (s *UpCloudServer) ProvisionedCount() int {
 	return len(s.tokens)
 }
 
+// AddRawToken injects a token with an arbitrary id and name directly into the
+// fake, bypassing the create path. Test-only: used to plant foreign-named
+// (non-cloud-creds-) entities that the reconciler must never delete.
+func (s *UpCloudServer) AddRawToken(id, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokens[id] = map[string]interface{}{
+		"id":   id,
+		"name": name,
+	}
+}
+
+// HasToken reports whether a token with the given id is still held by the fake.
+func (s *UpCloudServer) HasToken(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.tokens[id]
+	return ok
+}
+
 func (s *UpCloudServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

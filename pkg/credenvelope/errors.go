@@ -1,6 +1,10 @@
 package credenvelope
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/openbao/openbao/sdk/v2/logical"
+)
 
 // ErrorCode is a stable string identifier for plugin error conditions.
 // Adding a new code is a spec change — update the techrfc first.
@@ -37,4 +41,17 @@ func (e *PluginError) Error() string {
 // message.
 func NewError(code ErrorCode, statusCode int, msg string) *PluginError {
 	return &PluginError{Code: code, Message: msg, StatusCode: statusCode}
+}
+
+// ErrorResponse builds a logical error response whose message is prefixed with a
+// stable, machine-readable error_code in the form "<code>: <message>". The code
+// travels in the error string itself because OpenBao only surfaces the error
+// message (resp.Error()) to clients on error responses — Data side-channels are
+// dropped. Clients parse the "<code>: " prefix; the codes are the stable
+// constants in this package.
+func ErrorResponse(code ErrorCode, msg string, args ...interface{}) *logical.Response {
+	if len(args) > 0 {
+		msg = fmt.Sprintf(msg, args...)
+	}
+	return logical.ErrorResponse("%s: %s", string(code), msg)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -81,7 +82,8 @@ func (t *AccessTracker) Flush(ctx context.Context, now time.Time) error {
 	t.mu.Unlock()
 
 	for k, entry := range snapshot {
-		storageKey := fmt.Sprintf("metrics/%s/%s/%s", k.EntityID, k.Role, t.nodeID)
+		storageKey := fmt.Sprintf("metrics/%s/%s/%s",
+			url.PathEscape(k.EntityID), url.PathEscape(k.Role), url.PathEscape(t.nodeID))
 		data, err := json.Marshal(entry)
 		if err != nil {
 			return err
@@ -94,7 +96,8 @@ func (t *AccessTracker) Flush(ctx context.Context, now time.Time) error {
 }
 
 func (t *AccessTracker) MergeEntity(ctx context.Context, entityID string, now time.Time) (*MergedEntry, error) {
-	prefix := fmt.Sprintf("metrics/%s/", entityID)
+	prefix := fmt.Sprintf("metrics/%s/", url.PathEscape(entityID))
+	localSuffix := "/" + url.PathEscape(t.nodeID)
 	keys, err := t.store.List(ctx, prefix)
 	if err != nil {
 		return nil, err
@@ -104,6 +107,12 @@ func (t *AccessTracker) MergeEntity(ctx context.Context, entityID string, now ti
 	var latestFlush time.Time
 
 	for _, key := range keys {
+		// Skip this node's own flushed key: its accesses are counted from the
+		// live in-memory map below, so summing the storage copy too would
+		// double-count on any node that both issued and serves this query.
+		if strings.HasSuffix(key, localSuffix) {
+			continue
+		}
 		data, err := t.store.Get(ctx, key)
 		if err != nil {
 			return nil, err
@@ -121,7 +130,10 @@ func (t *AccessTracker) MergeEntity(ctx context.Context, entityID string, now ti
 		}
 	}
 
-	// Check local in-memory entries
+	// Add this node's contribution from the live in-memory map (its storage
+	// key was skipped above). Edge case: if a local entry was evicted after a
+	// flush, this node contributes nothing here — which is correct, since an
+	// evicted entry means no active lease for it.
 	t.mu.Lock()
 	for k, entry := range t.entries {
 		if k.EntityID == entityID {
@@ -201,7 +213,10 @@ func (t *AccessTracker) ListStaleEntities(ctx context.Context, olderThan time.Du
 		if len(parts) < 1 {
 			continue
 		}
-		entityID := parts[0]
+		entityID, err := url.PathUnescape(parts[0])
+		if err != nil {
+			continue
+		}
 		if existing, ok := entityAccess[entityID]; !ok || entry.LastAccessAt.After(existing) {
 			entityAccess[entityID] = entry.LastAccessAt
 		}

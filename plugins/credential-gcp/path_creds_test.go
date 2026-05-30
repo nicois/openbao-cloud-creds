@@ -3,6 +3,7 @@ package credentialgcp_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -383,5 +384,22 @@ func TestCredsIssue_CustomScopes(t *testing.T) {
 	}
 	if capturedScopes[1] != "https://www.googleapis.com/auth/devstorage.read_only" {
 		t.Fatalf("unexpected scope[1]: %v", capturedScopes[1])
+	}
+}
+
+func TestCredsIssue_RoleNotFound_HasErrorCode(t *testing.T) {
+	b, storage := getTestBackend(t)
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.ReadOperation, Path: "creds/nope", Storage: storage,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatal("expected error response")
+	}
+	got := resp.Error().Error()
+	if !strings.HasPrefix(got, "role_not_found: ") {
+		t.Fatalf("expected role_not_found: prefix, got %q", got)
 	}
 }

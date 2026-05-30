@@ -34,6 +34,26 @@ func (s *VultrServer) ProvisionedCount() int {
 	return len(s.users)
 }
 
+// AddRawUser injects a sub-user with an arbitrary id and name directly into the
+// fake, bypassing the create path. Test-only: used to plant foreign-named
+// (non-cloud-creds-) entities that the reconciler must never delete.
+func (s *VultrServer) AddRawUser(id, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.users[id] = map[string]interface{}{
+		"id":   id,
+		"name": name,
+	}
+}
+
+// HasUser reports whether a sub-user with the given id is still held by the fake.
+func (s *VultrServer) HasUser(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.users[id]
+	return ok
+}
+
 func (s *VultrServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

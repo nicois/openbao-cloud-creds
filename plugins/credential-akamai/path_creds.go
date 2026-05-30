@@ -46,7 +46,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return nil, err
 	}
 	if entry == nil {
-		return logical.ErrorResponse("role_not_found: role %q does not exist", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
 	}
 
 	var role akamaiRole
@@ -55,13 +55,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	if role.Disabled {
-		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
 	}
 
 	// Select a healthy minter from the role's bound set
 	setName, minterID, client, err := b.selectMinter(role.MinterSet)
 	if err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", err.Error()), nil
 	}
 
 	// Build client name using lease ID
@@ -97,12 +97,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	clientResp, httpStatus, err := client.CreateClient(ctx, clientName, apiAccess, groupAccess)
 	if err != nil {
 		b.recordMinterError(setName, minterID, httpStatus, now)
-		return logical.ErrorResponse("upstream error: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "upstream error: %v", err), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
 	if len(clientResp.Credentials) == 0 {
-		return logical.ErrorResponse("upstream error: no credentials returned from Akamai"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "no credentials returned from Akamai"), nil
 	}
 
 	if b.accessTracker != nil {

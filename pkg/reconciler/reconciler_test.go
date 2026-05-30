@@ -88,6 +88,25 @@ func TestDryRunDoesNotDelete(t *testing.T) {
 	}
 }
 
+func TestRun_OnlyDeletesListedOrphans(t *testing.T) {
+	cloud := &fakeCloudLister{entities: []reconciler.UpstreamEntity{
+		{ID: "orphan-1", Name: "cloud-creds-role-a-1"},
+		{ID: "known-1", Name: "cloud-creds-role-a-2"},
+	}}
+	reg := &fakeRegistry{known: map[string]bool{"known-1": true}}
+	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10}, cloud, reg)
+	res, err := r.Run(context.Background(), time.Now())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(cloud.entities) != 1 || cloud.entities[0].ID != "known-1" {
+		t.Fatalf("known entity deleted or orphan survived: %v", cloud.entities)
+	}
+	if res.Deleted != 1 {
+		t.Fatalf("expected 1 delete, got %d", res.Deleted)
+	}
+}
+
 func TestMaxDeletesPerPass(t *testing.T) {
 	entities := make([]reconciler.UpstreamEntity, 15)
 	for i := range entities {
