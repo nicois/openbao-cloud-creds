@@ -27,6 +27,13 @@ func NewExoscaleServer() *ExoscaleServer {
 	return s
 }
 
+// ProvisionedCount returns the number of API keys currently held by the fake.
+func (s *ExoscaleServer) ProvisionedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.apiKeys)
+}
+
 func (s *ExoscaleServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
