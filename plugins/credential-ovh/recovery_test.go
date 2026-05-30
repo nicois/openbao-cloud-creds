@@ -32,6 +32,20 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]interface{}{
+			"region": "eu",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
+		Data: map[string]interface{}{
 			"minters": []interface{}{
 				map[string]interface{}{
 					"id":            "minter-1",
@@ -40,12 +54,11 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 					"never_expires": true,
 				},
 			},
-			"region": "eu",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Write role
@@ -56,6 +69,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Data: map[string]interface{}{
 			"default_ttl": 3600,
 			"max_ttl":     3600,
+			"minter_set":  "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)

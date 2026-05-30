@@ -22,20 +22,12 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 func TestConfigWriteRead(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	// Write config
+	// Write config: operational settings only (minters live in minter-sets)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":            "minter-1",
-					"client_id":     "my-client-id",
-					"client_secret": "my-client-secret",
-					"never_expires": true,
-				},
-			},
 			"region": "eu",
 		},
 	}
@@ -64,51 +56,6 @@ func TestConfigWriteRead(t *testing.T) {
 	}
 }
 
-func TestConfigWrite_MissingMinters(t *testing.T) {
-	b, storage := getTestBackend(t)
-
-	req := &logical.Request{
-		Operation: logical.UpdateOperation,
-		Path:      "config",
-		Storage:   storage,
-		Data:      map[string]interface{}{},
-	}
-
-	resp, err := b.HandleRequest(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || !resp.IsError() {
-		t.Fatal("expected error for missing minters")
-	}
-}
-
-func TestConfigWrite_MissingClientCredentials(t *testing.T) {
-	b, storage := getTestBackend(t)
-
-	req := &logical.Request{
-		Operation: logical.UpdateOperation,
-		Path:      "config",
-		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":            "minter-1",
-					"never_expires": true,
-				},
-			},
-		},
-	}
-
-	resp, err := b.HandleRequest(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || !resp.IsError() {
-		t.Fatal("expected error for missing client_id/client_secret")
-	}
-}
-
 func TestConfigWrite_InvalidRegion(t *testing.T) {
 	b, storage := getTestBackend(t)
 
@@ -117,14 +64,6 @@ func TestConfigWrite_InvalidRegion(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":            "minter-1",
-					"client_id":     "cid",
-					"client_secret": "csec",
-					"never_expires": true,
-				},
-			},
 			"region": "invalid",
 		},
 	}
@@ -148,14 +87,6 @@ func TestConfigWrite_AllRegions(t *testing.T) {
 				Path:      "config",
 				Storage:   storage,
 				Data: map[string]interface{}{
-					"minters": []interface{}{
-						map[string]interface{}{
-							"id":            "minter-1",
-							"client_id":     "cid",
-							"client_secret": "csec",
-							"never_expires": true,
-						},
-					},
 					"region": region,
 				},
 			}

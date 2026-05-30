@@ -19,18 +19,23 @@ using the client_credentials grant against OVH's token endpoint (JIT strategy).
 
 type backend struct {
 	*framework.Backend
-	mu            sync.RWMutex
-	config        *cloudconfig.PluginConfig
-	minters       map[string]*minterState
-	region        string
-	tokenEndpoint string
-	accessTracker *metrics.AccessTracker
-	workerMgr     *worker.Manager
-	workerCancel  context.CancelFunc
-	tokenClientFn TokenClientFactory
+	mu sync.RWMutex
+	// workerLifecycleMu serializes startWorkers so a manager is never Wait()ed
+	// by one goroutine while another is still Start()ing it. Multiple writes
+	// (config + each minter set) each fire startWorkers, so overlap is common.
+	workerLifecycleMu sync.Mutex
+	config            *cloudconfig.PluginConfig
+	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
+	region            string
+	tokenEndpoint     string
+	accessTracker     *metrics.AccessTracker
+	workerMgr         *worker.Manager
+	workerCancel      context.CancelFunc
+	tokenClientFn     TokenClientFactory
 }
 
 type minterState struct {
+	set    string
 	minter cloudconfig.Minter
 	sm     *recovery.StateMachine
 }
@@ -40,8 +45,8 @@ type TokenClientFactory func(clientID, clientSecret, tokenEndpoint string) Token
 
 func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend, error) {
 	b := &backend{
-		minters: make(map[string]*minterState),
-		region:  "eu",
+		minterSets: make(map[string]map[string]*minterState),
+		region:     "eu",
 	}
 
 	b.Backend = &framework.Backend{
@@ -49,6 +54,7 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		Help:        backendHelp,
 		Paths: framework.PathAppend(
 			b.configPaths(),
+			b.minterSetPaths(),
 			b.rolePaths(),
 			b.credsPaths(),
 			b.reconcilePaths(),
@@ -65,6 +71,10 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 
 	store := metrics.NewInMemoryStore()
 	b.accessTracker = metrics.NewAccessTracker("local", store)
+
+	if conf.StorageView != nil {
+		_ = b.loadAllMinterSets(ctx, conf.StorageView)
+	}
 
 	return b, nil
 }

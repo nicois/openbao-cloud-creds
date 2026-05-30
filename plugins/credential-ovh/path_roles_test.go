@@ -7,8 +7,28 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+// writeDefaultMinterSet creates a "default" minter set so roles can bind to it.
+func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Storage) {
+	t.Helper()
+	req := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"minters": []interface{}{
+				map[string]interface{}{"id": "minter-1", "client_id": "cid", "client_secret": "csec", "never_expires": true},
+			},
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
+	}
+}
+
 func TestRoleCRUD(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	// Create role
 	req := &logical.Request{
@@ -18,6 +38,7 @@ func TestRoleCRUD(t *testing.T) {
 		Data: map[string]interface{}{
 			"default_ttl": 3600,
 			"max_ttl":     3600,
+			"minter_set":  "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
@@ -40,6 +61,9 @@ func TestRoleCRUD(t *testing.T) {
 	}
 	if resp.Data["default_ttl"] != 3600 {
 		t.Fatalf("unexpected default_ttl: %v", resp.Data["default_ttl"])
+	}
+	if resp.Data["minter_set"] != "default" {
+		t.Fatalf("unexpected minter_set: %v", resp.Data["minter_set"])
 	}
 
 	// List roles
@@ -127,6 +151,7 @@ func TestRoleValidation_DefaultTTLTooHigh(t *testing.T) {
 
 func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
 
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
@@ -135,6 +160,7 @@ func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 		Data: map[string]interface{}{
 			"default_ttl": 3600,
 			"max_ttl":     1800,
+			"minter_set":  "default",
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)

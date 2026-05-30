@@ -18,10 +18,24 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		return credentialovh.NewFakeTokenClient(nil, nil)
 	})
 
-	// Write config with minter
+	// Write config: operational settings only (minters live in minter-sets)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"region": "eu",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
@@ -32,15 +46,14 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 					"never_expires": true,
 				},
 			},
-			"region": "eu",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
-	// Write role
+	// Write role bound to the set
 	req = &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
@@ -48,6 +61,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Data: map[string]interface{}{
 			"default_ttl": 3600,
 			"max_ttl":     3600,
+			"minter_set":  "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)
@@ -104,6 +118,24 @@ func TestCredsIssue(t *testing.T) {
 	}
 	if resp.Secret.InternalData["credential_id"] == nil {
 		t.Fatal("expected credential_id in internal_data")
+	}
+	if resp.Secret.InternalData["minter_set"] != "default" {
+		t.Fatalf("expected minter_set=default in internal_data, got %v", resp.Secret.InternalData["minter_set"])
+	}
+	if resp.Secret.InternalData["minter_id"] != "minter-1" {
+		t.Fatalf("expected minter_id=minter-1 in internal_data, got %v", resp.Secret.InternalData["minter_id"])
+	}
+
+	// Verify provenance in the envelope metadata
+	meta := resp.Data["metadata"].(map[string]interface{})
+	if meta["minter_set"] != "default" {
+		t.Fatalf("expected minter_set=default, got %v", meta["minter_set"])
+	}
+	if meta["minter_id"] != "minter-1" {
+		t.Fatalf("expected minter_id=minter-1, got %v", meta["minter_id"])
+	}
+	if meta["api_version"] != "2" {
+		t.Fatalf("expected api_version=2, got %v", meta["api_version"])
 	}
 }
 
@@ -203,6 +235,20 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]interface{}{
+			"region": "eu",
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), req)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+	}
+
+	// Write minter set
+	req = &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "minter-sets/default",
+		Storage:   storage,
+		Data: map[string]interface{}{
 			"minters": []interface{}{
 				map[string]interface{}{
 					"id":            "minter-1",
@@ -211,12 +257,11 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 					"never_expires": true,
 				},
 			},
-			"region": "eu",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Write role
@@ -227,6 +272,7 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Data: map[string]interface{}{
 			"default_ttl": 3600,
 			"max_ttl":     3600,
+			"minter_set":  "default",
 		},
 	}
 	resp, err = b.HandleRequest(context.Background(), req)
@@ -249,25 +295,23 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 	}
 }
 
-func TestCredsIssue_NotConfigured(t *testing.T) {
-	b, storage := getTestBackend(t)
+// TestCredsIssue_SetNotLoaded proves issuing fails when the role's bound minter
+// set is no longer loaded (e.g. it was deleted after the role was created).
+func TestCredsIssue_SetNotLoaded(t *testing.T) {
+	b, storage := setupConfiguredBackend(t)
 
-	// Write role but don't configure minters
+	// Delete the minter set the role is bound to.
 	req := &logical.Request{
-		Operation: logical.UpdateOperation,
-		Path:      "roles/test-role",
+		Operation: logical.DeleteOperation,
+		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"default_ttl": 3600,
-			"max_ttl":     3600,
-		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("role write failed: err=%v resp=%v", err, resp)
+		t.Fatalf("minter-set delete failed: err=%v resp=%v", err, resp)
 	}
 
-	// Issue should fail because no minters configured
+	// Issue should fail because the bound set is no longer loaded.
 	req = &logical.Request{
 		Operation: logical.ReadOperation,
 		Path:      "creds/test-role",
@@ -278,6 +322,6 @@ func TestCredsIssue_NotConfigured(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp == nil || !resp.IsError() {
-		t.Fatal("expected error response when plugin not configured")
+		t.Fatal("expected error response when bound minter set is not loaded")
 	}
 }

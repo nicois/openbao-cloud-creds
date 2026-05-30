@@ -19,6 +19,7 @@ type ovhRole struct {
 	Name       string        `json:"name"`
 	DefaultTTL time.Duration `json:"default_ttl"`
 	MaxTTL     time.Duration `json:"max_ttl"`
+	MinterSet  string        `json:"minter_set"`
 	Disabled   bool          `json:"disabled,omitempty"`
 }
 
@@ -40,6 +41,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeDurationSecond,
 					Default:     3600,
 					Description: "Maximum lease TTL in seconds (max 3600s)",
+				},
+				"minter_set": {
+					Type:        framework.TypeString,
+					Description: "Name of the minter set this role mints from (required)",
 				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -70,6 +75,18 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("default_ttl must not exceed 3600 seconds (OVH tokens have a fixed 1-hour lifetime)"), nil
 	}
 
+	minterSet := d.Get("minter_set").(string)
+	if minterSet == "" {
+		return logical.ErrorResponse("minter_set is required"), nil
+	}
+	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
+	}
+
 	role := &cloudconfig.Role{
 		Name:       name,
 		Cloud:      "ovh",
@@ -84,6 +101,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		Name:       name,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
+		MinterSet:  minterSet,
 	}
 
 	entry, err := logical.StorageEntryJSON("roles/"+name, ovhR)
@@ -116,6 +134,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 		"name":        role.Name,
 		"default_ttl": int(role.DefaultTTL.Seconds()),
 		"max_ttl":     int(role.MaxTTL.Seconds()),
+		"minter_set":  role.MinterSet,
 	}
 
 	return &logical.Response{Data: data}, nil

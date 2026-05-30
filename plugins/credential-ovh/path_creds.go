@@ -61,8 +61,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
 	}
 
-	// Select a healthy minter
-	minterID, client, err := b.selectMinter()
+	// Select a healthy minter from the role's bound set
+	setName, minterID, client, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		return logical.ErrorResponse(err.Error()), nil
 	}
@@ -70,13 +70,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 	accessToken, expiresIn, err := client.MintToken(ctx)
 	if err != nil {
-		b.recordMinterError(minterID, classifyOVHError(err), now)
+		b.recordMinterError(setName, minterID, classifyOVHError(err), now)
 		return logical.ErrorResponse("upstream error: %v", err), nil
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(setName, minterID, now)
 
 	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(minterID, roleName, now)
+		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
 	}
 
 	emitLeaseIssued(roleName)
@@ -100,6 +100,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		CredentialID: credentialID,
 		Scope:        "all",
 		IssuedBy:     "cloud-creds-ovh/v0.1",
+		MinterSet:    setName,
+		MinterID:     minterID,
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)
@@ -118,6 +120,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	resp := b.Secret("ovh_access_token").Response(env.ToMap(), map[string]interface{}{
 		"credential_id": credentialID,
 		"role":          roleName,
+		"minter_set":    setName,
 		"minter_id":     minterID,
 	})
 	resp.Secret.TTL = role.DefaultTTL
@@ -127,12 +130,16 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 }
 
 // pathCredsRevoke is a no-op for OVH access tokens — they expire naturally.
-// We just remove the tracking entry.
+// We just remove the tracking entry. Unlike the JIT clouds (e.g. DigitalOcean),
+// there is no upstream entity to delete, so we do NOT resolve the minter that
+// issued this credential; minter_set is read only for log context.
 func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
 	credentialID, _ := req.Secret.InternalData["credential_id"].(string)
+	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
 	if credentialID != "" {
 		if err := req.Storage.Delete(ctx, "active-tokens/"+credentialID); err != nil {
-			b.Logger().Warn("failed to remove active credential tracking", "credential_id", credentialID, "error", err)
+			b.Logger().Warn("failed to remove active credential tracking",
+				"credential_id", credentialID, "minter_set", minterSet, "error", err)
 		}
 	}
 	// OVH access tokens cannot be revoked — they expire at the time OVH set.
@@ -144,26 +151,25 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, _ *f
 	return logical.ErrorResponse("ovh access tokens cannot be renewed; issue a new credential instead"), nil
 }
 
-func (b *backend) selectMinter() (string, TokenClient, error) {
+func (b *backend) selectMinter(setName string) (setID, minterID string, client TokenClient, err error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if b.config == nil {
-		return "", nil, fmt.Errorf("upstream_auth_failed: plugin not configured")
+	states, ok := b.minterSets[setName]
+	if !ok {
+		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
-
-	for _, ms := range b.minters {
+	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			client := b.buildTokenClient(ms.minter)
-			return ms.minter.ID, client, nil
+			return setName, id, b.buildTokenClient(ms.minter), nil
 		}
 	}
-
-	return "", nil, fmt.Errorf("upstream_auth_failed: all minters are failing")
+	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
 }
 
-// buildTokenClient creates a token client from a minter.
-// The token field stores client_id:client_secret.
+// buildTokenClient creates a token client from a minter. The token field stores
+// client_id:client_secret. Callers MUST hold b.mu (read or write); it performs
+// no locking of its own (it reads b.tokenEndpoint and b.tokenClientFn).
 func (b *backend) buildTokenClient(m cloudconfig.Minter) TokenClient {
 	clientID, clientSecret, _ := parseMinterToken(m.Token)
 	endpoint := b.tokenEndpoint
@@ -174,19 +180,23 @@ func (b *backend) buildTokenClient(m cloudconfig.Minter) TokenClient {
 	return newRealTokenClient(clientID, clientSecret, endpoint)
 }
 
-func (b *backend) recordMinterSuccess(id string, at time.Time) {
+func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordSuccess(at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordSuccess(at)
+		}
 	}
 }
 
-func (b *backend) recordMinterError(id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordError(httpStatus, at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordError(httpStatus, at)
+		}
 	}
 }
 
