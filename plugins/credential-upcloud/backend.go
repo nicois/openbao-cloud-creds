@@ -19,14 +19,18 @@ via the UpCloud /1.3/account/tokens API (JIT strategy).
 
 type backend struct {
 	*framework.Backend
-	mu            sync.RWMutex
-	config        *cloudconfig.PluginConfig
-	minterSets    map[string]map[string]*minterState // setName -> minterID -> state
-	apiURL        string
-	username      string
-	accessTracker *metrics.AccessTracker
-	workerMgr     *worker.Manager
-	workerCancel  context.CancelFunc
+	mu sync.RWMutex
+	// workerLifecycleMu serializes startWorkers so a manager is never Wait()ed
+	// by one goroutine while another is still Start()ing it. Multiple writes
+	// (config + each minter set) each fire startWorkers, so overlap is common.
+	workerLifecycleMu sync.Mutex
+	config            *cloudconfig.PluginConfig
+	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
+	apiURL            string
+	username          string
+	accessTracker     *metrics.AccessTracker
+	workerMgr         *worker.Manager
+	workerCancel      context.CancelFunc
 }
 
 type minterState struct {

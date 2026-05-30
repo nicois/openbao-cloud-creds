@@ -3,6 +3,7 @@ package worker_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -90,4 +91,25 @@ func TestWorkerErrorDoesNotCrash(t *testing.T) {
 	if count.Load() < 2 {
 		t.Fatalf("worker should keep ticking after errors, got %d", count.Load())
 	}
+}
+
+// TestConcurrentStartWaitCycles mimics a backend that restarts its workers on
+// every config/minter-set write. Each goroutine uses its OWN manager, so this
+// guards that a single manager's Start -> cancel -> Wait sequence is race-free.
+// Run with -race to catch WaitGroup Add/Wait interleaving regressions.
+func TestConcurrentStartWaitCycles(t *testing.T) {
+	var wgOuter sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wgOuter.Add(1)
+		go func() {
+			defer wgOuter.Done()
+			m := worker.New()
+			m.Register("noop", time.Hour, worker.Opts{}, func(ctx context.Context) error { return nil })
+			ctx, cancel := context.WithCancel(context.Background())
+			m.Start(ctx)
+			cancel()
+			m.Wait()
+		}()
+	}
+	wgOuter.Wait()
 }

@@ -10,7 +10,10 @@ import (
 )
 
 func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
-	b.stopWorkers()
+	b.workerLifecycleMu.Lock()
+	defer b.workerLifecycleMu.Unlock()
+
+	b.stopWorkersLocked()
 
 	b.mu.RLock()
 	cfg := b.config
@@ -44,7 +47,10 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 	wm.Start(workerCtx)
 }
 
-func (b *backend) stopWorkers() {
+// stopWorkersLocked tears down the running worker manager. Callers MUST hold
+// b.workerLifecycleMu so this never overlaps a concurrent startWorkers that is
+// still inside wm.Start().
+func (b *backend) stopWorkersLocked() {
 	b.mu.Lock()
 	cancel := b.workerCancel
 	wm := b.workerMgr

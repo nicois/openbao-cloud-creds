@@ -19,15 +19,19 @@ by calling AssumeRole directly (JIT strategy).
 
 type backend struct {
 	*framework.Backend
-	mu            sync.RWMutex
-	config        *cloudconfig.PluginConfig
-	minterSets    map[string]map[string]*minterState // setName -> minterID -> state
-	region        string
-	stsEndpoint   string
-	accessTracker *metrics.AccessTracker
-	workerMgr     *worker.Manager
-	workerCancel  context.CancelFunc
-	stsClientFn   STSClientFactory
+	mu sync.RWMutex
+	// workerLifecycleMu serializes startWorkers so a manager is never Wait()ed
+	// by one goroutine while another is still Start()ing it. Multiple writes
+	// (config + each minter set) each fire startWorkers, so overlap is common.
+	workerLifecycleMu sync.Mutex
+	config            *cloudconfig.PluginConfig
+	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
+	region            string
+	stsEndpoint       string
+	accessTracker     *metrics.AccessTracker
+	workerMgr         *worker.Manager
+	workerCancel      context.CancelFunc
+	stsClientFn       STSClientFactory
 }
 
 type minterState struct {
