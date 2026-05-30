@@ -27,6 +27,13 @@ func NewVultrServer() *VultrServer {
 	return s
 }
 
+// ProvisionedCount returns the number of sub-users currently held by the fake.
+func (s *VultrServer) ProvisionedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.users)
+}
+
 func (s *VultrServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
