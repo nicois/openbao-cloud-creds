@@ -34,6 +34,28 @@ func (s *ExoscaleServer) ProvisionedCount() int {
 	return len(s.apiKeys)
 }
 
+// AddRawAPIKey injects an API key with an arbitrary key-id and name directly
+// into the fake, bypassing the create path. Test-only: used to plant
+// foreign-named (non-cloud-creds-) entities that the reconciler must never
+// delete.
+func (s *ExoscaleServer) AddRawAPIKey(keyID, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.apiKeys[keyID] = map[string]interface{}{
+		"key-id": keyID,
+		"name":   name,
+	}
+}
+
+// HasAPIKey reports whether an API key with the given key-id is still held by
+// the fake.
+func (s *ExoscaleServer) HasAPIKey(keyID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.apiKeys[keyID]
+	return ok
+}
+
 func (s *ExoscaleServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

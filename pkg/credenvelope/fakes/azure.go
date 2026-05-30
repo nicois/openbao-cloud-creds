@@ -60,6 +60,30 @@ func (s *AzureServer) ProvisionedCount() int {
 	return s.PasswordCount()
 }
 
+// AddRawPassword injects a password credential with an arbitrary keyId and
+// displayName directly into the fake, bypassing addPassword. Test-only: used to
+// plant foreign-named (non-cloud-creds-) entities that the reconciler must
+// never delete. The password is attached to the fake's single application
+// (the one returned by GetApplication).
+func (s *AzureServer) AddRawPassword(keyID, displayName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.passwords[keyID] = map[string]interface{}{
+		"keyId":       keyID,
+		"displayName": displayName,
+		"endDateTime": "2099-01-01T00:00:00Z",
+	}
+}
+
+// HasPassword reports whether a password credential with the given keyId is
+// still held by the fake.
+func (s *AzureServer) HasPassword(keyID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.passwords[keyID]
+	return ok
+}
+
 // TokenCreds returns a copy of every (client_id, client_secret) pair presented
 // to the OAuth2 token endpoint, in request order.
 func (s *AzureServer) TokenCreds() [][2]string {

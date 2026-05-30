@@ -40,6 +40,29 @@ func (s *AkamaiServer) ProvisionedCount() int {
 	return len(s.clients)
 }
 
+// AddRawClient injects an API client with an arbitrary clientId and clientName
+// directly into the fake, bypassing the create path. Test-only: used to plant
+// foreign-named (non-cloud-creds-) entities that the reconciler must never
+// delete.
+func (s *AkamaiServer) AddRawClient(clientID, clientName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clients[clientID] = map[string]interface{}{
+		"clientId":   clientID,
+		"clientName": clientName,
+		"isLocked":   false,
+	}
+}
+
+// HasClient reports whether an API client with the given clientId is still held
+// by the fake.
+func (s *AkamaiServer) HasClient(clientID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.clients[clientID]
+	return ok
+}
+
 func (s *AkamaiServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
