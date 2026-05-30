@@ -48,7 +48,7 @@ func (c *countingIAMClient) GenerateAccessToken(ctx context.Context, serviceAcco
 // Credentials endpoint. The harness has no hook to inject the fake into the
 // reloaded backend before issuance, so the Reload category cannot be exercised
 // here and TestResilience_Reload is skipped with an explanation.
-func newResilienceHarness(t *testing.T) plugintest.Harness {
+func newResilienceHarness() plugintest.Harness {
 	var minted int64
 
 	configure := func(t *testing.T, b logical.Backend, storage logical.Storage) {
@@ -123,11 +123,9 @@ func TestResilience_Reload(t *testing.T) {
 }
 
 func TestResilience_Perturbation(t *testing.T) {
-	h := newResilienceHarness(t)
-	plugintest.RunPerturbationSuite(t, h)
+	plugintest.RunPerturbationSuite(t, newResilienceHarness())
 }
 
 func TestResilience_Revoke(t *testing.T) {
-	h := newResilienceHarness(t)
-	plugintest.RunRevokeResilienceSuite(t, h)
+	plugintest.RunRevokeResilienceSuite(t, newResilienceHarness())
 }

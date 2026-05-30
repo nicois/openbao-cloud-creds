@@ -134,18 +134,26 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	minterID, _ := req.Secret.InternalData["minter_id"].(string)
 	client, err := b.getMinter(minterSet, minterID)
 	if err != nil {
-		return nil, err
+		client, err = b.anyHealthyMinterInSet(minterSet)
+		if err != nil {
+			b.Logger().Warn("revoke: issuing minter gone and no fallback in set; "+
+				"leaving credential to expire via TTL",
+				"minter_set", minterSet, "minter_id", minterID)
+			_ = req.Storage.Delete(ctx, "active-tokens/"+keyID)
+			return nil, nil
+		}
 	}
 
 	roleName, _ := req.Secret.InternalData["role"].(string)
 
 	now := time.Now()
 	httpStatus, err := client.DeleteAPIKey(ctx, keyID)
-	if err != nil {
+	if err != nil && httpStatus != 404 {
 		b.recordMinterError(minterSet, minterID, httpStatus, now)
 		emitLeaseRevokeFailed(roleName)
 		return nil, fmt.Errorf("revoke failed: %v", err)
 	}
+	// 404 = already deleted upstream; treat as success.
 	b.recordMinterSuccess(minterSet, minterID, now)
 
 	// Remove from active tokens
@@ -195,6 +203,22 @@ func (b *backend) anyHealthyMinter() (*exoscaleClient, error) {
 		}
 	}
 	return nil, fmt.Errorf("upstream_auth_failed: no healthy minter available")
+}
+
+// anyHealthyMinterInSet returns a client for any healthy minter in the given
+// set. Used by revoke when the issuing minter was removed after issuance.
+func (b *backend) anyHealthyMinterInSet(setName string) (*exoscaleClient, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	apiURL := b.exoscaleAPIURL()
+	if states, ok := b.minterSets[setName]; ok {
+		for _, ms := range states {
+			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+				return newExoscaleClient(apiURL, ms.minter.Token), nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no healthy minter in set %q", setName)
 }
 
 func (b *backend) getMinter(setName, id string) (*exoscaleClient, error) {

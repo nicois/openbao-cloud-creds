@@ -10,7 +10,7 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
-func newResilienceHarness(t *testing.T) (plugintest.Harness, *fakes.ExoscaleServer) {
+func newResilienceHarness(t *testing.T) plugintest.Harness {
 	srv := fakes.NewExoscaleServer()
 	t.Cleanup(srv.Close)
 
@@ -55,20 +55,17 @@ func newResilienceHarness(t *testing.T) (plugintest.Harness, *fakes.ExoscaleServ
 		RewriteDefaultSetWithout: rewriteWithout,
 		ProvisionedCount:         srv.ProvisionedCount,
 		ExpectsHardRevoke:        true,
-	}, srv
+	}
 }
 
 func TestResilience_Reload(t *testing.T) {
-	h, _ := newResilienceHarness(t)
-	plugintest.RunReloadSuite(t, h)
+	plugintest.RunReloadSuite(t, newResilienceHarness(t))
 }
 
 func TestResilience_Perturbation(t *testing.T) {
-	h, _ := newResilienceHarness(t)
-	plugintest.RunPerturbationSuite(t, h)
+	plugintest.RunPerturbationSuite(t, newResilienceHarness(t))
 }
 
 func TestResilience_Revoke(t *testing.T) {
-	h, _ := newResilienceHarness(t)
-	plugintest.RunRevokeResilienceSuite(t, h)
+	plugintest.RunRevokeResilienceSuite(t, newResilienceHarness(t))
 }

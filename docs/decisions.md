@@ -71,3 +71,20 @@ The original model had a single per-cloud minter list in `config`, and any role 
 So minters are grouped into named **sets** (`minter-sets/<name>`), each independently validated by the OBC-006 rule, and every role carries a **required** `minter_set`. Issuance mints only from the bound set — deliberately **no cross-set failover**, because the whole point is isolation: a compromise or misconfiguration of set A's minters cannot issue set B's credentials. The issuing set+minter are stamped into `metadata.minter_set`/`minter_id` (which bumped the envelope to api_version 2) and lease internal_data. The reconciler is the one exception: it cleans orphaned upstream entities across all sets by owner-tag, since orphan cleanup is a mount-wide safety property, not a per-role one.
 
 Operators achieve least-privilege by granting each set's minters only the upstream rights its bound roles need. For capability isolation without sets, multiple mounts would also work, but sets keep it within one mount and make provenance first-class.
+
+## Why revoke tolerates a missing issuing minter and an already-deleted credential (KI-002)
+
+Hard-revoke plugins delete the upstream credential on lease revoke using the
+minter that issued it. Two cases broke this: (a) the issuing minter was removed
+from its set after issuance (re-seed), so the plugin could not build a client to
+delete; (b) the credential was already deleted (double revoke), so the upstream
+delete returned 404. Both previously returned errors, which OpenBao retries
+forever.
+
+Decision: (a) revoke falls back to any healthy minter in the same set, and if
+none remains, treats revoke as a successful no-op (logged); (b) a 404/not-found
+on the upstream delete is treated as success. This weakens the "revoke always
+performs the upstream delete" property in these edge cases, which is acceptable
+because the real guarantee is TTL expiry — every issued credential has a bounded
+lifetime. A clean no-op lets the lease release rather than accumulating infinite
+failed retries.
