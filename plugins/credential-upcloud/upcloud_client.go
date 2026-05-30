@@ -35,10 +35,6 @@ type tokenInfo struct {
 	Name string `json:"name"`
 }
 
-type listTokensResponse struct {
-	Tokens []tokenInfo `json:"tokens"`
-}
-
 func newUpCloudClient(baseURL, username, password string) *upcloudClient {
 	return &upcloudClient{
 		baseURL:  baseURL,
@@ -116,11 +112,13 @@ func (c *upcloudClient) ListTokens(ctx context.Context) ([]tokenInfo, error) {
 		return nil, fmt.Errorf("UpCloud API list tokens returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var result listTokensResponse
+	// UpCloud's GET /1.3/account/tokens returns a bare JSON array of tokens,
+	// not an object with a "tokens" key, so decode directly into a slice.
+	var result []tokenInfo
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
-	return result.Tokens, nil
+	return result, nil
 }
 
 func (c *upcloudClient) DeleteToken(ctx context.Context, tokenID string) (int, error) {

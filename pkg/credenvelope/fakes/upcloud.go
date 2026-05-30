@@ -161,7 +161,9 @@ func (s *UpCloudServer) listTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	writeJSON(w, map[string]interface{}{"tokens": tokens})
+	// UpCloud's GET /1.3/account/tokens returns a bare JSON array (verified
+	// against the live API), not an object with a "tokens" key.
+	writeJSON(w, tokens)
 }
 
 func (s *UpCloudServer) getAccount(w http.ResponseWriter, r *http.Request) {

@@ -104,16 +104,14 @@ func TestUpCloudFake_ListTokens(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp2.StatusCode)
 	}
 
-	var result map[string]interface{}
+	// UpCloud returns a bare JSON array of tokens (verified against the live
+	// API), not an object with a "tokens" key.
+	var tokens []interface{}
 	data, _ := io.ReadAll(resp2.Body)
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := json.Unmarshal(data, &tokens); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	tokens, ok := result["tokens"].([]interface{})
-	if !ok {
-		t.Fatalf("expected tokens array, got %T", result["tokens"])
-	}
 	if len(tokens) != 1 {
 		t.Fatalf("expected 1 token, got %d", len(tokens))
 	}
