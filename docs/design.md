@@ -1,6 +1,8 @@
 # OpenBao Short-Lived Cloud Credentials — Design
 
-**Status:** Draft (2026-05-29)
+> **⚠️ STATUS (2026-05-30):** This is the original design doc, written for the DO reference round. It is retained for its envelope / lease-lifecycle / metrics / reconciler rationale, which remain accurate. Two things are STALE: (1) it lists only six clouds — ten are now implemented (adds Exoscale, Vultr, Akamai, Oracle/OCI); (2) the "Native (STS/GCP/Azure engine wrapper)" strategy was abandoned — OpenBao has no GCP/Azure engine, so those are full JIT plugins. See `docs/cloud-credential-research.md` and `CLAUDE.md` for the current cloud list and per-cloud strategy.
+
+**Status:** Draft (2026-05-29) — partly superseded, see banner
 **Scope of this round:** API contract + DO reference implementation
 
 ## Problem

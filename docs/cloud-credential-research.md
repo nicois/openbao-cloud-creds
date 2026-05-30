@@ -1,23 +1,27 @@
 # Cloud Credential API Research
 
-**Date:** 2026-05-29
+**Date:** 2026-05-29 (research) — all clouds below were subsequently **built** (see Status column, updated 2026-05-30)
 **Purpose:** Determine JIT feasibility, scoping model, and strategy per cloud for the OpenBao credential plugin.
+
+This was the pre-build investigation. Every cloud except DO Spaces is now implemented as a working plugin; the Status column reflects build state, the rest of the table reflects the API findings that drove each design.
 
 ## Summary Table
 
 | Cloud | Strategy | Create API | Delete API | Native TTL | Scoping | Safety Boundary | Status |
 |-------|----------|-----------|-----------|-----------|---------|-----------------|--------|
-| DigitalOcean | JIT | `POST /v2/tokens` | `DELETE /v2/tokens/{id}` | No | Scope strings (coarse) | Name prefix `cloud-creds-` | **Done** (reference impl) |
-| UpCloud | JIT | `POST /1.3/account/tokens` | `DELETE /1.3/account/tokens/{id}` | Yes (`expires_in`) | Sub-account permissions | Name/ID tracking | Ready |
-| OVH | JIT (token minting) | Token endpoint (`client_credentials` grant) | N/A (tokens expire in 1h) | Yes (1h fixed) | IAM policies on service account | Service account identity | Ready (API in BETA) |
-| Exoscale | JIT | `POST /api-key` | `DELETE /api-key/{id}` | No | IAM roles (per-op/resource) | Key ID tracking | Ready |
-| Vultr | JIT | `POST /v2/users` | `DELETE /v2/users/{user-id}` | No | ACL categories (8 types) | User ID tracking | Ready |
-| Akamai | JIT | `POST /identity-management/v3/api-clients` | `DELETE .../{clientId}` | No | Per-API, per-group, IP ACL | Client ID tracking | Ready |
-| AWS | Native (partial) | OpenBao AWS engine (IAM users only) | OpenBao handles | Yes (STS) | IAM policies, `iam_tags` | `iam_tags` on users; no `session_tags` for STS | Partial — IAM user only |
-| GCP | JIT (direct) | GCP IAM API | GCP IAM API | Yes (impersonation tokens) | IAM bindings | Post-creation label patch | No OpenBao engine exists |
-| Azure | JIT (direct) | Azure AD API | Azure AD API | SP secrets have configurable expiry | RBAC | Tags on app registration | No OpenBao engine exists |
-| Oracle (OCI) | **Phased rotation** | `POST /users/{id}/authTokens` | `DELETE .../{id}` | No | IAM policies on groups/compartments | User/credential ID | Ready (max 2 tokens/user) |
+| DigitalOcean | JIT | `POST /v2/tokens` | `DELETE /v2/tokens/{id}` | No | Scope strings (coarse) | Name prefix `cloud-creds-` | **Built** (reference impl) |
+| UpCloud | JIT | `POST /1.3/account/tokens` | `DELETE /1.3/account/tokens/{id}` | Yes (`expires_in`) | Sub-account permissions | Name/ID tracking | **Built** |
+| OVH | JIT (token minting) | Token endpoint (`client_credentials` grant) | N/A (tokens expire in 1h) | Yes (1h fixed) | IAM policies on service account | Service account identity | **Built** (API in BETA) |
+| Exoscale | JIT | `POST /api-key` | `DELETE /api-key/{id}` | No | IAM roles (per-op/resource) | Key ID tracking | **Built** |
+| Vultr | JIT | `POST /v2/users` | `DELETE /v2/users/{user-id}` | No | ACL categories (8 types) | User ID tracking | **Built** |
+| Akamai | JIT | `POST /identity-management/v3/api-clients` | `DELETE .../{clientId}` | No | Per-API, per-group, IP ACL | Client ID tracking | **Built** (EdgeGrid/CDN, not Linode object storage) |
+| AWS | JIT (direct STS) | `sts:AssumeRole` (called directly) | N/A (STS expires) | Yes (STS, ≤12h) | IAM policy + `session_tags` on the assumed session | Session tags / role ARN | **Built** (direct STS, not the OpenBao AWS engine) |
+| GCP | JIT (direct) | SA impersonation `generateAccessToken` | N/A (token expires) | Yes (impersonation tokens) | IAM bindings | SA identity | **Built** (no OpenBao GCP engine exists) |
+| Azure | JIT (direct) | Graph `addPassword` on app registration | Graph `removePassword` | SP secrets have configurable expiry | RBAC | Tags + name prefix on app registration | **Built** (no OpenBao Azure engine exists) |
+| Oracle (OCI) | **Phased rotation** | `POST /users/{id}/authTokens` | `DELETE .../{id}` | No | IAM policies on groups/compartments | User/credential ID | **Built** (max 2 tokens/user → N=2 slots) |
 | DO Spaces | **Deferred** | No public API | No public API | N/A | N/A | N/A | Blocked — no API |
+
+> **Note (2026-05-30):** The AWS row originally read "Native (partial) — OpenBao AWS engine (IAM users only)." During implementation we chose to call STS directly instead of wrapping the OpenBao AWS engine, which gave full control over `session_tags` (the engine doesn't support them for AssumeRole). All AWS/GCP/Azure plugins are direct-API JIT, not engine wrappers.
 
 ## Detailed Findings
 
@@ -119,7 +123,7 @@
 - **Scoping:** IAM policies on groups/compartments. Credentials themselves are unscoped.
 - **No STS equivalent:** No headless session token API. Instance principals are compute-bound only.
 - **Rotation approach:** Pre-provision 2 auth tokens per role-user. Rotate one every T/2. Read returns the freshest. Lease TTL = time until that slot's next rotation.
-- **`pkg/rotator/` needed:** Yes — OCI is the only cloud requiring phased rotation.
+- **Phased rotation:** OCI is the only cloud requiring it. Slot management was built in-plugin (`plugins/credential-oci/slots.go`), not as a shared `pkg/rotator/` package.
 
 ## Architecture Implications
 
@@ -130,34 +134,35 @@ The techrfc assumed OpenBao has native AWS, GCP, and Azure secrets engines to wr
 - **GCP:** Engine does NOT exist in OpenBao
 - **Azure:** Engine does NOT exist in OpenBao
 
-All clouds except AWS (IAM user type) need full JIT implementations calling cloud APIs directly.
+All clouds need full JIT implementations calling cloud APIs directly, except OCI (phased rotation). No cloud uses the OpenBao native-engine-wrapper approach in the end.
 
-### Strategy distribution
+### Strategy distribution (as built)
 
 | Strategy | Clouds |
 |----------|--------|
-| JIT (create/delete) | DO, UpCloud, OVH, Exoscale, Vultr, Akamai, GCP (impersonation), Azure (SP creation), AWS (STS direct) |
-| Native wrapper | AWS (IAM user only, via OpenBao plugin) |
+| JIT (create/delete) | DO, UpCloud, OVH, Exoscale, Vultr, Akamai, GCP (impersonation), Azure (SP secret), AWS (STS direct) |
 | Phased rotation | Oracle (OCI) |
 | Deferred | DO Spaces |
 
-### Shared infrastructure needed
+### Shared infrastructure (all built)
 
-- `pkg/credenvelope/` — already built, works for all
-- `pkg/recovery/` — already built, works for all
-- `pkg/metrics/` — already built, works for all
-- `pkg/reconciler/` — already built, works for all
-- `pkg/worker/` — already built, works for all
-- `pkg/rotator/` — needed ONLY for Oracle OCI
+- `pkg/credenvelope/` — envelope + error codes, used by all
+- `pkg/recovery/` — minter recovery state machine, used by all
+- `pkg/metrics/` — per-node access metrics, used by all
+- `pkg/reconciler/` — orphan reclamation, used by JIT plugins
+- `pkg/worker/` — background worker lifecycle, used by all
+- Phased-rotation slot management lives **in-plugin** (`plugins/credential-oci/slots.go`), not in a shared `pkg/rotator/`. OCI is the only cloud that needs it, so per YAGNI it was not extracted into a shared package.
 
-### Priority recommendation
+### Build order followed (all complete)
 
-1. **UpCloud** — native TTL makes it the safest JIT after DO. Validates that the shared packages work for a second cloud.
-2. **Exoscale** — IAM-role-based scoping is interesting; validates granular permission model.
-3. **AWS (STS direct)** — high value, skip the native engine, call STS directly with session tags.
+Implemented in this sequence after DO; each note records the distinguishing trait:
+
+1. **UpCloud** — native TTL makes it the safest JIT after DO. Validated the shared packages on a second cloud.
+2. **Exoscale** — IAM-role-based scoping; validated the granular permission model.
+3. **AWS (STS direct)** — called STS directly with session tags (skipped the native engine).
 4. **GCP** — impersonation tokens are natively short-lived; no revocation needed.
-5. **OVH** — token minting from service account; validates OAuth2 flow pattern.
-6. **Azure** — SP creation latency needs documentation; otherwise standard JIT.
-7. **Vultr** — simple JIT, coarse scoping.
-8. **Akamai** — EdgeGrid auth is non-standard; more implementation work.
-9. **Oracle** — only cloud needing phased rotation; build `pkg/rotator/` for this.
+5. **OVH** — token minting from a service account; validated the OAuth2 flow pattern.
+6. **Azure** — SP secret creation via Graph; standard JIT with hard revoke.
+7. **Vultr** — simple JIT, coarse ACL scoping.
+8. **Akamai** — EdgeGrid HMAC auth (CDN/Identity API; not Linode object storage).
+9. **Oracle (OCI)** — the only cloud needing phased rotation; slot manager built in-plugin (`slots.go`).

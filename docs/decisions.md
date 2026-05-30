@@ -23,11 +23,12 @@ Two failure modes drove this rule:
 The metric exists to answer "is this cloud entity safe to delete?" — that's a question about a cloud entity, not a logical role. The same cloud entity (e.g., a single IAM role ARN) can back multiple OpenBao roles with different scopes. Keying on the OpenBao role would make a stale metric for one role hide active use through another, leading to deletion of an entity that's actually in use.
 
 So `entity_id` is the cloud-side identity an operator might delete:
-- AWS: IAM role ARN being assumed
+- AWS: IAM role ARN being assumed (via STS)
 - GCP: SA email being impersonated
-- Azure: parent app registration (NOT the per-lease ephemeral SP)
+- Azure: parent app registration (NOT the per-lease client secret)
 - DO: the minter PAT (NOT the per-lease minted token)
-- UpCloud: current slot's upstream token ID
+- UpCloud / Exoscale / Vultr / Akamai / OVH: the minter credential (NOT the per-lease issued credential)
+- OCI: the user whose auth-token slots are rotated
 
 ## Why per-node metrics with eventual consistency, not single-writer
 
@@ -51,8 +52,10 @@ DO is the simplest cloud that exercises every load-bearing piece of the design:
 
 - Has a JIT-capable native API (`POST /v2/tokens`)
 - Has revocation (`DELETE /v2/tokens/{id}`)
-- Has no native short-TTL primitive (so the plugin owns the TTL contract — there's no upstream engine to fall back on)
+- Has no native short-TTL primitive (so the plugin owns the TTL contract)
 - The cloud SDK is small
 - Test accounts are cheap
 
-AWS would be a poor reference: most of the credential lifecycle is delegated to the upstream OpenBao `aws` engine, so an AWS-first implementation would shortcut around the parts (envelope, lease tracking, recovery, reconciler, metrics) that this project actually needs to validate.
+It was chosen as the reference precisely because it owns the full lifecycle (envelope, lease tracking, recovery, reconciler, metrics) with nothing delegated upstream — every load-bearing piece gets exercised.
+
+> **Correction (2026-05-30):** This section originally argued AWS was a poor reference because "most of the credential lifecycle is delegated to the upstream OpenBao `aws` engine." That premise turned out false — OpenBao's AWS engine only supports IAM-user `iam_tags` (no STS `session_tags`), and there is no OpenBao GCP or Azure engine at all. As a result AWS/GCP/Azure were built as full JIT plugins calling the cloud APIs directly, with the same lifecycle machinery as DO. DO remains the reference for being the simplest, but the "delegate to upstream engine" distinction no longer applies to any cloud. See `docs/cloud-credential-research.md`.
