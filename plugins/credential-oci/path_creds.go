@@ -44,7 +44,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return nil, err
 	}
 	if entry == nil {
-		return logical.ErrorResponse("role_not_found: role %q does not exist", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
 	}
 
 	var role ociRole
@@ -53,7 +53,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	if role.Disabled {
-		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
 	}
 
 	// Load all slots and find the freshest active one
@@ -64,7 +64,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	best := freshestSlot(slots)
 	if best == nil {
-		return logical.ErrorResponse("no_active_slots: role %q has no active credential slots", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrPoolExhausted, "role %q has no active credential slots", roleName), nil
 	}
 
 	now := time.Now()

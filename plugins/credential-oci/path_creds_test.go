@@ -2,6 +2,7 @@ package credentialoci_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	credentialoci "github.com/nicois/openbao-cloud-creds/plugins/credential-oci"
@@ -150,6 +151,23 @@ func TestCredsRead_RoleNotFound(t *testing.T) {
 	}
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected error response for missing role")
+	}
+}
+
+func TestCredsRead_RoleNotFound_HasErrorCode(t *testing.T) {
+	b, storage := getTestBackend(t)
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.ReadOperation, Path: "creds/nope", Storage: storage,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatal("expected error response")
+	}
+	got := resp.Error().Error()
+	if !strings.HasPrefix(got, "role_not_found: ") {
+		t.Fatalf("expected role_not_found: prefix, got %q", got)
 	}
 }
 
