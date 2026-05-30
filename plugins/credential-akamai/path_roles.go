@@ -16,6 +16,7 @@ type akamaiRole struct {
 	MaxTTL     time.Duration `json:"max_ttl"`
 	GroupID    int           `json:"group_id"`
 	APIAccess  string        `json:"api_access"`
+	MinterSet  string        `json:"minter_set"`
 	Disabled   bool          `json:"disabled,omitempty"`
 }
 
@@ -48,6 +49,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Default:     "",
 					Description: "JSON string defining which APIs to grant access to",
 				},
+				"minter_set": {
+					Type:        framework.TypeString,
+					Description: "Name of the minter set this role mints from (required)",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -71,6 +76,18 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	groupID := d.Get("group_id").(int)
 	apiAccess := d.Get("api_access").(string)
 
+	minterSet := d.Get("minter_set").(string)
+	if minterSet == "" {
+		return logical.ErrorResponse("minter_set is required"), nil
+	}
+	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
+	}
+
 	role := &cloudconfig.Role{
 		Name:       name,
 		Cloud:      "akamai",
@@ -91,6 +108,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MaxTTL:     maxTTL,
 		GroupID:    groupID,
 		APIAccess:  apiAccess,
+		MinterSet:  minterSet,
 	}
 
 	entry, err := logical.StorageEntryJSON("roles/"+name, ar)
@@ -126,6 +144,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 			"max_ttl":     int(role.MaxTTL.Seconds()),
 			"group_id":    role.GroupID,
 			"api_access":  role.APIAccess,
+			"minter_set":  role.MinterSet,
 		},
 	}, nil
 }

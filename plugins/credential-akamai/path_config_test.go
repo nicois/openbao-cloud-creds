@@ -22,19 +22,12 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 func TestConfigWriteRead(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	// Write config
+	// Write config: operational settings + host only (no minters)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":            "minter-1",
-					"token":         "ct-xxx:at-yyy:cs-zzz",
-					"never_expires": true,
-				},
-			},
 			"host": "akab-test.luna.akamaiapis.net",
 		},
 	}
@@ -60,12 +53,12 @@ func TestConfigWriteRead(t *testing.T) {
 	}
 }
 
-func TestConfigWriteInvalidToken(t *testing.T) {
+func TestMinterSetRejectsInvalidToken(t *testing.T) {
 	b, storage := getTestBackend(t)
 
 	req := &logical.Request{
 		Operation: logical.UpdateOperation,
-		Path:      "config",
+		Path:      "minter-sets/bad",
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"minters": []interface{}{
@@ -75,7 +68,6 @@ func TestConfigWriteInvalidToken(t *testing.T) {
 					"never_expires": true,
 				},
 			},
-			"host": "akab-test.luna.akamaiapis.net",
 		},
 	}
 
@@ -84,7 +76,7 @@ func TestConfigWriteInvalidToken(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp == nil || !resp.IsError() {
-		t.Fatal("expected error for invalid token format")
+		t.Fatal("expected error for invalid EdgeGrid token format")
 	}
 }
 
@@ -95,15 +87,7 @@ func TestConfigWriteMissingHost(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
-					"id":            "minter-1",
-					"token":         "ct-xxx:at-yyy:cs-zzz",
-					"never_expires": true,
-				},
-			},
-		},
+		Data:      map[string]interface{}{},
 	}
 
 	resp, err := b.HandleRequest(context.Background(), req)

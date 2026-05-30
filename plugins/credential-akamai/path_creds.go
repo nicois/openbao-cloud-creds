@@ -58,8 +58,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("role_disabled: role %q is disabled", roleName), nil
 	}
 
-	// Select a healthy minter
-	minterID, client, err := b.selectMinter()
+	// Select a healthy minter from the role's bound set
+	setName, minterID, client, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		return logical.ErrorResponse(err.Error()), nil
 	}
@@ -96,17 +96,17 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 	clientResp, httpStatus, err := client.CreateClient(ctx, clientName, apiAccess, groupAccess)
 	if err != nil {
-		b.recordMinterError(minterID, httpStatus, now)
+		b.recordMinterError(setName, minterID, httpStatus, now)
 		return logical.ErrorResponse("upstream error: %v", err), nil
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(setName, minterID, now)
 
 	if len(clientResp.Credentials) == 0 {
 		return logical.ErrorResponse("upstream error: no credentials returned from Akamai"), nil
 	}
 
 	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(minterID, roleName, now)
+		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
 	}
 
 	emitLeaseIssued(roleName)
@@ -132,13 +132,16 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		CredentialID: clientResp.ClientID,
 		Scope:        role.APIAccess,
 		IssuedBy:     "cloud-creds-akamai/v0.1",
+		MinterSet:    setName,
+		MinterID:     minterID,
 	})
 
 	// Track active client for reconciler
 	activeEntry, _ := logical.StorageEntryJSON("active-clients/"+clientResp.ClientID, map[string]interface{}{
-		"role":    roleName,
-		"minter":  minterID,
-		"created": now.UTC().Format(time.RFC3339),
+		"role":       roleName,
+		"minter_set": setName,
+		"minter":     minterID,
+		"created":    now.UTC().Format(time.RFC3339),
 	})
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
@@ -149,6 +152,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	resp := b.Secret("akamai_client").Response(env.ToMap(), map[string]interface{}{
 		"upstream_client_id": clientResp.ClientID,
 		"role":               roleName,
+		"minter_set":         setName,
 		"minter_id":          minterID,
 	})
 	resp.Secret.TTL = role.DefaultTTL
@@ -163,8 +167,9 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		return nil, fmt.Errorf("missing upstream_client_id in internal_data")
 	}
 
+	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
 	minterID, _ := req.Secret.InternalData["minter_id"].(string)
-	_, client, err := b.getMinter(minterID)
+	client, err := b.getMinter(minterSet, minterID)
 	if err != nil {
 		return nil, err
 	}
@@ -174,11 +179,11 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	now := time.Now()
 	httpStatus, err := client.DeleteClient(ctx, clientID)
 	if err != nil {
-		b.recordMinterError(minterID, httpStatus, now)
+		b.recordMinterError(minterSet, minterID, httpStatus, now)
 		emitLeaseRevokeFailed(roleName)
 		return nil, fmt.Errorf("revoke failed: %v", err)
 	}
-	b.recordMinterSuccess(minterID, now)
+	b.recordMinterSuccess(minterSet, minterID, now)
 
 	// Remove from active clients
 	if err := req.Storage.Delete(ctx, "active-clients/"+clientID); err != nil {
@@ -195,61 +200,67 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *f
 	return resp, nil
 }
 
-func (b *backend) selectMinter() (string, *akamaiClient, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	if b.config == nil {
-		return "", nil, fmt.Errorf("upstream_auth_failed: plugin not configured")
+// clientFor builds an EdgeGrid-signing Akamai client from a specific minter's
+// triple plus the configured host. Callers MUST hold b.mu (read or write).
+func (b *backend) clientFor(ms *minterState) (*akamaiClient, error) {
+	cred, err := parseEdgeGridToken(ms.minter.Token)
+	if err != nil {
+		return nil, err
 	}
-
-	apiURL := b.akamaiAPIURL()
-
-	for _, ms := range b.minters {
-		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			cred, err := parseEdgeGridToken(ms.minter.Token)
-			if err != nil {
-				continue
-			}
-			cred.Host = b.host
-			return ms.minter.ID, newAkamaiClient(apiURL, cred), nil
-		}
-	}
-
-	return "", nil, fmt.Errorf("upstream_auth_failed: all minters are failing")
+	cred.Host = b.host
+	return newAkamaiClient(b.akamaiAPIURL(), cred), nil
 }
 
-func (b *backend) getMinter(id string) (string, *akamaiClient, error) {
+func (b *backend) selectMinter(setName string) (setID, minterID string, client *akamaiClient, err error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if b.config == nil {
-		return "", nil, fmt.Errorf("plugin not configured")
+	states, ok := b.minterSets[setName]
+	if !ok {
+		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
-
-	apiURL := b.akamaiAPIURL()
-
-	if ms, ok := b.minters[id]; ok {
-		cred, err := parseEdgeGridToken(ms.minter.Token)
-		if err != nil {
-			return "", nil, err
-		}
-		cred.Host = b.host
-		return id, newAkamaiClient(apiURL, cred), nil
-	}
-
-	// Fallback to any healthy minter
-	for _, ms := range b.minters {
-		if ms.sm.State() == recovery.Healthy {
-			cred, err := parseEdgeGridToken(ms.minter.Token)
+	for id, ms := range states {
+		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+			c, err := b.clientFor(ms)
 			if err != nil {
 				continue
 			}
-			cred.Host = b.host
-			return ms.minter.ID, newAkamaiClient(apiURL, cred), nil
+			return setName, id, c, nil
 		}
 	}
-	return "", nil, fmt.Errorf("no healthy minter available")
+	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+}
+
+// anyHealthyMinter returns a client for any healthy minter across all sets.
+// Used by the reconciler, which lists owner-tagged clients regardless of set.
+func (b *backend) anyHealthyMinter() (*akamaiClient, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	for _, states := range b.minterSets {
+		for _, ms := range states {
+			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+				c, err := b.clientFor(ms)
+				if err != nil {
+					continue
+				}
+				return c, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("upstream_auth_failed: no healthy minter available")
+}
+
+func (b *backend) getMinter(setName, id string) (*akamaiClient, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			return b.clientFor(ms)
+		}
+	}
+	return nil, fmt.Errorf("minter %q not found in set %q", id, setName)
 }
 
 func (b *backend) akamaiAPIURL() string {
@@ -259,18 +270,22 @@ func (b *backend) akamaiAPIURL() string {
 	return "https://" + b.host
 }
 
-func (b *backend) recordMinterSuccess(id string, at time.Time) {
+func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordSuccess(at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordSuccess(at)
+		}
 	}
 }
 
-func (b *backend) recordMinterError(id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if ms, ok := b.minters[id]; ok {
-		ms.sm.RecordError(httpStatus, at)
+	if states, ok := b.minterSets[setName]; ok {
+		if ms, ok := states[id]; ok {
+			ms.sm.RecordError(httpStatus, at)
+		}
 	}
 }

@@ -17,6 +17,10 @@ type AkamaiServer struct {
 	nextID     atomic.Int64
 	nextCredID atomic.Int64
 	nextStatus int
+	// lastClientToken records the client_token parsed from the EdgeGrid
+	// Authorization header of the most recent createClient call, so tests can
+	// assert which minter's triple actually signed the request.
+	lastClientToken string
 }
 
 func NewAkamaiServer() *AkamaiServer {
@@ -61,6 +65,29 @@ func (s *AkamaiServer) checkInjectedError(w http.ResponseWriter) bool {
 	return false
 }
 
+// LastSigningClientToken returns the client_token extracted from the EdgeGrid
+// Authorization header of the most recent successfully-authenticated request.
+// Tests use this to prove a role signed with its own minter set's triple.
+func (s *AkamaiServer) LastSigningClientToken() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastClientToken
+}
+
+// parseClientToken pulls the client_token value out of an EdgeGrid
+// Authorization header of the form
+// "EG1-HMAC-SHA256 client_token=...;access_token=...;...".
+func parseClientToken(auth string) string {
+	for _, part := range strings.Split(auth, ";") {
+		part = strings.TrimSpace(part)
+		part = strings.TrimPrefix(part, "EG1-HMAC-SHA256 ")
+		if strings.HasPrefix(part, "client_token=") {
+			return strings.TrimPrefix(part, "client_token=")
+		}
+	}
+	return ""
+}
+
 func (s *AkamaiServer) checkEdgeGridAuth(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "EG1-HMAC-SHA256") {
@@ -72,6 +99,9 @@ func (s *AkamaiServer) checkEdgeGridAuth(w http.ResponseWriter, r *http.Request)
 		})
 		return false
 	}
+	s.mu.Lock()
+	s.lastClientToken = parseClientToken(auth)
+	s.mu.Unlock()
 	return true
 }
 
