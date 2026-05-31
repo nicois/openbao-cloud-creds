@@ -1,6 +1,7 @@
 package recovery_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -117,5 +118,56 @@ func TestNeedsHealthCheck(t *testing.T) {
 	}
 	if sm.NeedsHealthCheck(now.Add(32 * time.Second)) {
 		t.Fatal("should not need health check before interval")
+	}
+}
+
+// TestStateMachine_ConcurrentAccess hammers the StateMachine from many
+// goroutines with a mix of read and write methods. Its purpose is to be run
+// under -race: the pass criterion is "no data race and no panic". The final
+// state is nondeterministic under concurrency, so we only assert it is one of
+// the valid enum values rather than a specific value.
+func TestStateMachine_ConcurrentAccess(t *testing.T) {
+	sm := recovery.NewStateMachine(recovery.Config{
+		AuthFailThreshold:   30 * time.Second,
+		HealthCheckInterval: 5 * time.Minute,
+	})
+
+	now := time.Now()
+
+	const goroutines = 50
+	const iterations = 200
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				switch (g + i) % 6 {
+				case 0:
+					// Transient/server error.
+					sm.RecordError(500, now.Add(time.Duration(i)*time.Second))
+				case 1:
+					// Auth error, advancing time to drive the threshold.
+					sm.RecordError(401, now.Add(time.Duration(i)*time.Second))
+				case 2:
+					sm.RecordSuccess(now.Add(time.Duration(i) * time.Second))
+				case 3:
+					_ = sm.State()
+				case 4:
+					_ = sm.ConsecutiveFailures()
+				case 5:
+					_ = sm.NeedsHealthCheck(now.Add(time.Duration(i) * time.Second))
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	switch sm.State() {
+	case recovery.Healthy, recovery.TransientFailing, recovery.AuthFailing, recovery.Missing:
+		// valid terminal state
+	default:
+		t.Fatalf("state machine returned invalid state: %q", sm.State())
 	}
 }
