@@ -103,7 +103,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	})
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
-			b.Logger().Warn("failed to track active credential", "credential_id", credentialID, "error", err)
+			// Tracking is metrics-only here: access tokens auto-expire and the
+			// reconciler never deletes an upstream entity, so an untracked
+			// credential is harmless (it self-expires). We keep the issued
+			// credential and only lose a metrics datapoint (audit F6: N/A for
+			// no-revoke plugins).
+			b.Logger().Warn("failed to track active credential (metrics-only; access token self-expires)",
+				"credential_id", credentialID, "error", err)
 		}
 	}
 

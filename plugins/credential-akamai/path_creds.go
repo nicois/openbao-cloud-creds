@@ -78,6 +78,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		roleName:   roleName,
 		setName:    sel.setID,
 		minterID:   sel.minterID,
+		client:     sel.client,
 		clientResp: clientResp,
 		now:        now,
 	}), nil
@@ -90,6 +91,7 @@ type credsResponseArgs struct {
 	roleName   string
 	setName    string
 	minterID   string
+	client     *akamaiClient
 	clientResp *createClientResponse
 	now        time.Time
 }
@@ -131,7 +133,14 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	})
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
-			b.Logger().Warn("failed to track active client", "client_id", a.clientResp.ClientID, "error", err)
+			// Tracking write failed: revoke the just-minted upstream credential
+			// so we never hand out a credential we cannot later track/reconcile
+			// (audit F6). Best-effort delete.
+			_, _ = a.client.DeleteClient(ctx, a.clientResp.ClientID)
+			b.Logger().Error("failed to persist active-client record; revoked upstream credential",
+				"client_id", a.clientResp.ClientID, "error", err)
+			return credenvelope.ErrorResponse(credenvelope.ErrInternal,
+				"failed to persist credential tracking record")
 		}
 	}
 

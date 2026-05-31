@@ -95,7 +95,14 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	})
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
-			b.Logger().Warn("failed to track active credential", "key_id", pwResp.KeyID, "error", err)
+			// Tracking write failed: revoke the just-minted upstream credential
+			// so we never hand out a credential we cannot later track/reconcile
+			// (audit F6). Best-effort delete.
+			_, _ = client.RemovePassword(ctx, role.AppObjectID, pwResp.KeyID)
+			b.Logger().Error("failed to persist active-credential record; revoked upstream credential",
+				"key_id", pwResp.KeyID, "error", err)
+			return credenvelope.ErrorResponse(credenvelope.ErrInternal,
+				"failed to persist credential tracking record"), nil
 		}
 	}
 

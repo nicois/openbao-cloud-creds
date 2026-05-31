@@ -106,16 +106,15 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		MinterID:     minterID,
 	})
 
-	// Track active key for reconciler
-	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+keyResp.KeyID, map[string]interface{}{
-		fieldRole: roleName,
-		"minter":  minterID,
-		"created": now.UTC().Format(time.RFC3339),
-	})
-	if activeEntry != nil {
-		if err := req.Storage.Put(ctx, activeEntry); err != nil {
-			b.Logger().Warn("failed to track active key", "key_id", keyResp.KeyID, "error", err)
-		}
+	// Track active key for reconciler; compensate (revoke) on write failure.
+	if errResp := b.trackActiveKey(ctx, req, trackArgs{
+		client:   client,
+		roleName: roleName,
+		minterID: minterID,
+		keyID:    keyResp.KeyID,
+		now:      now,
+	}); errResp != nil {
+		return errResp, nil
 	}
 
 	resp := b.Secret("exoscale_api_key").Response(env.ToMap(), map[string]interface{}{
@@ -128,6 +127,39 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	resp.Secret.MaxTTL = role.MaxTTL
 
 	return resp, nil
+}
+
+// trackArgs bundles the inputs to trackActiveKey so it stays under the
+// argument-count limit.
+type trackArgs struct {
+	client   *exoscaleClient
+	roleName string
+	minterID string
+	keyID    string
+	now      time.Time
+}
+
+// trackActiveKey persists the active-key tracking record the reconciler relies
+// on. If the write fails it revokes the just-minted upstream key (best-effort)
+// and returns an error response, so we never hand out a credential we cannot
+// later track or reconcile (audit F6). Returns nil on success.
+func (b *backend) trackActiveKey(ctx context.Context, req *logical.Request, a trackArgs) *logical.Response {
+	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+a.keyID, map[string]interface{}{
+		fieldRole: a.roleName,
+		"minter":  a.minterID,
+		"created": a.now.UTC().Format(time.RFC3339),
+	})
+	if activeEntry == nil {
+		return nil
+	}
+	if err := req.Storage.Put(ctx, activeEntry); err != nil {
+		_, _ = a.client.DeleteAPIKey(ctx, a.keyID)
+		b.Logger().Error("failed to persist active-key record; revoked upstream credential",
+			"key_id", a.keyID, "error", err)
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal,
+			"failed to persist credential tracking record")
+	}
+	return nil
 }
 
 func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {

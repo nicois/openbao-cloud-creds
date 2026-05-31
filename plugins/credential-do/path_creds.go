@@ -102,7 +102,15 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	})
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
-			b.Logger().Warn("failed to track active token", "token_id", tokenResp.Token.ID, "error", err)
+			// Tracking write failed: revoke the just-minted upstream credential
+			// so we never hand out a credential we cannot later track/reconcile
+			// (audit F6). Best-effort delete; the upstream id is no longer in
+			// any lease either, so this is our only chance to clean it up.
+			_, _ = client.DeleteToken(ctx, tokenResp.Token.ID)
+			b.Logger().Error("failed to persist active-token record; revoked upstream credential",
+				"token_id", tokenResp.Token.ID, "error", err)
+			return credenvelope.ErrorResponse(credenvelope.ErrInternal,
+				"failed to persist credential tracking record"), nil
 		}
 	}
 

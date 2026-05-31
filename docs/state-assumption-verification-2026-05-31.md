@@ -9,7 +9,7 @@ Each finding: verdict (REAL / REFUTED / DOCUMENTED-RISK), artifact (test path or
 | F3 | OCI fakeOCIClient unsynchronized map | REAL (fixed) | test: TestFakeOCIClient_ConcurrentAccess (-race) | fixed (Task 5): mutex on fakeOCIClient |
 | F4 | OCI rotation-vs-reconcile delete race | REAL (fixed) | test: TestRotationReconcileRace | fixed (Task 5): rotateReconcileMu serializes rotation vs reconcile |
 | F5 | Reconciler DeleteEntity not 404-idempotent (5 plugins) | REAL (fixed) | test: TestDeleteEntity_404IsSuccess + TestRun_DeleteErrorDoesNotAbortPass | fixed (Task 6): treat upstream 404 as success in 5 listers + reconciler log-and-continue per entity |
-| F6 | Create-then-track: untracked live cred on Put failure | TBD | Task 7 | — |
+| F6 | Create-then-track: untracked live cred on Put failure | REAL (fixed) | test: TestCredsIssue_TrackingWriteFailureCompensates (DO + Azure, -race) | fixed (Task 7): revoke-on-track-write-failure in 6 hard-revoke plugins; N/A for 3 no-revoke plugins |
 | F7 | Azure addPassword Graph propagation lag | TBD | Task 9 | — |
 | F8 | pkg/worker tests sleep-based / flaky | REAL | static: worker_test.go fixed sleeps + [4,6] band | fix (Task 10) |
 
@@ -109,5 +109,17 @@ Artifact (red→green): `TestDeleteEntity_404IsSuccess` (credential-do, internal
 - Each of the 5 listers' `DeleteEntity` now captures the status and treats 404 as success: `status, err := l.client.DeleteX(ctx, id); if err != nil && status != http.StatusNotFound { return err }; return nil` (added `net/http` import). Delete fns: DO `DeleteToken`, Vultr `DeleteUser`, Exoscale `DeleteAPIKey`, UpCloud `DeleteToken`, Akamai `DeleteClient`. **Azure was left as-is** — its `DeleteEntity` already returns nil when the password is not found (it iterates app object IDs and returns nil if no `RemovePassword` succeeds), i.e. already idempotent.
 - Defense in depth in `pkg/reconciler/reconciler.go`: a per-entity delete failure no longer aborts the pass. The failing ID is appended to a new `Result.Errors []string` field and the loop `continue`s to the next entity. Added `TestRun_DeleteErrorDoesNotAbortPass`: with a 3-orphan list where the middle one's delete errors, the pass deletes the other 2, records the failing ID in `Result.Errors`, and returns no pass-level error. (The fake lister's `ListTaggedEntities` was also made to return a copy of its slice, matching real listers, so the fake's delete-time slice mutation can't corrupt the reconciler's iteration.)
 - `Result.Errors` is additive, so existing `Run` callers are unaffected. The manual `/reconcile` response in the 6 affected plugins now surfaces a `delete_errors` count for visibility.
+
+### F6 — Create-then-track: untracked live credential on tracking-write failure — REAL
+
+During issuance every JIT plugin first mints the upstream credential, then `req.Storage.Put`s an `active-tokens/` (or `active-users/`/`active-clients/`) tracking record. On a Put failure the plugins previously only `b.Logger().Warn(...)` and still returned the credential. Result: a live upstream credential that is untracked — the reconciler's lister can't see it via the tracking store. With the Task 3/4 fail-closed reconciler this is less catastrophic (a zero-`CreatedAt` or recent orphan is skipped), but it is still a real gap: a credential is leased yet untracked.
+
+Artifact (red→green): `TestCredsIssue_TrackingWriteFailureCompensates` in `plugins/credential-do` and `plugins/credential-azure`. The test wraps the test `logical.Storage` in a `putFailStorage` decorator that returns an error for any `Put` whose key has the `active-tokens/` prefix and delegates everything else, then issues a credential against the cloud-fake. Pre-fix it FAILED: the DO fake's token count went up by one and the read returned a non-error response with a valid token — a live-but-untracked credential. **Verdict: REAL.**
+
+**Fix applied (Task 7):** at the tracking-record Put-failure site, the 6 **hard-revoke** plugins now best-effort revoke the just-minted upstream credential and return `ErrInternal` instead of handing out an untrackable credential:
+- DO `DeleteToken`, Azure `RemovePassword`, Exoscale `DeleteAPIKey`, UpCloud `DeleteToken`, Vultr `DeleteUser`, Akamai `DeleteClient`.
+- Exoscale's tracking block was extracted into a `trackActiveKey(trackArgs)` helper to stay under the funlen/argument-count lint limits. Akamai threads the minter `client` through its `credsResponseArgs` builder struct so the builder can compensate.
+
+**N/A for the 3 no-revoke plugins (AWS, GCP, OVH):** their tracking record is metrics-only — the credential auto-expires upstream and their reconciler never deletes an upstream entity (it only prunes already-expired local tracking entries; confirmed in `plugins/credential-{aws,gcp,ovh}/path_reconcile.go` / `workers.go`). An untracked credential there is harmless: there is nothing to reconcile/revoke and it self-expires. Forcing a failed issuance of an otherwise-valid self-expiring credential would be a regression, so these keep Warn-and-continue, with the log message clarified to state the impact is metrics-only.
 
 All touched tests pass under `go test -race`; lint clean (golangci-lint v2, 0 issues across all touched modules); full build clean.

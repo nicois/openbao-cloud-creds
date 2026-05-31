@@ -167,7 +167,13 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	})
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
-			b.Logger().Warn("failed to track active credential", "access_key_id", accessKeyID, "error", err)
+			// Tracking is metrics-only here: STS credentials auto-expire and the
+			// reconciler never deletes an upstream entity, so an untracked
+			// credential is harmless (it self-expires). We keep the issued
+			// credential and only lose a metrics datapoint (audit F6: N/A for
+			// no-revoke plugins).
+			b.Logger().Warn("failed to track active credential (metrics-only; STS cred self-expires)",
+				"access_key_id", accessKeyID, "error", err)
 		}
 	}
 
