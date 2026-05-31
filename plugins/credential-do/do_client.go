@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// httpTimeout bounds every DO API call the minter client makes.
+const httpTimeout = 30 * time.Second
+
 type doClient struct {
 	baseURL    string
 	token      string
@@ -43,14 +46,14 @@ func newDOClient(baseURL, token string) *doClient {
 		baseURL: baseURL,
 		token:   token,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: httpTimeout,
 		},
 	}
 }
 
 func (c *doClient) CreateToken(ctx context.Context, name string, scopes []string) (*tokenResponse, int, error) {
 	body, _ := json.Marshal(createTokenRequest{Name: name, Scopes: scopes})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/v2/tokens", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v2/tokens", bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -63,7 +66,7 @@ func (c *doClient) CreateToken(ctx context.Context, name string, scopes []string
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 201 {
+	if resp.StatusCode != http.StatusCreated {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, resp.StatusCode, fmt.Errorf("DO API returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -76,7 +79,7 @@ func (c *doClient) CreateToken(ctx context.Context, name string, scopes []string
 }
 
 func (c *doClient) CheckHealth(ctx context.Context) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v2/account", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v2/account", http.NoBody)
 	if err != nil {
 		return 0, err
 	}
@@ -93,7 +96,7 @@ func (c *doClient) CheckHealth(ctx context.Context) (int, error) {
 }
 
 func (c *doClient) ListTokens(ctx context.Context) ([]tokenInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v2/tokens", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v2/tokens", http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +108,7 @@ func (c *doClient) ListTokens(ctx context.Context) ([]tokenInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("DO API list tokens returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -118,7 +121,7 @@ func (c *doClient) ListTokens(ctx context.Context) ([]tokenInfo, error) {
 }
 
 func (c *doClient) DeleteToken(ctx context.Context, tokenID string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/v2/tokens/"+tokenID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v2/tokens/"+tokenID, http.NoBody)
 	if err != nil {
 		return 0, err
 	}
@@ -130,7 +133,7 @@ func (c *doClient) DeleteToken(ctx context.Context, tokenID string) (int, error)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 204 {
+	if resp.StatusCode != http.StatusNoContent {
 		return resp.StatusCode, fmt.Errorf("DO API delete returned %d", resp.StatusCode)
 	}
 	return resp.StatusCode, nil

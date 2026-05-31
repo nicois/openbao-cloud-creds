@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -18,7 +19,7 @@ func (b *backend) credsPaths() []*framework.Path {
 		{
 			Pattern: "creds/" + framework.GenericNameRegex("role"),
 			Fields: map[string]*framework.FieldSchema{
-				"role": {
+				fieldRole: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
@@ -39,33 +40,21 @@ func (b *backend) secretDO() *framework.Secret {
 }
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	roleName := d.Get("role").(string)
+	roleName := d.Get(fieldRole).(string)
 
-	// Load role from storage
-	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
-	if err != nil {
-		return nil, err
-	}
-	if entry == nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
-	}
-
-	var role doRole
-	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, err
-	}
-
-	if role.Disabled {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	role, errResp, err := b.loadRole(ctx, req, roleName)
+	if err != nil || errResp != nil {
+		return errResp, err
 	}
 
 	// Select a healthy minter from the role's bound set
-	setName, minterID, client, err := b.selectMinter(role.MinterSet)
+	sel, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		// selectMinter fails when the set is unloaded or every minter in it is
 		// failing — both surface to the client as an upstream auth failure.
 		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", err.Error()), nil
 	}
+	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
 	// Mint token via DO API
 	scopes := strings.Split(role.Scopes, ",")
@@ -89,11 +78,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	expiresAt := now.Add(role.DefaultTTL)
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
-		Cloud: "do",
+		Cloud: cloudName,
 		Role:  roleName,
 		Credential: map[string]interface{}{
-			"token":  tokenResp.Token.AccessToken,
-			"scopes": scopes,
+			"token":     tokenResp.Token.AccessToken,
+			fieldScopes: scopes,
 		},
 		ExpiresAt:    expiresAt,
 		TTLSeconds:   int(role.DefaultTTL.Seconds()),
@@ -107,7 +96,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	// Track active token for reconciler
 	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+tokenResp.Token.ID, map[string]interface{}{
-		"role":    roleName,
+		fieldRole: roleName,
 		"minter":  minterID,
 		"created": now.UTC().Format(time.RFC3339),
 	})
@@ -119,8 +108,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	resp := b.Secret("do_token").Response(env.ToMap(), map[string]interface{}{
 		"upstream_token_id": tokenResp.Token.ID,
-		"role":              roleName,
-		"minter_set":        setName,
+		fieldRole:           roleName,
+		fieldMinterSet:      setName,
 		"minter_id":         minterID,
 	})
 	resp.Secret.TTL = role.DefaultTTL
@@ -135,7 +124,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		return nil, fmt.Errorf("missing upstream_token_id in internal_data")
 	}
 
-	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
+	minterSet, _ := req.Secret.InternalData[fieldMinterSet].(string)
 	minterID, _ := req.Secret.InternalData["minter_id"].(string)
 	client, err := b.getMinter(minterSet, minterID)
 	if err != nil {
@@ -149,11 +138,11 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		}
 	}
 
-	roleName, _ := req.Secret.InternalData["role"].(string)
+	roleName, _ := req.Secret.InternalData[fieldRole].(string)
 
 	now := time.Now()
 	httpStatus, err := client.DeleteToken(ctx, tokenID)
-	if err != nil && httpStatus != 404 {
+	if err != nil && httpStatus != http.StatusNotFound {
 		b.recordMinterError(minterSet, minterID, httpStatus, now)
 		emitLeaseRevokeFailed(roleName)
 		return nil, fmt.Errorf("revoke failed: %v", err)
@@ -176,21 +165,51 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *f
 	return resp, nil
 }
 
-func (b *backend) selectMinter(setName string) (setID, minterID string, client *doClient, err error) {
+// selectedMinter bundles the result of selectMinter: the set and minter that
+// were chosen plus a ready-to-use client for them.
+type selectedMinter struct {
+	setID    string
+	minterID string
+	client   *doClient
+}
+
+func (b *backend) selectMinter(setName string) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	states, ok := b.minterSets[setName]
 	if !ok {
-		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	apiURL := b.doAPIURL()
 	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			return setName, id, newDOClient(apiURL, ms.minter.Token), nil
+			return selectedMinter{setID: setName, minterID: id, client: newDOClient(apiURL, ms.minter.Token)}, nil
 		}
 	}
-	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+	return selectedMinter{}, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+}
+
+// loadRole fetches and validates a role for issuance. It returns either the
+// parsed role, or an *logical.Response describing why issuance can't proceed
+// (role missing/disabled), or a hard error. Exactly one of role/errResp is
+// non-nil when err is nil.
+func (b *backend) loadRole(ctx context.Context, req *logical.Request, roleName string) (*doRole, *logical.Response, error) {
+	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
+	if err != nil {
+		return nil, nil, err
+	}
+	if entry == nil {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
+	}
+	var role doRole
+	if err := json.Unmarshal(entry.Value, &role); err != nil {
+		return nil, nil, err
+	}
+	if role.Disabled {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	}
+	return &role, nil, nil
 }
 
 // anyHealthyMinter returns a client for any healthy minter across all sets.
