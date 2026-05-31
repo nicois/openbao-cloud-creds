@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/localexpiry"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -70,37 +71,15 @@ func (b *backend) stopWorkersLocked() {
 // reconcileWorker for GCP is simpler than DO/Exoscale since access tokens auto-expire.
 // It cleans up stale tracking entries from storage.
 func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) error {
-	entries, err := storage.List(ctx, "active-tokens/")
+	res, err := localexpiry.PruneExpired(ctx, storage, localexpiry.Options{
+		Prefix: "active-tokens/",
+		Now:    time.Now(),
+		DryRun: false,
+		Logger: b.Logger(),
+	})
 	if err != nil {
 		return err
 	}
-
-	now := time.Now()
-	cleaned := 0
-	for _, key := range entries {
-		entry, err := storage.Get(ctx, "active-tokens/"+key)
-		if err != nil {
-			continue
-		}
-		if entry == nil {
-			continue
-		}
-
-		var data map[string]interface{}
-		if err := entry.DecodeJSON(&data); err != nil {
-			continue
-		}
-
-		// Remove tracking entries for expired credentials
-		if expiresStr, ok := data["expires_at"].(string); ok {
-			expiresAt, err := time.Parse(time.RFC3339, expiresStr)
-			if err == nil && now.After(expiresAt) {
-				_ = storage.Delete(ctx, "active-tokens/"+key)
-				cleaned++
-			}
-		}
-	}
-
-	emitOrphansFound(cleaned)
+	emitOrphansFound(len(res.Expired))
 	return nil
 }

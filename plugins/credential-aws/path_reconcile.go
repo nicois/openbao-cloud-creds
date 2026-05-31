@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/localexpiry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -32,52 +33,25 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	mode := d.Get("mode").(string)
 	dryRun := mode == "dry_run"
 
-	entries, err := req.Storage.List(ctx, "active-tokens/")
+	res, err := localexpiry.PruneExpired(ctx, req.Storage, localexpiry.Options{
+		Prefix: "active-tokens/",
+		Now:    time.Now(),
+		DryRun: dryRun,
+		Logger: b.Logger(),
+	})
 	if err != nil {
 		return logical.ErrorResponse("reconcile failed: %v", err), nil
 	}
 
-	now := time.Now()
-	var expired []string
-	for _, key := range entries {
-		entry, err := req.Storage.Get(ctx, "active-tokens/"+key)
-		if err != nil || entry == nil {
-			continue
-		}
-
-		var data map[string]interface{}
-		if err := entry.DecodeJSON(&data); err != nil {
-			continue
-		}
-
-		if expiresStr, ok := data["expires_at"].(string); ok {
-			expiresAt, err := time.Parse(time.RFC3339, expiresStr)
-			if err == nil && now.After(expiresAt) {
-				expired = append(expired, key)
-			}
-		}
-	}
-
-	deleted := 0
-	if !dryRun {
-		for _, key := range expired {
-			if err := req.Storage.Delete(ctx, "active-tokens/"+key); err != nil {
-				b.Logger().Warn("reconcile: failed to delete expired entry", "key", key, "error", err)
-				continue
-			}
-			deleted++
-		}
-	}
-
-	emitOrphansFound(len(expired))
+	emitOrphansFound(len(res.Expired))
 
 	return &logical.Response{
 		Data: map[string]interface{}{
 			"mode":             mode,
 			"dry_run":          dryRun,
-			"expired_found":    len(expired),
-			"deleted":          deleted,
-			"active_remaining": len(entries) - deleted,
+			"expired_found":    len(res.Expired),
+			"deleted":          res.Deleted,
+			"active_remaining": res.Scanned - res.Deleted,
 		},
 	}, nil
 }

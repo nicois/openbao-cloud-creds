@@ -6,6 +6,7 @@ require (
 	github.com/hashicorp/go-metrics v0.5.4
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/metrics v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/worker v0.0.0
@@ -68,6 +69,7 @@ require (
 replace (
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../../pkg/cloudconfig
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../../pkg/credenvelope
+	github.com/nicois/openbao-cloud-creds/pkg/localexpiry => ../../pkg/localexpiry
 	github.com/nicois/openbao-cloud-creds/pkg/metrics => ../../pkg/metrics
 	github.com/nicois/openbao-cloud-creds/pkg/recovery => ../../pkg/recovery
 	github.com/nicois/openbao-cloud-creds/pkg/worker => ../../pkg/worker
