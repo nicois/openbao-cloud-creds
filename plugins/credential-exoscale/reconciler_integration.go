@@ -2,6 +2,7 @@ package credentialexoscale
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
@@ -33,8 +34,11 @@ func (l *exoscaleCloudLister) ListTaggedEntities(ctx context.Context) ([]reconci
 }
 
 func (l *exoscaleCloudLister) DeleteEntity(ctx context.Context, id string) error {
-	_, err := l.client.DeleteAPIKey(ctx, id)
-	return err
+	status, err := l.client.DeleteAPIKey(ctx, id)
+	if err != nil && status != http.StatusNotFound {
+		return err
+	}
+	return nil
 }
 
 type leaseRegistry struct {

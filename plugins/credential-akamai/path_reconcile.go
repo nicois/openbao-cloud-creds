@@ -65,6 +65,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 			"orphans_found": len(result.OrphansFound),
 			"deleted":       result.Deleted,
 			"hit_limit":     result.HitLimit,
+			"delete_errors": len(result.Errors),
 		},
 	}, nil
 }

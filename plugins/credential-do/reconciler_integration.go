@@ -2,6 +2,7 @@ package credentialdo
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
@@ -34,8 +35,11 @@ func (l *doCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler.Up
 }
 
 func (l *doCloudLister) DeleteEntity(ctx context.Context, id string) error {
-	_, err := l.client.DeleteToken(ctx, id)
-	return err
+	status, err := l.client.DeleteToken(ctx, id)
+	if err != nil && status != http.StatusNotFound {
+		return err
+	}
+	return nil
 }
 
 type leaseRegistry struct {

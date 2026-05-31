@@ -45,6 +45,11 @@ type Result struct {
 	OrphansFound []string
 	Deleted      int
 	HitLimit     bool
+	// Errors holds the IDs of orphans whose delete failed. A per-entity delete
+	// failure no longer aborts the whole pass (defense in depth alongside the
+	// lister-level 404-is-success handling); the failing ID is recorded here and
+	// the pass continues to the next entity.
+	Errors []string
 }
 
 type reconciler struct {
@@ -97,7 +102,8 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 		}
 
 		if err := r.cloud.DeleteEntity(ctx, entity.ID); err != nil {
-			return result, err
+			result.Errors = append(result.Errors, entity.ID)
+			continue
 		}
 		result.Deleted++
 	}

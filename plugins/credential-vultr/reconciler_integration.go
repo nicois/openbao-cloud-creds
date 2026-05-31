@@ -2,6 +2,7 @@ package credentialvultr
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
@@ -33,8 +34,11 @@ func (l *vultrCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler
 }
 
 func (l *vultrCloudLister) DeleteEntity(ctx context.Context, id string) error {
-	_, err := l.client.DeleteUser(ctx, id)
-	return err
+	status, err := l.client.DeleteUser(ctx, id)
+	if err != nil && status != http.StatusNotFound {
+		return err
+	}
+	return nil
 }
 
 type leaseRegistry struct {

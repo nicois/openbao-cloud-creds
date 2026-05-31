@@ -11,13 +11,25 @@ import (
 
 type fakeCloudLister struct {
 	entities []reconciler.UpstreamEntity
+	// errOnID, when non-empty, makes DeleteEntity return an error for that ID
+	// (and leave the entity in place), simulating a non-404 upstream delete
+	// failure for one entity.
+	errOnID string
 }
 
 func (f *fakeCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler.UpstreamEntity, error) {
-	return f.entities, nil
+	// Return a copy: real listers return a fresh slice from the upstream list
+	// call, so the reconciler's iteration must not share a backing array with
+	// the store that DeleteEntity mutates.
+	out := make([]reconciler.UpstreamEntity, len(f.entities))
+	copy(out, f.entities)
+	return out, nil
 }
 
 func (f *fakeCloudLister) DeleteEntity(ctx context.Context, id string) error {
+	if id == f.errOnID {
+		return fmt.Errorf("simulated delete failure for %s", id)
+	}
 	for i, e := range f.entities {
 		if e.ID == id {
 			f.entities = append(f.entities[:i], f.entities[i+1:]...)
@@ -133,6 +145,38 @@ func TestMaxDeletesPerPass(t *testing.T) {
 	}
 	if !result.HitLimit {
 		t.Fatal("expected HitLimit=true")
+	}
+}
+
+// TestRun_DeleteErrorDoesNotAbortPass proves that a per-entity delete failure
+// no longer aborts the whole pass (audit F5 defense-in-depth): the failing ID
+// is recorded in Result.Errors and the reconciler continues to delete the
+// remaining orphans.
+func TestRun_DeleteErrorDoesNotAbortPass(t *testing.T) {
+	cloud := &fakeCloudLister{
+		entities: []reconciler.UpstreamEntity{
+			{ID: "orphan-1", Name: "cloud-creds-role-a-1"},
+			{ID: "orphan-bad", Name: "cloud-creds-role-a-2"},
+			{ID: "orphan-3", Name: "cloud-creds-role-a-3"},
+		},
+		errOnID: "orphan-bad",
+	}
+	reg := &fakeRegistry{known: map[string]bool{}}
+	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10}, cloud, reg)
+
+	res, err := r.Run(context.Background(), time.Now())
+	if err != nil {
+		t.Fatalf("a per-entity delete failure must not return a pass-level error, got: %v", err)
+	}
+	if res.Deleted != 2 {
+		t.Fatalf("expected the 2 deletable orphans deleted, got %d", res.Deleted)
+	}
+	if len(res.Errors) != 1 || res.Errors[0] != "orphan-bad" {
+		t.Fatalf("expected the failing ID in Errors, got %v", res.Errors)
+	}
+	// The failing entity survives; the other two are gone.
+	if len(cloud.entities) != 1 || cloud.entities[0].ID != "orphan-bad" {
+		t.Fatalf("expected only orphan-bad to survive, got %v", cloud.entities)
 	}
 }
 

@@ -86,6 +86,18 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 	}
 }
 
+// TestDeleteEntity_404IsSuccess proves the lister treats an upstream 404 (the
+// entity is already gone) as a successful delete rather than a hard error that
+// would wedge the whole reconcile pass (audit F5).
+func TestDeleteEntity_404IsSuccess(t *testing.T) {
+	srv := fakes.NewDOServer()
+	defer srv.Close()
+	lister := &doCloudLister{client: newDOClient(srv.URL, "minter-token")}
+	if err := lister.DeleteEntity(context.Background(), "nonexistent-id"); err != nil {
+		t.Fatalf("DeleteEntity should treat upstream 404 as success, got: %v", err)
+	}
+}
+
 // allOrphansRegistry knows nothing, so every upstream entity is an orphan.
 type allOrphansRegistry struct{}
 
