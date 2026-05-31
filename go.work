@@ -3,6 +3,7 @@ go 1.26.1
 use (
 	./pkg/cloudconfig
 	./pkg/credenvelope
+	./pkg/localexpiry
 	./pkg/metrics
 	./pkg/plugintest
 	./pkg/reconciler
