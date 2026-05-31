@@ -14,7 +14,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version: '1.26.3'
 
       - name: Build
         run: go build github.com/nicois/openbao-cloud-creds/...
@@ -22,22 +22,49 @@ jobs:
       - name: Test
         run: go test -race -coverprofile=coverage.out github.com/nicois/openbao-cloud-creds/...
 
-      - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v7
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
         with:
-          version: latest
-          args: --help
-          install-mode: binary
+          name: coverage
+          path: coverage.out
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Lint
         run: |
-          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/worker \
+          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/worker pkg/plugintest \
                      plugins/credential-akamai plugins/credential-aws plugins/credential-azure \
                      plugins/credential-do plugins/credential-exoscale plugins/credential-gcp \
                      plugins/credential-oci plugins/credential-ovh plugins/credential-upcloud \
                      plugins/credential-vultr; do
             echo "=== Linting $dir ==="
             (cd "$dir" && golangci-lint run ./...)
+          done
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.3'
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck (per module)
+        run: |
+          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/worker pkg/plugintest \
+                     plugins/credential-akamai plugins/credential-aws plugins/credential-azure \
+                     plugins/credential-do plugins/credential-exoscale plugins/credential-gcp \
+                     plugins/credential-oci plugins/credential-ovh plugins/credential-upcloud \
+                     plugins/credential-vultr; do
+            echo "=== govulncheck $dir ==="
+            (cd "$dir" && govulncheck ./...)
           done
 
   registration-smoke-test:
@@ -47,7 +74,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version: '1.26.3'
 
       - name: Install OpenBao
         run: |
