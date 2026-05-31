@@ -55,13 +55,28 @@ BAO_PID=$!
 export BAO_ADDR="$ADDR"
 export BAO_TOKEN="$TOKEN"
 
-# Wait for the server to become ready (up to ~15s).
-for _ in $(seq 1 30); do
-  if bao status >/dev/null 2>&1; then break; fi
+# Wait for the server to be ready FOR THE OPERATION WE DEPEND ON.
+#
+# `bao status` only reports seal/init state, which goes healthy before the
+# mount subsystem can serve an enable write coherently to a subsequent read
+# (this raced the first plugin's enable). The correct readiness gate polls
+# until the dependency itself round-trips: enable a throwaway mount and
+# confirm it appears in the list, then tear it down. Once this succeeds the
+# mount table is verifiably serving write-then-read, so each plugin below
+# needs only a single post-enable check.
+READY=0
+for _ in $(seq 1 60); do
+  if bao status >/dev/null 2>&1 \
+     && bao secrets enable -path=smoke-readiness-probe kv >/dev/null 2>&1 \
+     && bao secrets list 2>/dev/null | grep -q '^smoke-readiness-probe/'; then
+    bao secrets disable smoke-readiness-probe >/dev/null 2>&1 || true
+    READY=1
+    break
+  fi
   sleep 0.5
 done
-if ! bao status >/dev/null 2>&1; then
-  echo "FAIL: OpenBao dev server did not become ready"
+if [ "$READY" -ne 1 ]; then
+  echo "FAIL: OpenBao dev server did not become ready (mount round-trip never succeeded)"
   cat "$LOG_FILE"
   exit 1
 fi
@@ -83,7 +98,9 @@ for name in "${PLUGINS[@]}"; do
     continue
   fi
 
-  # Confirm the mount is actually present.
+  # Confirm the mount is actually present. The readiness gate above already
+  # proved the mount table serves write-then-read coherently, so a single
+  # check is sufficient here.
   if bao secrets list 2>/dev/null | grep -q "^smoke-$name/"; then
     echo "    OK:   $name"
   else
