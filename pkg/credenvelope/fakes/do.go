@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -22,7 +21,7 @@ func NewDOServer() *DOServer {
 	s := &DOServer{
 		tokens: make(map[string]map[string]interface{}),
 	}
-	s.nextID.Store(1000)
+	s.nextID.Store(fakeStartID)
 	s.Server = httptest.NewServer(s.handler())
 	return s
 }
@@ -41,8 +40,8 @@ func (s *DOServer) AddRawToken(id, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tokens[id] = map[string]interface{}{
-		"id":   id,
-		"name": name,
+		"id":        id,
+		jsonKeyName: name,
 	}
 }
 
@@ -69,12 +68,6 @@ func (s *DOServer) handler() http.Handler {
 	return mux
 }
 
-func writeJSON(w http.ResponseWriter, v interface{}) {
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		panic(fmt.Sprintf("fake server: failed to encode JSON: %v", err))
-	}
-}
-
 func (s *DOServer) checkInjectedError(w http.ResponseWriter) bool {
 	s.mu.Lock()
 	status := s.nextStatus
@@ -84,8 +77,8 @@ func (s *DOServer) checkInjectedError(w http.ResponseWriter) bool {
 	if status != 0 {
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
-			"id":      "server_error",
-			"message": fmt.Sprintf("injected %d", status),
+			"id":           injectedErrorValue,
+			jsonKeyMessage: fmt.Sprintf("injected %d", status),
 		})
 		return true
 	}
@@ -102,23 +95,23 @@ func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 		Scopes []string `json:"scopes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 	id := fmt.Sprintf("tok-%d", s.nextID.Add(1))
 	token := map[string]interface{}{
-		"id":           id,
-		"name":         req.Name,
-		"scopes":       req.Scopes,
-		"access_token": fmt.Sprintf("dop_v1_fake_%s", id),
+		"id":               id,
+		jsonKeyName:        req.Name,
+		"scopes":           req.Scopes,
+		jsonKeyAccessToken: fmt.Sprintf("dop_v1_fake_%s", id),
 	}
 
 	s.mu.Lock()
 	s.tokens[id] = token
 	s.mu.Unlock()
 
-	w.WriteHeader(201)
+	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]interface{}{"token": token})
 }
 
@@ -126,22 +119,7 @@ func (s *DOServer) deleteToken(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
 		return
 	}
-
-	parts := strings.Split(r.URL.Path, "/")
-	id := parts[len(parts)-1]
-
-	s.mu.Lock()
-	_, exists := s.tokens[id]
-	if exists {
-		delete(s.tokens, id)
-	}
-	s.mu.Unlock()
-
-	if !exists {
-		w.WriteHeader(404)
-		return
-	}
-	w.WriteHeader(204)
+	deleteByID(w, r, &s.mu, s.tokens, http.StatusNoContent)
 }
 
 func (s *DOServer) listTokens(w http.ResponseWriter, r *http.Request) {
@@ -163,9 +141,9 @@ func (s *DOServer) getAccount(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
 		return
 	}
-	w.WriteHeader(200)
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
-		"account": map[string]interface{}{
+		jsonKeyAccount: map[string]interface{}{
 			"uuid":   "fake-account-uuid",
 			"status": "active",
 		},

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +22,7 @@ func NewUpCloudServer() *UpCloudServer {
 	s := &UpCloudServer{
 		tokens: make(map[string]map[string]interface{}),
 	}
-	s.nextID.Store(1000)
+	s.nextID.Store(fakeStartID)
 	s.Server = httptest.NewServer(s.handler())
 	return s
 }
@@ -42,8 +41,8 @@ func (s *UpCloudServer) AddRawToken(id, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tokens[id] = map[string]interface{}{
-		"id":   id,
-		"name": name,
+		"id":        id,
+		jsonKeyName: name,
 	}
 }
 
@@ -79,7 +78,7 @@ func (s *UpCloudServer) checkInjectedError(w http.ResponseWriter) bool {
 	if status != 0 {
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
-			"error": map[string]interface{}{
+			jsonKeyError: map[string]interface{}{
 				"error_code":    "SERVER_ERROR",
 				"error_message": fmt.Sprintf("injected %d", status),
 			},
@@ -92,9 +91,9 @@ func (s *UpCloudServer) checkInjectedError(w http.ResponseWriter) bool {
 func (s *UpCloudServer) checkBasicAuth(w http.ResponseWriter, r *http.Request) bool {
 	username, password, ok := r.BasicAuth()
 	if !ok || username == "" || password == "" {
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		writeJSON(w, map[string]interface{}{
-			"error": map[string]interface{}{
+			jsonKeyError: map[string]interface{}{
 				"error_code":    "AUTHENTICATION_FAILED",
 				"error_message": "missing or invalid credentials",
 			},
@@ -118,7 +117,7 @@ func (s *UpCloudServer) createToken(w http.ResponseWriter, r *http.Request) {
 		CanCreateTokens bool   `json:"can_create_tokens"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -135,7 +134,7 @@ func (s *UpCloudServer) createToken(w http.ResponseWriter, r *http.Request) {
 
 	token := map[string]interface{}{
 		"id":         id,
-		"name":       req.Name,
+		jsonKeyName:  req.Name,
 		"token":      fmt.Sprintf("ucat_fake_%s", id),
 		"expires_at": expiresAt.UTC().Format(time.RFC3339),
 	}
@@ -144,7 +143,7 @@ func (s *UpCloudServer) createToken(w http.ResponseWriter, r *http.Request) {
 	s.tokens[id] = token
 	s.mu.Unlock()
 
-	w.WriteHeader(201)
+	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, token)
 }
 
@@ -155,22 +154,7 @@ func (s *UpCloudServer) deleteToken(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
 		return
 	}
-
-	parts := strings.Split(r.URL.Path, "/")
-	id := parts[len(parts)-1]
-
-	s.mu.Lock()
-	_, exists := s.tokens[id]
-	if exists {
-		delete(s.tokens, id)
-	}
-	s.mu.Unlock()
-
-	if !exists {
-		w.WriteHeader(404)
-		return
-	}
-	w.WriteHeader(204)
+	deleteByID(w, r, &s.mu, s.tokens, http.StatusNoContent)
 }
 
 func (s *UpCloudServer) listTokens(w http.ResponseWriter, r *http.Request) {
@@ -200,11 +184,13 @@ func (s *UpCloudServer) getAccount(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
 		return
 	}
-	w.WriteHeader(200)
+	// fakeAccountCredits is an arbitrary non-zero balance for the test account.
+	const fakeAccountCredits = 100.0
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
-		"account": map[string]interface{}{
+		jsonKeyAccount: map[string]interface{}{
 			"username": "test-user",
-			"credits":  100.0,
+			"credits":  fakeAccountCredits,
 		},
 	})
 }

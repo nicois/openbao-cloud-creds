@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+const (
+	jsonKeyAzureKeyID  = "keyId"
+	jsonKeyDisplayName = "displayName"
+	jsonKeyEndDateTime = "endDateTime"
+)
+
 type AzureServer struct {
 	*httptest.Server
 	mu                sync.Mutex
@@ -34,7 +40,7 @@ func NewAzureServer() *AzureServer {
 		validClientSecret: "fake-client-secret",
 		appObjectID:       "fake-app-object-id",
 	}
-	s.nextID.Store(1000)
+	s.nextID.Store(fakeStartID)
 	s.Server = httptest.NewServer(s.handler())
 	return s
 }
@@ -69,9 +75,9 @@ func (s *AzureServer) AddRawPassword(keyID, displayName string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.passwords[keyID] = map[string]interface{}{
-		"keyId":       keyID,
-		"displayName": displayName,
-		"endDateTime": "2099-01-01T00:00:00Z",
+		jsonKeyAzureKeyID:  keyID,
+		jsonKeyDisplayName: displayName,
+		jsonKeyEndDateTime: "2099-01-01T00:00:00Z",
 	}
 }
 
@@ -114,9 +120,9 @@ func (s *AzureServer) checkInjectedError(w http.ResponseWriter) bool {
 	if status != 0 {
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
-			"error": map[string]interface{}{
-				"code":    "ServerError",
-				"message": fmt.Sprintf("injected %d", status),
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    "ServerError",
+				jsonKeyMessage: fmt.Sprintf("injected %d", status),
 			},
 		})
 		return true
@@ -127,11 +133,11 @@ func (s *AzureServer) checkInjectedError(w http.ResponseWriter) bool {
 func (s *AzureServer) checkBearerAuth(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") || len(auth) <= 7 {
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		writeJSON(w, map[string]interface{}{
-			"error": map[string]interface{}{
-				"code":    "InvalidAuthenticationToken",
-				"message": "Access token is empty.",
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    "InvalidAuthenticationToken",
+				jsonKeyMessage: "Access token is empty.",
 			},
 		})
 		return false
@@ -147,20 +153,20 @@ func (s *AzureServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseForm(); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		writeJSON(w, map[string]interface{}{
-			"error":             "invalid_request",
-			"error_description": "failed to parse form",
+			jsonKeyError:            "invalid_request",
+			jsonKeyErrorDescription: "failed to parse form",
 		})
 		return
 	}
 
 	grantType := r.FormValue("grant_type")
 	if grantType != "client_credentials" {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		writeJSON(w, map[string]interface{}{
-			"error":             "unsupported_grant_type",
-			"error_description": "only client_credentials is supported",
+			jsonKeyError:            "unsupported_grant_type",
+			jsonKeyErrorDescription: "only client_credentials is supported",
 		})
 		return
 	}
@@ -173,20 +179,20 @@ func (s *AzureServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	if clientID == "" || clientSecret == "" {
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		writeJSON(w, map[string]interface{}{
-			"error":             "invalid_client",
-			"error_description": "client_id and client_secret are required",
+			jsonKeyError:            "invalid_client",
+			jsonKeyErrorDescription: "client_id and client_secret are required",
 		})
 		return
 	}
 
 	// Return a fake token
-	w.WriteHeader(200)
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
-		"token_type":   "Bearer",
-		"expires_in":   3600,
-		"access_token": fmt.Sprintf("eyJ0eXAiOi_fake_token_%s", clientID),
+		"token_type":       "Bearer",
+		"expires_in":       fakeTokenExpirySeconds,
+		jsonKeyAccessToken: fmt.Sprintf("eyJ0eXAiOi_fake_token_%s", clientID),
 	})
 }
 
@@ -205,11 +211,11 @@ func (s *AzureServer) addPassword(w http.ResponseWriter, r *http.Request) {
 		} `json:"passwordCredential"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		writeJSON(w, map[string]interface{}{
-			"error": map[string]interface{}{
-				"code":    "Request_BadRequest",
-				"message": "unable to parse request body",
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    "Request_BadRequest",
+				jsonKeyMessage: "unable to parse request body",
 			},
 		})
 		return
@@ -224,17 +230,17 @@ func (s *AzureServer) addPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	password := map[string]interface{}{
-		"keyId":       keyID,
-		"secretText":  secretText,
-		"displayName": req.PasswordCredential.DisplayName,
-		"endDateTime": endDateTime,
+		jsonKeyAzureKeyID:  keyID,
+		"secretText":       secretText,
+		jsonKeyDisplayName: req.PasswordCredential.DisplayName,
+		jsonKeyEndDateTime: endDateTime,
 	}
 
 	s.mu.Lock()
 	s.passwords[keyID] = password
 	s.mu.Unlock()
 
-	w.WriteHeader(200)
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, password)
 }
 
@@ -250,7 +256,7 @@ func (s *AzureServer) removePassword(w http.ResponseWriter, r *http.Request) {
 		KeyID string `json:"keyId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -262,16 +268,16 @@ func (s *AzureServer) removePassword(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	if !exists {
-		w.WriteHeader(404)
+		w.WriteHeader(http.StatusNotFound)
 		writeJSON(w, map[string]interface{}{
-			"error": map[string]interface{}{
-				"code":    "Request_ResourceNotFound",
-				"message": "password credential not found",
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    "Request_ResourceNotFound",
+				jsonKeyMessage: "password credential not found",
 			},
 		})
 		return
 	}
-	w.WriteHeader(204)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *AzureServer) getApplication(w http.ResponseWriter, r *http.Request) {
@@ -287,18 +293,18 @@ func (s *AzureServer) getApplication(w http.ResponseWriter, r *http.Request) {
 	for _, p := range s.passwords {
 		// List doesn't return secretText
 		passwords = append(passwords, map[string]interface{}{
-			"keyId":       p["keyId"],
-			"displayName": p["displayName"],
-			"endDateTime": p["endDateTime"],
+			jsonKeyAzureKeyID:  p[jsonKeyAzureKeyID],
+			jsonKeyDisplayName: p[jsonKeyDisplayName],
+			jsonKeyEndDateTime: p[jsonKeyEndDateTime],
 		})
 	}
 	s.mu.Unlock()
 
-	w.WriteHeader(200)
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
 		"id":                  s.appObjectID,
 		"appId":               s.validClientID,
-		"displayName":         "TestApp",
+		jsonKeyDisplayName:    "TestApp",
 		"passwordCredentials": passwords,
 	})
 }

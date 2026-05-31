@@ -70,7 +70,7 @@ func TestVultrFake_DeleteUser(t *testing.T) {
 	userID := createResult["user"].(map[string]interface{})["id"].(string)
 
 	// Delete
-	req, _ := http.NewRequest("DELETE", srv.URL+"/v2/users/"+userID, nil)
+	req, _ := http.NewRequest("DELETE", srv.URL+"/v2/users/"+userID, http.NoBody)
 	req.Header.Set("Authorization", "Bearer test-token")
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -94,7 +94,7 @@ func TestVultrFake_ListUsers(t *testing.T) {
 	resp.Body.Close()
 
 	// List users
-	listReq, _ := http.NewRequest("GET", srv.URL+"/v2/users", nil)
+	listReq, _ := http.NewRequest("GET", srv.URL+"/v2/users", http.NoBody)
 	listReq.Header.Set("Authorization", "Bearer test-token")
 	resp2, err := http.DefaultClient.Do(listReq)
 	if err != nil {
@@ -153,7 +153,7 @@ func TestVultrFake_Unauthorized(t *testing.T) {
 	srv := fakes.NewVultrServer()
 	defer srv.Close()
 
-	req, _ := http.NewRequest("GET", srv.URL+"/v2/account", nil)
+	req, _ := http.NewRequest("GET", srv.URL+"/v2/account", http.NoBody)
 	// No auth header
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

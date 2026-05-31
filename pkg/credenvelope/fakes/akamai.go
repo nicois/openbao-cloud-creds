@@ -10,6 +10,15 @@ import (
 	"sync/atomic"
 )
 
+const (
+	jsonKeyClientID   = "clientId"
+	jsonKeyClientName = "clientName"
+	jsonKeyIsLocked   = "isLocked"
+	jsonKeyType       = "type"
+	jsonKeyTitle      = "title"
+	jsonKeyDetail     = "detail"
+)
+
 type AkamaiServer struct {
 	*httptest.Server
 	mu         sync.Mutex
@@ -27,8 +36,8 @@ func NewAkamaiServer() *AkamaiServer {
 	s := &AkamaiServer{
 		clients: make(map[string]map[string]interface{}),
 	}
-	s.nextID.Store(1000)
-	s.nextCredID.Store(5000)
+	s.nextID.Store(fakeStartID)
+	s.nextCredID.Store(fakeStartCredID)
 	s.Server = httptest.NewServer(s.handler())
 	return s
 }
@@ -48,9 +57,9 @@ func (s *AkamaiServer) AddRawClient(clientID, clientName string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clients[clientID] = map[string]interface{}{
-		"clientId":   clientID,
-		"clientName": clientName,
-		"isLocked":   false,
+		jsonKeyClientID:   clientID,
+		jsonKeyClientName: clientName,
+		jsonKeyIsLocked:   false,
 	}
 }
 
@@ -87,8 +96,8 @@ func (s *AkamaiServer) checkInjectedError(w http.ResponseWriter) bool {
 	if status != 0 {
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
-			"error":   "server_error",
-			"message": fmt.Sprintf("injected %d", status),
+			jsonKeyError:   injectedErrorValue,
+			jsonKeyMessage: fmt.Sprintf("injected %d", status),
 		})
 		return true
 	}
@@ -121,11 +130,11 @@ func parseClientToken(auth string) string {
 func (s *AkamaiServer) checkEdgeGridAuth(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "EG1-HMAC-SHA256") {
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		writeJSON(w, map[string]interface{}{
-			"type":   "https://problems.luna.akamaiapis.net/identity-management/unauthorized",
-			"title":  "Unauthorized",
-			"detail": "Missing or invalid EdgeGrid authorization",
+			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/unauthorized",
+			jsonKeyTitle:  "Unauthorized",
+			jsonKeyDetail: "Missing or invalid EdgeGrid authorization",
 		})
 		return false
 	}
@@ -153,11 +162,11 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 		GroupAccess     interface{} `json:"groupAccess"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		writeJSON(w, map[string]interface{}{
-			"type":   "https://problems.luna.akamaiapis.net/identity-management/bad-request",
-			"title":  "Bad Request",
-			"detail": "Invalid request body",
+			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/bad-request",
+			jsonKeyTitle:  "Bad Request",
+			jsonKeyDetail: "Invalid request body",
 		})
 		return
 	}
@@ -165,12 +174,12 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 	clientID := fmt.Sprintf("akamai-client-%d", s.nextID.Add(1))
 
 	client := map[string]interface{}{
-		"clientId":        clientID,
-		"clientName":      req.ClientName,
+		jsonKeyClientID:   clientID,
+		jsonKeyClientName: req.ClientName,
 		"authorizedUsers": req.AuthorizedUsers,
 		"apiAccess":       req.APIAccess,
 		"groupAccess":     req.GroupAccess,
-		"isLocked":        false,
+		jsonKeyIsLocked:   false,
 		"createdDate":     "2026-01-01T00:00:00Z",
 	}
 
@@ -192,7 +201,7 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 	s.clients[clientID] = client
 	s.mu.Unlock()
 
-	w.WriteHeader(201)
+	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, client)
 }
 
@@ -215,15 +224,15 @@ func (s *AkamaiServer) deleteClient(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	if !exists {
-		w.WriteHeader(404)
+		w.WriteHeader(http.StatusNotFound)
 		writeJSON(w, map[string]interface{}{
-			"type":   "https://problems.luna.akamaiapis.net/identity-management/not-found",
-			"title":  "Not Found",
-			"detail": "API client not found",
+			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/not-found",
+			jsonKeyTitle:  "Not Found",
+			jsonKeyDetail: "API client not found",
 		})
 		return
 	}
-	w.WriteHeader(204)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *AkamaiServer) listClients(w http.ResponseWriter, r *http.Request) {
@@ -239,9 +248,9 @@ func (s *AkamaiServer) listClients(w http.ResponseWriter, r *http.Request) {
 	for _, c := range s.clients {
 		// List does not return credentials
 		clients = append(clients, map[string]interface{}{
-			"clientId":   c["clientId"],
-			"clientName": c["clientName"],
-			"isLocked":   c["isLocked"],
+			jsonKeyClientID:   c[jsonKeyClientID],
+			jsonKeyClientName: c[jsonKeyClientName],
+			jsonKeyIsLocked:   c[jsonKeyIsLocked],
 		})
 	}
 	s.mu.Unlock()
@@ -257,11 +266,11 @@ func (s *AkamaiServer) getSelf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(200)
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
-		"clientId":    "minter-self-id",
-		"clientName":  "cloud-creds-minter",
-		"isLocked":    false,
-		"createdDate": "2025-01-01T00:00:00Z",
+		jsonKeyClientID:   "minter-self-id",
+		jsonKeyClientName: "cloud-creds-minter",
+		jsonKeyIsLocked:   false,
+		"createdDate":     "2025-01-01T00:00:00Z",
 	})
 }

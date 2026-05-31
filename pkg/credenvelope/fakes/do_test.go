@@ -59,7 +59,7 @@ func TestDOFake_DeleteToken(t *testing.T) {
 	tokenID := createResult["token"].(map[string]interface{})["id"].(string)
 
 	// Delete
-	req, _ := http.NewRequest("DELETE", srv.URL+"/v2/tokens/"+tokenID, nil)
+	req, _ := http.NewRequest("DELETE", srv.URL+"/v2/tokens/"+tokenID, http.NoBody)
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("delete failed: %v", err)

@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 )
 
+const jsonKeyKeyID = "key-id"
+
 type ExoscaleServer struct {
 	*httptest.Server
 	mu         sync.Mutex
@@ -22,7 +24,7 @@ func NewExoscaleServer() *ExoscaleServer {
 	s := &ExoscaleServer{
 		apiKeys: make(map[string]map[string]interface{}),
 	}
-	s.nextID.Store(1000)
+	s.nextID.Store(fakeStartID)
 	s.Server = httptest.NewServer(s.handler())
 	return s
 }
@@ -42,8 +44,8 @@ func (s *ExoscaleServer) AddRawAPIKey(keyID, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.apiKeys[keyID] = map[string]interface{}{
-		"key-id": keyID,
-		"name":   name,
+		jsonKeyKeyID: keyID,
+		jsonKeyName:  name,
 	}
 }
 
@@ -80,9 +82,9 @@ func (s *ExoscaleServer) checkInjectedError(w http.ResponseWriter) bool {
 	if status != 0 {
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
-			"error": map[string]interface{}{
-				"code":    "SERVER_ERROR",
-				"message": fmt.Sprintf("injected %d", status),
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    "SERVER_ERROR",
+				jsonKeyMessage: fmt.Sprintf("injected %d", status),
 			},
 		})
 		return true
@@ -93,11 +95,11 @@ func (s *ExoscaleServer) checkInjectedError(w http.ResponseWriter) bool {
 func (s *ExoscaleServer) checkBearerAuth(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") || len(auth) <= 7 {
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		writeJSON(w, map[string]interface{}{
-			"error": map[string]interface{}{
-				"code":    "UNAUTHORIZED",
-				"message": "missing or invalid bearer token",
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    "UNAUTHORIZED",
+				jsonKeyMessage: "missing or invalid bearer token",
 			},
 		})
 		return false
@@ -118,7 +120,7 @@ func (s *ExoscaleServer) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		RoleID string `json:"role-id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -126,17 +128,17 @@ func (s *ExoscaleServer) createAPIKey(w http.ResponseWriter, r *http.Request) {
 	keySecret := fmt.Sprintf("EXOsecret_fake_%s", keyID)
 
 	apiKey := map[string]interface{}{
-		"key":     keySecret,
-		"key-id":  keyID,
-		"name":    req.Name,
-		"role-id": req.RoleID,
+		"key":        keySecret,
+		jsonKeyKeyID: keyID,
+		jsonKeyName:  req.Name,
+		"role-id":    req.RoleID,
 	}
 
 	s.mu.Lock()
 	s.apiKeys[keyID] = apiKey
 	s.mu.Unlock()
 
-	w.WriteHeader(200)
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, apiKey)
 }
 
@@ -147,22 +149,7 @@ func (s *ExoscaleServer) deleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
 		return
 	}
-
-	parts := strings.Split(r.URL.Path, "/")
-	keyID := parts[len(parts)-1]
-
-	s.mu.Lock()
-	_, exists := s.apiKeys[keyID]
-	if exists {
-		delete(s.apiKeys, keyID)
-	}
-	s.mu.Unlock()
-
-	if !exists {
-		w.WriteHeader(404)
-		return
-	}
-	w.WriteHeader(200)
+	deleteByID(w, r, &s.mu, s.apiKeys, http.StatusOK)
 }
 
 func (s *ExoscaleServer) listAPIKeys(w http.ResponseWriter, r *http.Request) {
@@ -178,9 +165,9 @@ func (s *ExoscaleServer) listAPIKeys(w http.ResponseWriter, r *http.Request) {
 	for _, k := range s.apiKeys {
 		// List does not return the secret key value
 		keys = append(keys, map[string]interface{}{
-			"key-id":  k["key-id"],
-			"name":    k["name"],
-			"role-id": k["role-id"],
+			jsonKeyKeyID: k[jsonKeyKeyID],
+			jsonKeyName:  k[jsonKeyName],
+			"role-id":    k["role-id"],
 		})
 	}
 	s.mu.Unlock()
@@ -195,12 +182,12 @@ func (s *ExoscaleServer) listZones(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
 		return
 	}
-	w.WriteHeader(200)
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
 		"zones": []map[string]interface{}{
-			{"name": "ch-gva-2"},
-			{"name": "ch-dk-2"},
-			{"name": "de-fra-1"},
+			{jsonKeyName: "ch-gva-2"},
+			{jsonKeyName: "ch-dk-2"},
+			{jsonKeyName: "de-fra-1"},
 		},
 	})
 }

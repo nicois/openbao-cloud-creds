@@ -68,7 +68,7 @@ func TestUpCloudFake_DeleteToken(t *testing.T) {
 	tokenID := createResult["id"].(string)
 
 	// Delete
-	delReq, _ := http.NewRequest("DELETE", srv.URL+"/1.3/account/tokens/"+tokenID, nil)
+	delReq, _ := http.NewRequest("DELETE", srv.URL+"/1.3/account/tokens/"+tokenID, http.NoBody)
 	delReq.SetBasicAuth("testuser", "testtoken")
 	resp2, err := http.DefaultClient.Do(delReq)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestUpCloudFake_ListTokens(t *testing.T) {
 	resp.Body.Close()
 
 	// List
-	listReq, _ := http.NewRequest("GET", srv.URL+"/1.3/account/tokens", nil)
+	listReq, _ := http.NewRequest("GET", srv.URL+"/1.3/account/tokens", http.NoBody)
 	listReq.SetBasicAuth("testuser", "testtoken")
 	resp2, err := http.DefaultClient.Do(listReq)
 	if err != nil {

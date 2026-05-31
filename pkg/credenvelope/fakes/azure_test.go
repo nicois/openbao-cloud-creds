@@ -130,7 +130,7 @@ func TestAzureFake_GetApplication(t *testing.T) {
 	addResp.Body.Close()
 
 	// Get application
-	getReq, _ := http.NewRequest("GET", srv.URL+"/v1.0/applications/fake-app-object-id", nil)
+	getReq, _ := http.NewRequest("GET", srv.URL+"/v1.0/applications/fake-app-object-id", http.NoBody)
 	getReq.Header.Set("Authorization", "Bearer fake-token")
 	resp, err := http.DefaultClient.Do(getReq)
 	if err != nil {

@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 )
 
+const jsonKeyEmail = "email"
+
 type VultrServer struct {
 	*httptest.Server
 	mu         sync.Mutex
@@ -22,7 +24,7 @@ func NewVultrServer() *VultrServer {
 	s := &VultrServer{
 		users: make(map[string]map[string]interface{}),
 	}
-	s.nextID.Store(1000)
+	s.nextID.Store(fakeStartID)
 	s.Server = httptest.NewServer(s.handler())
 	return s
 }
@@ -41,8 +43,8 @@ func (s *VultrServer) AddRawUser(id, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.users[id] = map[string]interface{}{
-		"id":   id,
-		"name": name,
+		"id":        id,
+		jsonKeyName: name,
 	}
 }
 
@@ -78,8 +80,8 @@ func (s *VultrServer) checkInjectedError(w http.ResponseWriter) bool {
 	if status != 0 {
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
-			"error":   "server_error",
-			"message": fmt.Sprintf("injected %d", status),
+			jsonKeyError:   injectedErrorValue,
+			jsonKeyMessage: fmt.Sprintf("injected %d", status),
 		})
 		return true
 	}
@@ -89,10 +91,10 @@ func (s *VultrServer) checkInjectedError(w http.ResponseWriter) bool {
 func (s *VultrServer) checkBearerAuth(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") || len(auth) <= 7 {
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		writeJSON(w, map[string]interface{}{
-			"error":   "unauthorized",
-			"message": "missing or invalid bearer token",
+			jsonKeyError:   "unauthorized",
+			jsonKeyMessage: "missing or invalid bearer token",
 		})
 		return false
 	}
@@ -114,7 +116,7 @@ func (s *VultrServer) createUser(w http.ResponseWriter, r *http.Request) {
 		ACLs       []string `json:"acls"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -123,8 +125,8 @@ func (s *VultrServer) createUser(w http.ResponseWriter, r *http.Request) {
 
 	user := map[string]interface{}{
 		"id":          id,
-		"name":        req.Name,
-		"email":       req.Email,
+		jsonKeyName:   req.Name,
+		jsonKeyEmail:  req.Email,
 		"api_enabled": req.APIEnabled,
 		"acls":        req.ACLs,
 		"api_key":     apiKey,
@@ -134,7 +136,7 @@ func (s *VultrServer) createUser(w http.ResponseWriter, r *http.Request) {
 	s.users[id] = user
 	s.mu.Unlock()
 
-	w.WriteHeader(201)
+	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]interface{}{"user": user})
 }
 
@@ -145,22 +147,7 @@ func (s *VultrServer) deleteUser(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
 		return
 	}
-
-	parts := strings.Split(r.URL.Path, "/")
-	id := parts[len(parts)-1]
-
-	s.mu.Lock()
-	_, exists := s.users[id]
-	if exists {
-		delete(s.users, id)
-	}
-	s.mu.Unlock()
-
-	if !exists {
-		w.WriteHeader(404)
-		return
-	}
-	w.WriteHeader(204)
+	deleteByID(w, r, &s.mu, s.users, http.StatusNoContent)
 }
 
 func (s *VultrServer) listUsers(w http.ResponseWriter, r *http.Request) {
@@ -177,8 +164,8 @@ func (s *VultrServer) listUsers(w http.ResponseWriter, r *http.Request) {
 		// List does not return api_key
 		users = append(users, map[string]interface{}{
 			"id":          u["id"],
-			"name":        u["name"],
-			"email":       u["email"],
+			jsonKeyName:   u[jsonKeyName],
+			jsonKeyEmail:  u[jsonKeyEmail],
 			"api_enabled": u["api_enabled"],
 			"acls":        u["acls"],
 		})
@@ -200,12 +187,14 @@ func (s *VultrServer) getAccount(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
 		return
 	}
-	w.WriteHeader(200)
+	// fakeAccountBalance is an arbitrary negative balance for the test account.
+	const fakeAccountBalance = -100.00
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
-		"account": map[string]interface{}{
-			"name":    "fake-vultr-account",
-			"email":   "admin@example.com",
-			"balance": -100.00,
+		jsonKeyAccount: map[string]interface{}{
+			jsonKeyName:  "fake-vultr-account",
+			jsonKeyEmail: "admin@example.com",
+			"balance":    fakeAccountBalance,
 		},
 	})
 }

@@ -78,7 +78,7 @@ func TestAkamaiFake_DeleteClient(t *testing.T) {
 	clientID := createResult["clientId"].(string)
 
 	// Delete
-	req, _ := http.NewRequest("DELETE", srv.URL+"/identity-management/v3/api-clients/"+clientID, nil)
+	req, _ := http.NewRequest("DELETE", srv.URL+"/identity-management/v3/api-clients/"+clientID, http.NoBody)
 	req.Header.Set("Authorization", "EG1-HMAC-SHA256 client_token=xxx;access_token=yyy;timestamp=zzz;nonce=nnn;signature=sss")
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -102,7 +102,7 @@ func TestAkamaiFake_ListClients(t *testing.T) {
 	resp.Body.Close()
 
 	// List clients
-	listReq, _ := http.NewRequest("GET", srv.URL+"/identity-management/v3/api-clients", nil)
+	listReq, _ := http.NewRequest("GET", srv.URL+"/identity-management/v3/api-clients", http.NoBody)
 	listReq.Header.Set("Authorization", "EG1-HMAC-SHA256 client_token=xxx;access_token=yyy;timestamp=zzz;nonce=nnn;signature=sss")
 	resp2, err := http.DefaultClient.Do(listReq)
 	if err != nil {
@@ -135,7 +135,7 @@ func TestAkamaiFake_HealthCheck(t *testing.T) {
 	srv := fakes.NewAkamaiServer()
 	defer srv.Close()
 
-	req, _ := http.NewRequest("GET", srv.URL+"/identity-management/v3/api-clients/self", nil)
+	req, _ := http.NewRequest("GET", srv.URL+"/identity-management/v3/api-clients/self", http.NoBody)
 	req.Header.Set("Authorization", "EG1-HMAC-SHA256 client_token=xxx;access_token=yyy;timestamp=zzz;nonce=nnn;signature=sss")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -184,7 +184,7 @@ func TestAkamaiFake_Unauthorized(t *testing.T) {
 	srv := fakes.NewAkamaiServer()
 	defer srv.Close()
 
-	req, _ := http.NewRequest("GET", srv.URL+"/identity-management/v3/api-clients/self", nil)
+	req, _ := http.NewRequest("GET", srv.URL+"/identity-management/v3/api-clients/self", http.NoBody)
 	// No auth header
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

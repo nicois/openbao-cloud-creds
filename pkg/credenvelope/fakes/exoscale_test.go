@@ -68,7 +68,7 @@ func TestExoscaleFake_DeleteAPIKey(t *testing.T) {
 	keyID := createResult["key-id"].(string)
 
 	// Delete
-	delReq, _ := http.NewRequest("DELETE", srv.URL+"/v2/api-key/"+keyID, nil)
+	delReq, _ := http.NewRequest("DELETE", srv.URL+"/v2/api-key/"+keyID, http.NoBody)
 	delReq.Header.Set("Authorization", "Bearer test-api-key")
 	resp2, err := http.DefaultClient.Do(delReq)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestExoscaleFake_ListAPIKeys(t *testing.T) {
 	resp.Body.Close()
 
 	// List
-	listReq, _ := http.NewRequest("GET", srv.URL+"/v2/api-key", nil)
+	listReq, _ := http.NewRequest("GET", srv.URL+"/v2/api-key", http.NoBody)
 	listReq.Header.Set("Authorization", "Bearer test-api-key")
 	resp2, err := http.DefaultClient.Do(listReq)
 	if err != nil {

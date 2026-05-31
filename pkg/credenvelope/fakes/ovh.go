@@ -62,8 +62,8 @@ func (s *OVHServer) checkInjectedError(w http.ResponseWriter) bool {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
-			"error":             "server_error",
-			"error_description": fmt.Sprintf("injected %d", status),
+			jsonKeyError:            injectedErrorValue,
+			jsonKeyErrorDescription: fmt.Sprintf("injected %d", status),
 		})
 		return true
 	}
@@ -77,10 +77,10 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	if err := r.ParseForm(); err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		writeJSON(w, map[string]interface{}{
-			"error":             "invalid_request",
-			"error_description": "failed to parse form",
+			jsonKeyError:            "invalid_request",
+			jsonKeyErrorDescription: "failed to parse form",
 		})
 		return
 	}
@@ -88,10 +88,10 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	grantType := r.FormValue("grant_type")
 	if grantType != "client_credentials" {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		writeJSON(w, map[string]interface{}{
-			"error":             "unsupported_grant_type",
-			"error_description": fmt.Sprintf("unsupported grant_type: %s", grantType),
+			jsonKeyError:            "unsupported_grant_type",
+			jsonKeyErrorDescription: fmt.Sprintf("unsupported grant_type: %s", grantType),
 		})
 		return
 	}
@@ -105,10 +105,10 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	if !clientExists || clientSecret != expectedSecret {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		writeJSON(w, map[string]interface{}{
-			"error":             "invalid_client",
-			"error_description": "invalid client_id or client_secret",
+			jsonKeyError:            "invalid_client",
+			jsonKeyErrorDescription: "invalid client_id or client_secret",
 		})
 		return
 	}
@@ -117,11 +117,11 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	token := fmt.Sprintf("ovh-fake-token-%d", n)
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
+	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
-		"access_token": token,
-		"token_type":   "Bearer",
-		"expires_in":   3600,
+		jsonKeyAccessToken: token,
+		"token_type":       "Bearer",
+		"expires_in":       fakeTokenExpirySeconds,
 	})
 }
 
