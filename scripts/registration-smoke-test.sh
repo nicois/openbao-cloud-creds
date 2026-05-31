@@ -98,13 +98,23 @@ for name in "${PLUGINS[@]}"; do
     continue
   fi
 
-  # Confirm the mount is actually present. The readiness gate above already
-  # proved the mount table serves write-then-read coherently, so a single
-  # check is sufficient here.
-  if bao secrets list 2>/dev/null | grep -q "^smoke-$name/"; then
+  # Confirm the mount is actually present. `enable` returning success does not
+  # guarantee the mount table is immediately consistent on a subsequent `list`
+  # — CI observed this lag hit different plugins on different runs (not just the
+  # first), so the startup readiness gate alone is insufficient. Poll the list
+  # until the mount appears, with a bounded timeout.
+  mounted=0
+  for _ in $(seq 1 20); do
+    if bao secrets list 2>/dev/null | grep -q "^smoke-$name/"; then
+      mounted=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$mounted" -eq 1 ]; then
     echo "    OK:   $name"
   else
-    echo "    FAIL: $name enable reported success but mount is absent"
+    echo "    FAIL: $name enable reported success but mount absent after polling"
     FAILED=1
   fi
 done
