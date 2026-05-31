@@ -2,6 +2,8 @@
 
 Each finding: verdict (REAL / REFUTED / DOCUMENTED-RISK), artifact (test path or static proof), action.
 
+**Summary: 8 findings, all verified — 7 REAL (fixed), 1 DOCUMENTED-RISK (KI-003). Residual gaps (Exoscale/Vultr fail-closed orphan cleanup) tracked as KI-004.**
+
 | # | Finding | Verdict | Artifact | Action |
 |---|---------|---------|----------|--------|
 | F1 | Reconciler ConfirmationHold guard dead (6 plugins) | REAL (fixed) | static: reconciler.go:62 gated on CreatedAt, no lister set it; Task 3 fail-closed + Task 4 populates CreatedAt (4 of 6 clouds; exoscale/vultr have no list timestamp → fail-closed) | fixed (Task 3,4) |
@@ -11,7 +13,7 @@ Each finding: verdict (REAL / REFUTED / DOCUMENTED-RISK), artifact (test path or
 | F5 | Reconciler DeleteEntity not 404-idempotent (5 plugins) | REAL (fixed) | test: TestDeleteEntity_404IsSuccess + TestRun_DeleteErrorDoesNotAbortPass | fixed (Task 6): treat upstream 404 as success in 5 listers + reconciler log-and-continue per entity |
 | F6 | Create-then-track: untracked live cred on Put failure | REAL (fixed) | test: TestCredsIssue_TrackingWriteFailureCompensates (DO + Azure, -race) | fixed (Task 7): revoke-on-track-write-failure in 6 hard-revoke plugins; N/A for 3 no-revoke plugins |
 | F7 | Azure addPassword Graph propagation lag | DOCUMENTED-RISK | docs/known-issues.md KI-003 | documented (Task 9) |
-| F8 | pkg/worker tests sleep-based / flaky | REAL | static: worker_test.go fixed sleeps + [4,6] band | fix (Task 10) |
+| F8 | pkg/worker tests sleep-based / flaky | REAL (fixed) | test: TestWorkerTicks + TestWorkerInitialDelay (testing/synctest) | fixed (Task 10): converted to synctest, exact assertions |
 
 ## Notes
 (Subsequent tasks append per-finding detail here.)
