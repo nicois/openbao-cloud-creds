@@ -3,19 +3,38 @@ package credentialoci
 import (
 	"time"
 
-	"github.com/hashicorp/go-metrics"
+	metrics "github.com/hashicorp/go-metrics"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 )
 
-func emitGauge(key []string, val float32, labels []metrics.Label) {
-	metrics.SetGaugeWithLabels(key, val, labels)
+// emit is this plugin's shared metrics emitter (cloud identity + namespace).
+var emit = telemetry.Emitter{Cloud: cloudName, Namespace: metricNamespace}
+
+func emitLeaseIssued(role string) { emit.LeaseIssued(role) }
+func emitOrphansFound(count int)  { emit.OrphansFound(count) }
+
+// emitSlotRotated counts a phased-rotation slot rotation. OCI-specific (no
+// Emitter method); routed through emit.Counter with the same name + labels.
+func emitSlotRotated(role string, slotIndex int) {
+	emit.Counter("slot_rotated_total", []metrics.Label{
+		emit.CloudLabel(),
+		{Name: fieldRole, Value: role},
+	})
+	_ = slotIndex
 }
 
-func emitCounter(key []string, labels []metrics.Label) {
-	metrics.IncrCounterWithLabels(key, 1, labels)
+// emitRotationCheckCompleted counts a completed rotation-check worker pass.
+// OCI-specific (no Emitter method); routed through emit.Counter.
+func emitRotationCheckCompleted(rolesChecked int) {
+	emit.Counter("rotation_check_completed", []metrics.Label{
+		emit.CloudLabel(),
+	})
+	_ = rolesChecked
 }
 
+// emitMinterMetrics stays here: it reaches into b.minterSets / state machines.
 func (b *backend) emitMinterMetrics() {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -24,55 +43,26 @@ func (b *backend) emitMinterMetrics() {
 	for setName, states := range b.minterSets {
 		for id, ms := range states {
 			labels := []metrics.Label{
-				{Name: fieldCloud, Value: cloudName},
+				emit.CloudLabel(),
 				{Name: fieldMinterSet, Value: setName},
 				{Name: "cred_id", Value: id},
 			}
 
 			state := string(ms.sm.State())
-			emitGauge([]string{metricNamespace, "upstream_state"}, 1, append(labels, metrics.Label{Name: "state", Value: state}))
-
-			emitGauge([]string{metricNamespace, "upstream_consecutive_failures"}, float32(ms.sm.ConsecutiveFailures()), labels)
+			emit.Gauge("upstream_state", 1, append(labels, metrics.Label{Name: "state", Value: state}))
+			emit.Gauge("upstream_consecutive_failures", float32(ms.sm.ConsecutiveFailures()), labels)
 
 			lastSuccess := ms.sm.LastSuccessAt()
 			if !lastSuccess.IsZero() {
-				emitGauge([]string{metricNamespace, "upstream_last_success_seconds_ago"}, float32(now.Sub(lastSuccess).Seconds()), labels)
+				emit.Gauge("upstream_last_success_seconds_ago", float32(now.Sub(lastSuccess).Seconds()), labels)
 			}
 
 			if !ms.minter.ExpiresAt.IsZero() {
 				expiresIn := ms.minter.ExpiresAt.Sub(now).Seconds()
-				emitGauge([]string{metricNamespace, "upstream_expires_in_seconds"}, float32(expiresIn), labels)
+				emit.Gauge("upstream_expires_in_seconds", float32(expiresIn), labels)
 			}
 		}
 	}
-}
-
-func emitLeaseIssued(role string) {
-	emitCounter([]string{metricNamespace, "lease_issued_total"}, []metrics.Label{
-		{Name: fieldCloud, Value: cloudName},
-		{Name: fieldRole, Value: role},
-	})
-}
-
-func emitSlotRotated(role string, slotIndex int) {
-	emitCounter([]string{metricNamespace, "slot_rotated_total"}, []metrics.Label{
-		{Name: fieldCloud, Value: cloudName},
-		{Name: fieldRole, Value: role},
-	})
-	_ = slotIndex
-}
-
-func emitOrphansFound(count int) {
-	emitGauge([]string{metricNamespace, "orphans_found"}, float32(count), []metrics.Label{
-		{Name: fieldCloud, Value: cloudName},
-	})
-}
-
-func emitRotationCheckCompleted(rolesChecked int) {
-	emitCounter([]string{metricNamespace, "rotation_check_completed"}, []metrics.Label{
-		{Name: fieldCloud, Value: cloudName},
-	})
-	_ = rolesChecked
 }
 
 // workerErrorHandler returns a handler that logs and counts periodic worker
@@ -80,7 +70,6 @@ func emitRotationCheckCompleted(rolesChecked int) {
 func (b *backend) workerErrorHandler() worker.ErrorHandler {
 	return func(name string, err error) {
 		b.Logger().Warn("worker error", "worker", name, "error", err)
-		emitCounter([]string{metricNamespace, "worker_errors_total"},
-			[]metrics.Label{{Name: fieldCloud, Value: cloudName}, {Name: "worker", Value: name}})
+		emit.WorkerError(name, err)
 	}
 }
