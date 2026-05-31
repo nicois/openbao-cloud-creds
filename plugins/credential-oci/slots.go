@@ -151,7 +151,15 @@ func (b *backend) initializeSlots(ctx context.Context, storage logical.Storage, 
 }
 
 // rotateSlot rotates a single slot: creates a new token, updates storage, deletes the old one.
+//
+// It holds rotateReconcileMu for the whole create+persist+delete so a reconcile
+// pass cannot list+delete the freshly-created token before it is recorded in
+// slot storage (audit F4). rotateReconcileMu is the outermost lock; b.mu is only
+// taken-and-released inside the helper calls below, never across this body.
 func (b *backend) rotateSlot(ctx context.Context, storage logical.Storage, role *ociRole, slotIndex int) error {
+	b.rotateReconcileMu.Lock()
+	defer b.rotateReconcileMu.Unlock()
+
 	existing, err := loadSlot(ctx, storage, role.Name, slotIndex)
 	if err != nil {
 		return fmt.Errorf("failed to load slot %d: %w", slotIndex, err)

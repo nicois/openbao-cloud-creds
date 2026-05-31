@@ -93,6 +93,28 @@ type reconcilePass struct {
 	result        reconcileResult
 }
 
+// runReconcilePass performs one full reconcile sweep: snapshot the known-set,
+// list upstream, delete unknown tokens carrying our prefix. The whole sweep
+// (snapshot -> list -> delete) is held under rotateReconcileMu so a concurrent
+// rotation cannot create+persist a token in the window between the snapshot and
+// the upstream list — which would otherwise leave the freshly-rotated live token
+// absent from the snapshot and get it deleted (audit F4).
+//
+// rotateReconcileMu is the outermost lock; b.mu is only acquired-and-released
+// inside the helpers (maxDeletesForPass, reconcileOrphans -> selectMinterForSet),
+// never held across this body, so there is no lock-ordering deadlock.
+func (b *backend) runReconcilePass(ctx context.Context, storage logical.Storage, roleNames []string, dryRun bool) reconcileResult {
+	b.rotateReconcileMu.Lock()
+	defer b.rotateReconcileMu.Unlock()
+
+	pass := &reconcilePass{
+		knownTokenIDs: collectKnownTokenIDs(ctx, storage, roleNames),
+		dryRun:        dryRun,
+		maxDeletes:    b.maxDeletesForPass(),
+	}
+	return b.reconcileOrphans(ctx, storage, roleNames, pass)
+}
+
 // reconcileOrphans lists upstream tokens for every role and deletes those that
 // carry our owner prefix but are not recorded in slot storage. When dryRun is
 // true no deletes are issued, but orphans are still counted. deleted never
@@ -156,12 +178,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	maxDeletes := b.maxDeletesForPass()
-	pass := &reconcilePass{
-		knownTokenIDs: collectKnownTokenIDs(ctx, req.Storage, roleNames),
-		dryRun:        dryRun,
-		maxDeletes:    maxDeletes,
-	}
-	res := b.reconcileOrphans(ctx, req.Storage, roleNames, pass)
+	res := b.runReconcilePass(ctx, req.Storage, roleNames, dryRun)
 
 	emitOrphansFound(res.orphansFound)
 

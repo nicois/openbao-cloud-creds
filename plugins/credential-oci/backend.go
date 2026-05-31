@@ -30,6 +30,20 @@ type backend struct {
 	// by one goroutine while another is still Start()ing it. Multiple writes
 	// (config + each minter set) each fire startWorkers, so overlap is common.
 	workerLifecycleMu sync.Mutex
+	// rotateReconcileMu serializes a slot rotation (create+persist+delete) against
+	// a reconcile pass (snapshot known-set -> list upstream -> delete unknowns).
+	// Without it a rotation can land mid-reconcile: the reconcile snapshot is taken
+	// before the upstream list, so a token created+persisted by rotation in that
+	// window is present upstream but absent from the stale snapshot, and reconcile
+	// deletes the freshly-rotated live token (audit F4).
+	//
+	// Lock ordering: rotateReconcileMu is the OUTERMOST lock. b.mu (the request /
+	// config RWMutex) is only ever acquired-and-released INSIDE the helper calls
+	// (selectMinterForSet, clientForSlot, maxDeletesForPass, etc.) — it is never
+	// held across a rotation or reconcile body, so it can never be held while
+	// acquiring rotateReconcileMu. No nesting in the opposite order exists, so
+	// there is no deadlock.
+	rotateReconcileMu sync.Mutex
 	config            *cloudconfig.PluginConfig
 	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
 	region            string

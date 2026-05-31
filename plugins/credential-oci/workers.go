@@ -134,12 +134,7 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		return err
 	}
 
-	pass := &reconcilePass{
-		knownTokenIDs: collectKnownTokenIDs(ctx, storage, roleNames),
-		dryRun:        false,
-		maxDeletes:    b.maxDeletesForPass(),
-	}
-	res := b.reconcileOrphans(ctx, storage, roleNames, pass)
+	res := b.runReconcilePass(ctx, storage, roleNames, false)
 
 	emitOrphansFound(res.orphansFound)
 	return nil

@@ -3,6 +3,7 @@ package credentialoci
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 // AuthTokenInfo represents metadata about an existing OCI auth token.
@@ -61,7 +62,14 @@ func (c *signingOCIClient) GetUser(_ context.Context, _ string) error {
 }
 
 // fakeOCIClient is an in-memory implementation of OCIIAMClient for testing.
+//
+// The fake is shared between the test goroutine and the background
+// rotation/reconcile workers, which call its methods concurrently. mu guards
+// every field; without it -race reports a data race / "concurrent map writes"
+// (audit F3). All methods are leaves (none calls another fake method), so a
+// plain Lock/defer-Unlock per method is re-entrancy-safe.
 type fakeOCIClient struct {
+	mu       sync.Mutex
 	tokens   map[string]map[string]*fakeToken // userID -> tokenID -> token
 	nextID   int
 	failNext error
@@ -86,10 +94,14 @@ func newFakeOCIClient() *fakeOCIClient {
 }
 
 func (f *fakeOCIClient) SetNextError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.failNext = err
 }
 
 func (f *fakeOCIClient) CreateAuthToken(_ context.Context, userID, description string) (tokenValue, tokenID string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.failNext != nil {
 		err = f.failNext
 		f.failNext = nil
@@ -114,6 +126,8 @@ func (f *fakeOCIClient) CreateAuthToken(_ context.Context, userID, description s
 }
 
 func (f *fakeOCIClient) DeleteAuthToken(_ context.Context, userID, tokenID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.failNext != nil {
 		err := f.failNext
 		f.failNext = nil
@@ -127,6 +141,8 @@ func (f *fakeOCIClient) DeleteAuthToken(_ context.Context, userID, tokenID strin
 }
 
 func (f *fakeOCIClient) ListAuthTokens(_ context.Context, userID string) ([]AuthTokenInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.failNext != nil {
 		err := f.failNext
 		f.failNext = nil
@@ -147,6 +163,8 @@ func (f *fakeOCIClient) ListAuthTokens(_ context.Context, userID string) ([]Auth
 }
 
 func (f *fakeOCIClient) GetUser(_ context.Context, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.failNext != nil {
 		err := f.failNext
 		f.failNext = nil
@@ -157,6 +175,8 @@ func (f *fakeOCIClient) GetUser(_ context.Context, _ string) error {
 
 // TokenCount returns the total number of tokens across all users (for testing).
 func (f *fakeOCIClient) TokenCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	count := 0
 	for _, userTokens := range f.tokens {
 		count += len(userTokens)
@@ -166,6 +186,8 @@ func (f *fakeOCIClient) TokenCount() int {
 
 // TokenCountForUser returns the number of tokens for a specific user (for testing).
 func (f *fakeOCIClient) TokenCountForUser(userID string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if userTokens, ok := f.tokens[userID]; ok {
 		return len(userTokens)
 	}

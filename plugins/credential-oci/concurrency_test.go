@@ -25,10 +25,6 @@ const (
 // ---------------------------------------------------------------------------
 
 func TestFakeOCIClient_ConcurrentAccess(t *testing.T) {
-	t.Skip("RED until Task 5 fix (audit F3): fakeOCIClient.tokens map is unguarded; " +
-		"-race reports a data race / 'concurrent map writes' under concurrent " +
-		"CreateAuthToken+ListAuthTokens+TokenCount. Unskip once the fake takes a mutex.")
-
 	f := newFakeOCIClient()
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -52,138 +48,96 @@ func TestFakeOCIClient_ConcurrentAccess(t *testing.T) {
 // it to slot storage in that window, the new live token is present upstream but
 // absent from the stale snapshot, so reconcileOrphans deletes it.
 //
-// This test reproduces that exact interleaving deterministically by wrapping the
-// fake client: the wrapper's ListAuthTokens (called only by reconcile) blocks
-// until a concurrent rotation has created + persisted its new token. We then
-// assert the freshly-rotated live token survives the reconcile pass.
+// The fix serializes the two operations with rotateReconcileMu: a rotation's
+// create+persist+delete and a reconcile pass's snapshot+list+delete are now
+// mutually exclusive, so the destructive interleaving above is IMPOSSIBLE — one
+// runs fully before the other.
 //
-// Interleaving forced (logical order):
-//
-//	reconcile: collectKnownTokenIDs() -> snapshot S (does NOT contain new token)
-//	reconcile: ListAuthTokens()       -> BLOCKS on gate
-//	rotation : CreateAuthToken()       -> new token T added upstream
-//	rotation : saveSlot()              -> T persisted to slot storage (too late for S)
-//	rotation : (releases gate)
-//	reconcile: ListAuthTokens() returns -> includes T
-//	reconcile: T not in S, has our prefix -> DELETE T   <-- destructive if unguarded
+// Why the test changed: the original test forced that interleaving by gating
+// reconcile's ListAuthTokens until a concurrent rotation had persisted its new
+// token. With proper serialization that gate would deadlock (reconcile holds
+// rotateReconcileMu while blocked in ListAuthTokens; rotation can't acquire it to
+// persist), which would merely prove the lock holds — but a deadlocking test is
+// a bad regression test. So this now runs rotation and reconcile concurrently
+// through the LOCKED entry points (rotateSlot / runReconcilePass) over many
+// trials with randomized ordering, and asserts the freshly-rotated live token
+// always survives. Under the old unguarded code the snapshot+delete could still
+// straddle a rotation and delete the live token; the race detector plus the
+// repeated trials catch any regression.
 func TestRotationReconcileRace(t *testing.T) {
-	t.Skip("RED until Task 5 fix (audit F4): with the known-set snapshot taken " +
-		"before the upstream list, a rotation that creates+persists a new token in " +
-		"that window leaves the new live token absent from the snapshot, so " +
-		"reconcileOrphans deletes it. Unskip once reconcile is serialized against " +
-		"rotation (or re-checks slot storage before deleting).")
+	const trials = 50
 
-	b, storage, fake := newInternalConfiguredBackend(t)
+	for trial := 0; trial < trials; trial++ {
+		b, storage, fake := newInternalConfiguredBackend(t)
 
-	role, ok := loadRole(context.Background(), storage, "test-role")
-	if !ok {
-		t.Fatal("test-role not found after setup")
-	}
+		role, ok := loadRole(context.Background(), storage, "test-role")
+		if !ok {
+			t.Fatal("test-role not found after setup")
+		}
 
-	// listEntered is closed by the wrapper when reconcile enters ListAuthTokens
-	// (i.e. AFTER the known-set snapshot has been taken). rotationDone is closed
-	// once rotation has created + persisted the replacement token. The wrapper
-	// waits on rotationDone before returning the upstream list, guaranteeing the
-	// stale-snapshot interleaving.
-	listEntered := make(chan struct{})
-	rotationDone := make(chan struct{})
-	var once sync.Once
+		// Force slot 0 due for rotation: rewrite its NextRotationAt into the past.
+		s0, err := loadSlot(context.Background(), storage, "test-role", 0)
+		if err != nil || s0 == nil {
+			t.Fatalf("loadSlot(0): err=%v slot=%v", err, s0)
+		}
+		s0.NextRotationAt = time.Now().Add(-time.Hour)
+		if err := saveSlot(context.Background(), storage, "test-role", s0); err != nil {
+			t.Fatalf("saveSlot(0): %v", err)
+		}
 
-	gated := &gatingClient{
-		inner: fake,
-		onList: func() {
-			once.Do(func() { close(listEntered) })
-			<-rotationDone
-		},
-	}
-	b.SetClientFactory(func(string) OCIIAMClient { return gated })
-
-	// Force slot 0 due for rotation: rewrite its NextRotationAt into the past.
-	s0, err := loadSlot(context.Background(), storage, "test-role", 0)
-	if err != nil || s0 == nil {
-		t.Fatalf("loadSlot(0): err=%v slot=%v", err, s0)
-	}
-	s0.NextRotationAt = time.Now().Add(-time.Hour)
-	if err := saveSlot(context.Background(), storage, "test-role", s0); err != nil {
-		t.Fatalf("saveSlot(0): %v", err)
-	}
-
-	tokensBefore := fake.TokenCount()
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Reconcile goroutine: snapshots known-set, then blocks in ListAuthTokens.
-	go func() {
-		defer wg.Done()
+		tokensBefore := fake.TokenCount()
 		roleNames := []string{"test-role"}
-		pass := &reconcilePass{
-			knownTokenIDs: collectKnownTokenIDs(context.Background(), storage, roleNames),
-			dryRun:        false,
-			maxDeletes:    b.maxDeletesForPass(),
+
+		// startGate releases both goroutines at once so their locked regions race
+		// to acquire rotateReconcileMu in arbitrary order across trials.
+		startGate := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		// Reconcile goroutine: full pass through the LOCKED entry point
+		// (snapshot+list+delete are atomic under rotateReconcileMu).
+		go func() {
+			defer wg.Done()
+			<-startGate
+			b.runReconcilePass(context.Background(), storage, roleNames, false)
+		}()
+
+		// Rotation goroutine: rotates slot 0 through the LOCKED entry point
+		// (create+persist+delete atomic under rotateReconcileMu).
+		go func() {
+			defer wg.Done()
+			<-startGate
+			if err := b.rotateSlot(context.Background(), storage, role, 0); err != nil {
+				t.Errorf("trial %d: rotateSlot: %v", trial, err)
+			}
+		}()
+
+		close(startGate)
+		wg.Wait()
+
+		// The freshly-rotated slot's token must still exist upstream. rotateSlot
+		// creates a new token and deletes the OLD one, so net upstream count is
+		// unchanged (tokensBefore). If reconcile destroyed the new live token, the
+		// count drops below tokensBefore.
+		newS0, err := loadSlot(context.Background(), storage, "test-role", 0)
+		if err != nil || newS0 == nil {
+			t.Fatalf("trial %d: loadSlot(0) after: err=%v slot=%v", trial, err, newS0)
 		}
-		b.reconcileOrphans(context.Background(), storage, roleNames, pass)
-	}()
-
-	// Rotation goroutine: waits until reconcile is blocked in ListAuthTokens
-	// (snapshot already taken), then rotates slot 0, creating + persisting a new
-	// token, then releases reconcile.
-	go func() {
-		defer wg.Done()
-		<-listEntered
-		if err := b.rotateSlot(context.Background(), storage, role, 0); err != nil {
-			t.Errorf("rotateSlot: %v", err)
+		if !fake.hasToken(role.UserOCID, newS0.TokenID) {
+			t.Fatalf("trial %d: freshly-rotated live token %q was deleted by reconcile (F4 regression)",
+				trial, newS0.TokenID)
 		}
-		close(rotationDone)
-	}()
-
-	wg.Wait()
-
-	// The freshly-rotated slot's token must still exist upstream. rotateSlot
-	// creates a new token and deletes the OLD one, so net upstream count is
-	// unchanged (tokensBefore). If reconcile destroyed the new live token, the
-	// count drops below tokensBefore.
-	newS0, err := loadSlot(context.Background(), storage, "test-role", 0)
-	if err != nil || newS0 == nil {
-		t.Fatalf("loadSlot(0) after: err=%v slot=%v", err, newS0)
+		if got := fake.TokenCount(); got < tokensBefore {
+			t.Fatalf("trial %d: upstream token count dropped from %d to %d: reconcile deleted a live token (F4 regression)",
+				trial, tokensBefore, got)
+		}
 	}
-	if !fake.hasToken(role.UserOCID, newS0.TokenID) {
-		t.Fatalf("freshly-rotated live token %q was deleted by reconcile (F4 REAL)", newS0.TokenID)
-	}
-	if got := fake.TokenCount(); got < tokensBefore {
-		t.Fatalf("upstream token count dropped from %d to %d: reconcile deleted a live token (F4 REAL)",
-			tokensBefore, got)
-	}
-}
-
-// gatingClient wraps a real OCIIAMClient and runs onList just after entering
-// ListAuthTokens, letting a test pin the rotation-vs-reconcile interleaving.
-type gatingClient struct {
-	inner  OCIIAMClient
-	onList func()
-}
-
-func (g *gatingClient) CreateAuthToken(ctx context.Context, userID, description string) (tokenValue, tokenID string, err error) {
-	return g.inner.CreateAuthToken(ctx, userID, description)
-}
-
-func (g *gatingClient) DeleteAuthToken(ctx context.Context, userID, tokenID string) error {
-	return g.inner.DeleteAuthToken(ctx, userID, tokenID)
-}
-
-func (g *gatingClient) ListAuthTokens(ctx context.Context, userID string) ([]AuthTokenInfo, error) {
-	if g.onList != nil {
-		g.onList()
-	}
-	return g.inner.ListAuthTokens(ctx, userID)
-}
-
-func (g *gatingClient) GetUser(ctx context.Context, userID string) error {
-	return g.inner.GetUser(ctx, userID)
 }
 
 // hasToken reports whether the fake still holds the given token for a user.
 func (f *fakeOCIClient) hasToken(userID, tokenID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	userTokens, ok := f.tokens[userID]
 	if !ok {
 		return false

@@ -6,8 +6,8 @@ Each finding: verdict (REAL / REFUTED / DOCUMENTED-RISK), artifact (test path or
 |---|---------|---------|----------|--------|
 | F1 | Reconciler ConfirmationHold guard dead (6 plugins) | REAL (fixed) | static: reconciler.go:62 gated on CreatedAt, no lister set it; Task 3 fail-closed + Task 4 populates CreatedAt (4 of 6 clouds; exoscale/vultr have no list timestamp → fail-closed) | fixed (Task 3,4) |
 | F2 | GCP/OVH no HTTP client timeout | REAL | static: http.DefaultClient at iam_client.go + token_client.go | fix (Task 8) |
-| F3 | OCI fakeOCIClient unsynchronized map | REAL | test: TestFakeOCIClient_ConcurrentAccess (-race) | fix (Task 5) |
-| F4 | OCI rotation-vs-reconcile delete race | REAL | test: TestRotationReconcileRace | fix (Task 5) |
+| F3 | OCI fakeOCIClient unsynchronized map | REAL (fixed) | test: TestFakeOCIClient_ConcurrentAccess (-race) | fixed (Task 5): mutex on fakeOCIClient |
+| F4 | OCI rotation-vs-reconcile delete race | REAL (fixed) | test: TestRotationReconcileRace | fixed (Task 5): rotateReconcileMu serializes rotation vs reconcile |
 | F5 | Reconciler DeleteEntity not 404-idempotent (5 plugins) | TBD | Task 6 | — |
 | F6 | Create-then-track: untracked live cred on Put failure | TBD | Task 7 | — |
 | F7 | Azure addPassword Graph propagation lag | TBD | Task 9 | — |
@@ -69,6 +69,8 @@ fatal error: concurrent map writes
 
 The test is currently `t.Skip`-guarded (RED until the Task 5 fix adds a mutex to the fake); Task 5 unskips it.
 
+**Fix applied (Task 5):** added `mu sync.Mutex` to `fakeOCIClient` and guard every field-touching method (`SetNextError`, `CreateAuthToken`, `DeleteAuthToken`, `ListAuthTokens`, `GetUser`, `TokenCount`, `TokenCountForUser`, plus the test-only `hasToken`) with `f.mu.Lock(); defer f.mu.Unlock()`. All methods are leaves (none calls another fake method), so a plain per-method lock is re-entrancy-safe. `t.Skip` removed; `TestFakeOCIClient_ConcurrentAccess` now passes under `go test -race -count=3` with no data race.
+
 ### F4 — OCI rotation-vs-reconcile delete race — REAL
 Reconcile (`reconcileWorker`, workers.go:131) first snapshots the known token IDs from slot storage via `collectKnownTokenIDs` (path_reconcile.go:61), THEN — inside `reconcileOrphans` (path_reconcile.go:100) — calls `client.ListAuthTokens` upstream and deletes every prefixed token NOT in that snapshot (`reconcileRoleTokens`, path_reconcile.go:126-143). Rotation (`rotateSlot`, slots.go:154) creates the replacement token upstream (CreateAuthToken, slots.go:171), persists it to slot storage (saveSlot, slots.go:192), then deletes the old token. There is no lock serializing the two paths.
 
@@ -86,3 +88,13 @@ reconcile: T has our prefix, T not in S -> DeleteAuthToken(T)   <-- live token d
 Artifact: `TestRotationReconcileRace`. Result: the freshly-rotated live token (`ocid1.credential.oc1..fake1003`) WAS deleted by the reconcile pass — `fake.hasToken(...)` returned false and the assertion fired (`freshly-rotated live token ... was deleted by reconcile (F4 REAL)`), reproducibly across repeated runs. The slot is left pointing at a token that no longer exists upstream — a wedged credential until the next rotation.
 
 The test is currently `t.Skip`-guarded (RED until the Task 5 fix serializes reconcile against rotation, e.g. a shared mutex or a post-list re-check of slot storage before deleting); Task 5 unskips it.
+
+**Fix applied (Task 5):** added a dedicated `rotateReconcileMu sync.Mutex` to `backend` (NOT the request-path `b.mu`, to avoid contending issuance). It is held for the whole of:
+- a slot rotation's create+persist+delete (`rotateSlot`, slots.go), and
+- a reconcile pass's snapshot+list+delete — a new `runReconcilePass` helper (path_reconcile.go) takes the lock, then does `collectKnownTokenIDs` → `reconcileOrphans` as one atomic span. Both the background `reconcileWorker` and the manual `pathReconcile` now route through `runReconcilePass`, so they share the same serialization.
+
+The snapshot MUST be inside the lock (not just `reconcileOrphans`): otherwise a rotation landing between snapshot and list still leaves the new token absent from the stale snapshot. Holding the lock across snapshot+list+delete makes the destructive interleaving impossible — rotation and reconcile now run fully serially.
+
+Lock-ordering: `rotateReconcileMu` is the OUTERMOST lock. `b.mu` is only ever acquired-and-released INSIDE helper calls (`selectMinterForSet`, `clientForSlot`, `maxDeletesForPass`) and is never held across a rotation or reconcile body, so it can never be held while acquiring `rotateReconcileMu`. No opposite-order nesting exists ⇒ no deadlock.
+
+**Test adjustment:** the original test forced the bad interleaving by gating reconcile's `ListAuthTokens` until rotation had persisted. With serialization that gate would deadlock (reconcile holds `rotateReconcileMu` while blocked in `ListAuthTokens`; rotation can't acquire it to persist) — a deadlocking test is a poor regression test. The test was rewritten to run rotation (`rotateSlot`) and reconcile (`runReconcilePass`) concurrently through the LOCKED entry points over 50 trials with a shared start-gate so their locked regions race to acquire the mutex in arbitrary order, asserting the freshly-rotated live token survives every trial. Verified this still catches the bug: temporarily removing both `rotateReconcileMu` Lock/Unlock pairs makes the test FAIL (`freshly-rotated live token ... was deleted by reconcile (F4 regression)`); restored, it passes under `go test -race -count=3`.
