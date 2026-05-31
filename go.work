@@ -5,6 +5,7 @@ use (
 	./pkg/credenvelope
 	./pkg/localexpiry
 	./pkg/metrics
+	./pkg/metricspath
 	./pkg/plugintest
 	./pkg/reconciler
 	./pkg/recovery
