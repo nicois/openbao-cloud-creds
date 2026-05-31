@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
@@ -17,7 +18,7 @@ func (b *backend) credsPaths() []*framework.Path {
 		{
 			Pattern: "creds/" + framework.GenericNameRegex("role"),
 			Fields: map[string]*framework.FieldSchema{
-				"role": {
+				fieldRole: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
@@ -38,7 +39,7 @@ func (b *backend) secretExoscale() *framework.Secret {
 }
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	roleName := d.Get("role").(string)
+	roleName := d.Get(fieldRole).(string)
 
 	// Load role from storage
 	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
@@ -59,12 +60,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	// Select a healthy minter from the role's bound set
-	setName, minterID, client, err := b.selectMinter(role.MinterSet)
+	sel, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		// selectMinter fails when the set is unloaded or every minter in it is
 		// failing — both surface to the client as an upstream auth failure.
 		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", err.Error()), nil
 	}
+	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
 	// Mint API key via Exoscale API
 	keyName := fmt.Sprintf("cloud-creds-%s-%s", roleName, req.ID)
@@ -89,7 +91,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	expiresAt := now.Add(role.DefaultTTL)
 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
-		Cloud: "exoscale",
+		Cloud: cloudName,
 		Role:  roleName,
 		Credential: map[string]interface{}{
 			"key": keyResp.Key,
@@ -106,7 +108,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	// Track active key for reconciler
 	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+keyResp.KeyID, map[string]interface{}{
-		"role":    roleName,
+		fieldRole: roleName,
 		"minter":  minterID,
 		"created": now.UTC().Format(time.RFC3339),
 	})
@@ -118,8 +120,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	resp := b.Secret("exoscale_api_key").Response(env.ToMap(), map[string]interface{}{
 		"upstream_key_id": keyResp.KeyID,
-		"role":            roleName,
-		"minter_set":      setName,
+		fieldRole:         roleName,
+		fieldMinterSet:    setName,
 		"minter_id":       minterID,
 	})
 	resp.Secret.TTL = role.DefaultTTL
@@ -134,7 +136,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		return nil, fmt.Errorf("missing upstream_key_id in internal_data")
 	}
 
-	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
+	minterSet, _ := req.Secret.InternalData[fieldMinterSet].(string)
 	minterID, _ := req.Secret.InternalData["minter_id"].(string)
 	client, err := b.getMinter(minterSet, minterID)
 	if err != nil {
@@ -148,11 +150,11 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		}
 	}
 
-	roleName, _ := req.Secret.InternalData["role"].(string)
+	roleName, _ := req.Secret.InternalData[fieldRole].(string)
 
 	now := time.Now()
 	httpStatus, err := client.DeleteAPIKey(ctx, keyID)
-	if err != nil && httpStatus != 404 {
+	if err != nil && httpStatus != http.StatusNotFound {
 		b.recordMinterError(minterSet, minterID, httpStatus, now)
 		emitLeaseRevokeFailed(roleName)
 		return nil, fmt.Errorf("revoke failed: %v", err)
@@ -175,21 +177,29 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *f
 	return resp, nil
 }
 
-func (b *backend) selectMinter(setName string) (setID, minterID string, client *exoscaleClient, err error) {
+// selectedMinter bundles the result of selectMinter: the set and minter that
+// were chosen plus a ready-to-use client for them.
+type selectedMinter struct {
+	setID    string
+	minterID string
+	client   *exoscaleClient
+}
+
+func (b *backend) selectMinter(setName string) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	states, ok := b.minterSets[setName]
 	if !ok {
-		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	apiURL := b.exoscaleAPIURL()
 	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			return setName, id, newExoscaleClient(apiURL, ms.minter.Token), nil
+			return selectedMinter{setID: setName, minterID: id, client: newExoscaleClient(apiURL, ms.minter.Token)}, nil
 		}
 	}
-	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+	return selectedMinter{}, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
 }
 
 // anyHealthyMinter returns a client for any healthy minter across all sets.

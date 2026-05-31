@@ -17,7 +17,7 @@ func (b *backend) minterSetPaths() []*framework.Path {
 		{
 			Pattern: "minter-sets/" + framework.GenericNameRegex("name"),
 			Fields: map[string]*framework.FieldSchema{
-				"name":    {Type: framework.TypeString, Description: "Name of the minter set"},
+				fieldName: {Type: framework.TypeString, Description: "Name of the minter set"},
 				"minters": {Type: framework.TypeSlice, Description: "Minter credentials in this set"},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -73,7 +73,7 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 }
 
 func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	if err := cloudconfig.ValidateSetName(name); err != nil {
 		return logical.ErrorResponse(err.Error()), nil
 	}
@@ -98,7 +98,7 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 }
 
 func (b *backend) pathMinterSetRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "minter-sets/"+name)
 	if err != nil {
 		return nil, err
@@ -120,7 +120,7 @@ func (b *backend) pathMinterSetRead(ctx context.Context, req *logical.Request, d
 }
 
 func (b *backend) pathMinterSetDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	if err := req.Storage.Delete(ctx, "minter-sets/"+name); err != nil {
 		return nil, err
 	}
@@ -147,8 +147,8 @@ func (b *backend) loadMinterSet(set *cloudconfig.MinterSet) {
 			set:    set.Name,
 			minter: m,
 			sm: recovery.NewStateMachine(recovery.Config{
-				AuthFailThreshold:   30 * time.Second,
-				HealthCheckInterval: 5 * time.Minute,
+				AuthFailThreshold:   authFailThreshold,
+				HealthCheckInterval: healthCheckInterval,
 			}),
 		}
 	}

@@ -17,12 +17,12 @@ func (b *backend) configPaths() []*framework.Path {
 			Fields: map[string]*framework.FieldSchema{
 				"flush_interval": {
 					Type:        framework.TypeDurationSecond,
-					Default:     900,
+					Default:     defaultFlushIntervalSeconds,
 					Description: "Metrics flush interval in seconds",
 				},
 				"reconcile_cadence": {
 					Type:        framework.TypeDurationSecond,
-					Default:     21600,
+					Default:     defaultReconcileCadenceSeconds,
 					Description: "Reconciliation cadence in seconds",
 				},
 				"exoscale_api_url": {
@@ -44,11 +44,11 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
-		Cloud:             "exoscale",
+		Cloud:             cloudName,
 		FlushInterval:     flushInterval,
 		ReconcileCadence:  reconcileCadence,
-		BootstrapDelay:    24 * time.Hour,
-		MaxDeletesPerPass: 10,
+		BootstrapDelay:    reconcilerBootstrapDelay,
+		MaxDeletesPerPass: maxDeletesPerPass,
 	}
 
 	entry, err := logical.StorageEntryJSON("config", cfg)
@@ -130,7 +130,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"cloud":             cfg.Cloud,
+			fieldCloud:          cfg.Cloud,
 			"flush_interval":    int(cfg.FlushInterval.Seconds()),
 			"reconcile_cadence": int(cfg.ReconcileCadence.Seconds()),
 		},
