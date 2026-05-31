@@ -19,6 +19,11 @@ func (b *backend) reconcilePaths() []*framework.Path {
 					Default:     "normal",
 					Description: "Run mode: normal or dry_run",
 				},
+				"confirmation_hold": {
+					Type:        framework.TypeDurationSecond,
+					Default:     int(time.Hour.Seconds()),
+					Description: "Grace period (seconds) below which a recently-created orphan is not deleted. Operator requests are floored at the reconciler minimum (5m). Default: the worker hold (1h).",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathReconcile},
@@ -31,6 +36,14 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	mode := d.Get("mode").(string)
 	dryRun := mode == "dry_run"
 
+	requestedHold := time.Duration(d.Get("confirmation_hold").(int)) * time.Second
+	effectiveHold := requestedHold
+	if effectiveHold < reconciler.MinConfirmationHold {
+		b.Logger().Info("manual reconcile: raising requested confirmation_hold to the floor",
+			"requested", requestedHold.String(), "floor", reconciler.MinConfirmationHold.String())
+		effectiveHold = reconciler.MinConfirmationHold
+	}
+
 	client, err := b.anyHealthyMinter()
 	if err != nil {
 		return logical.ErrorResponse("cannot reconcile: %v", err), nil
@@ -41,7 +54,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 
 	cfg := reconciler.Config{
 		MaxDeletesPerPass: maxDeletesPerPass,
-		ConfirmationHold:  0,
+		ConfirmationHold:  effectiveHold,
 		DryRun:            dryRun,
 	}
 
@@ -60,12 +73,13 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"mode":          mode,
-			"dry_run":       dryRun,
-			"orphans_found": len(result.OrphansFound),
-			"deleted":       result.Deleted,
-			"hit_limit":     result.HitLimit,
-			"delete_errors": len(result.Errors),
+			"mode":              mode,
+			"dry_run":           dryRun,
+			"confirmation_hold": effectiveHold.String(),
+			"orphans_found":     len(result.OrphansFound),
+			"deleted":           result.Deleted,
+			"hit_limit":         result.HitLimit,
+			"delete_errors":     len(result.Errors),
 		},
 	}, nil
 }
