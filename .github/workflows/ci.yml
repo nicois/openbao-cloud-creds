@@ -38,7 +38,7 @@ jobs:
 
       - name: Lint
         run: |
-          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/localexpiry pkg/worker pkg/plugintest \
+          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/localexpiry pkg/worker pkg/plugintest pkg/telemetry pkg/metricspath \
                      plugins/credential-akamai plugins/credential-aws plugins/credential-azure \
                      plugins/credential-do plugins/credential-exoscale plugins/credential-gcp \
                      plugins/credential-oci plugins/credential-ovh plugins/credential-upcloud \
@@ -61,7 +61,7 @@ jobs:
 
       - name: Run govulncheck (per module)
         run: |
-          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/localexpiry pkg/worker pkg/plugintest \
+          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/localexpiry pkg/worker pkg/plugintest pkg/telemetry pkg/metricspath \
                      plugins/credential-akamai plugins/credential-aws plugins/credential-azure \
                      plugins/credential-do plugins/credential-exoscale plugins/credential-gcp \
                      plugins/credential-oci plugins/credential-ovh plugins/credential-upcloud \
