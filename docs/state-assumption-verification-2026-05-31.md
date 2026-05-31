@@ -6,8 +6,8 @@ Each finding: verdict (REAL / REFUTED / DOCUMENTED-RISK), artifact (test path or
 |---|---------|---------|----------|--------|
 | F1 | Reconciler ConfirmationHold guard dead (6 plugins) | REAL | static: reconciler.go:62 gated on CreatedAt, no lister sets it | fix (Task 3,4) |
 | F2 | GCP/OVH no HTTP client timeout | REAL | static: http.DefaultClient at iam_client.go + token_client.go | fix (Task 8) |
-| F3 | OCI fakeOCIClient unsynchronized map | TBD | Task 2 | — |
-| F4 | OCI rotation-vs-reconcile delete race | TBD | Task 2 | — |
+| F3 | OCI fakeOCIClient unsynchronized map | REAL | test: TestFakeOCIClient_ConcurrentAccess (-race) | fix (Task 5) |
+| F4 | OCI rotation-vs-reconcile delete race | REAL | test: TestRotationReconcileRace | fix (Task 5) |
 | F5 | Reconciler DeleteEntity not 404-idempotent (5 plugins) | TBD | Task 6 | — |
 | F6 | Create-then-track: untracked live cred on Put failure | TBD | Task 7 | — |
 | F7 | Azure addPassword Graph propagation lag | TBD | Task 9 | — |
@@ -21,3 +21,39 @@ The guard lives at `pkg/reconciler/reconciler.go:62`: `if r.config.ConfirmationH
 
 ### F2 — GCP/OVH lack client-side HTTP timeout
 GCP issues requests via `http.DefaultClient.Do(req)` at `plugins/credential-gcp/iam_client.go:156` and `:208`; OVH via `http.DefaultClient.Do(req)` at `plugins/credential-ovh/token_client.go:63`. `http.DefaultClient` has no `Timeout` set, so a hung upstream can block indefinitely. By contrast DO (representative of the other 7 plugins) builds its client with an explicit timeout: `plugins/credential-do/do_client.go:13-14` defines `const httpTimeout = 30 * time.Second` and lines 48-49 construct `&http.Client{ Timeout: httpTimeout }`. Verdict: REAL.
+
+### F3 — OCI fakeOCIClient unsynchronized map — REAL
+`fakeOCIClient` (`plugins/credential-oci/oci_client.go:64`) holds `tokens map[string]map[string]*fakeToken`, `nextID int`, and `failNext error` with NO mutex, yet it is shared between the test/request goroutine and the background rotation + reconcile workers (which run as independent goroutines via `worker.Manager`). `CreateAuthToken` writes the map (oci_client.go:99,106), `ListAuthTokens` iterates it (oci_client.go:138), `DeleteAuthToken` deletes from it (oci_client.go:124), and `TokenCount` ranges over it (oci_client.go:161) — all unguarded.
+
+Artifact: `TestFakeOCIClient_ConcurrentAccess` (8 goroutines × 100 iterations of CreateAuthToken+TokenCount+ListAuthTokens). Under `go test -race` it reports a data race and the runtime aborts with `fatal error: concurrent map writes`:
+
+```
+WARNING: DATA RACE
+Read at 0x... by goroutine 12:
+  (*fakeOCIClient).CreateAuthToken()  oci_client.go:99
+Previous write at 0x... by goroutine 15:
+  (*fakeOCIClient).CreateAuthToken()  oci_client.go:99
+...
+fatal error: concurrent map writes
+  (*fakeOCIClient).ListAuthTokens(...)  oci_client.go:138
+```
+
+The test is currently `t.Skip`-guarded (RED until the Task 5 fix adds a mutex to the fake); Task 5 unskips it.
+
+### F4 — OCI rotation-vs-reconcile delete race — REAL
+Reconcile (`reconcileWorker`, workers.go:131) first snapshots the known token IDs from slot storage via `collectKnownTokenIDs` (path_reconcile.go:61), THEN — inside `reconcileOrphans` (path_reconcile.go:100) — calls `client.ListAuthTokens` upstream and deletes every prefixed token NOT in that snapshot (`reconcileRoleTokens`, path_reconcile.go:126-143). Rotation (`rotateSlot`, slots.go:154) creates the replacement token upstream (CreateAuthToken, slots.go:171), persists it to slot storage (saveSlot, slots.go:192), then deletes the old token. There is no lock serializing the two paths.
+
+Destructive interleaving constructed (deterministically, via a `gatingClient` wrapper whose `ListAuthTokens` blocks until rotation has created+persisted its new token):
+
+```
+reconcile: collectKnownTokenIDs() -> snapshot S (old token IDs only)
+reconcile: ListAuthTokens()        -> BLOCKS on gate
+rotation : CreateAuthToken()        -> new token T added upstream
+rotation : saveSlot()               -> T persisted to slot storage (too late for S)
+reconcile: ListAuthTokens() returns -> now includes T
+reconcile: T has our prefix, T not in S -> DeleteAuthToken(T)   <-- live token destroyed
+```
+
+Artifact: `TestRotationReconcileRace`. Result: the freshly-rotated live token (`ocid1.credential.oc1..fake1003`) WAS deleted by the reconcile pass — `fake.hasToken(...)` returned false and the assertion fired (`freshly-rotated live token ... was deleted by reconcile (F4 REAL)`), reproducibly across repeated runs. The slot is left pointing at a token that no longer exists upstream — a wedged credential until the next rotation.
+
+The test is currently `t.Skip`-guarded (RED until the Task 5 fix serializes reconcile against rotation, e.g. a shared mutex or a post-list re-check of slot storage before deleting); Task 5 unskips it.
