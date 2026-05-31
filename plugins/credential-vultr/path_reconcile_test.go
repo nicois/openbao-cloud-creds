@@ -45,6 +45,70 @@ func TestReconcile_NeverDeletesForeignEntity(t *testing.T) {
 	}
 }
 
+// TestPathReconcile_FloorsSubMinHold proves two things at once: an
+// operator-requested confirmation_hold below the 5m floor is raised to the
+// floor (surfaced in the response), and that because Vultr's list API carries
+// no creation timestamp (KI-004), a cloud-creds-prefixed orphan has a zero
+// CreatedAt and is therefore skipped by the fail-closed reconciler whenever
+// the hold is > 0. So a floored manual reconcile deletes nothing here.
+func TestPathReconcile_FloorsSubMinHold(t *testing.T) {
+	srv := fakes.NewVultrServer()
+	defer srv.Close()
+
+	b, storage := setupConfiguredBackend(t, srv.URL)
+
+	// Plant a cloud-creds-prefixed upstream orphan NOT tracked in active-users/.
+	srv.AddRawUser("orphan-1", "cloud-creds-test-role-orphan")
+
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
+		Data: map[string]interface{}{"mode": "normal", "confirmation_hold": 0},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+	if resp != nil && resp.IsError() {
+		t.Fatalf("reconcile error: %v", resp)
+	}
+
+	if got := resp.Data["confirmation_hold"].(string); got != "5m0s" {
+		t.Fatalf("confirmation_hold not floored: got %q want %q", got, "5m0s")
+	}
+	if got := resp.Data["deleted"].(int); got != 0 {
+		t.Fatalf("zero-CreatedAt orphan should be skipped under floor: deleted=%d", got)
+	}
+	if !srv.HasUser("orphan-1") {
+		t.Fatal("orphan with zero CreatedAt was deleted despite the floor (KI-004 fail-closed violated)")
+	}
+}
+
+// TestPathReconcile_DefaultHoldSurfaced proves that when no confirmation_hold
+// field is supplied, the 1h worker default flows through to the response.
+func TestPathReconcile_DefaultHoldSurfaced(t *testing.T) {
+	srv := fakes.NewVultrServer()
+	defer srv.Close()
+
+	b, storage := setupConfiguredBackend(t, srv.URL)
+
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
+		Data: map[string]interface{}{"mode": "normal"},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+	if resp != nil && resp.IsError() {
+		t.Fatalf("reconcile error: %v", resp)
+	}
+
+	if got := resp.Data["confirmation_hold"].(string); got != "1h0m0s" {
+		t.Fatalf("default confirmation_hold not surfaced: got %q want %q", got, "1h0m0s")
+	}
+	if got := resp.Data["deleted"].(int); got != 0 {
+		t.Fatalf("expected no deletions: deleted=%d", got)
+	}
+}
+
 func TestReconcileEndpoint_DryRun(t *testing.T) {
 	srv := fakes.NewVultrServer()
 	defer srv.Close()
