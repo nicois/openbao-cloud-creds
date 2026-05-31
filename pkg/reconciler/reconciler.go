@@ -35,6 +35,15 @@ type Registry interface {
 	IsKnown(id string) bool
 }
 
+// MinConfirmationHold is the floor for an operator-requested confirmation hold
+// on the manual reconcile path. A hold shorter than this (including zero) would
+// re-expose the create-then-track window that the fail-closed guard protects
+// against, so operator-facing callers clamp their requested hold up to this
+// value. NOTE: this floor is applied by callers (the manual /reconcile
+// handlers), NOT inside Run — Run's ConfirmationHold==0 still means "guard
+// disabled" for internal/worker use and existing tests.
+const MinConfirmationHold = 5 * time.Minute
+
 type Config struct {
 	MaxDeletesPerPass int
 	ConfirmationHold  time.Duration

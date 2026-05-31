@@ -239,3 +239,9 @@ func TestRun_SkipsRecentConfirmableOrphan(t *testing.T) {
 		t.Fatalf("expected fresh orphan skipped, got %d", res.Deleted)
 	}
 }
+
+func TestMinConfirmationHold(t *testing.T) {
+	if reconciler.MinConfirmationHold != 5*time.Minute {
+		t.Fatalf("MinConfirmationHold: expected 5m, got %v", reconciler.MinConfirmationHold)
+	}
+}
