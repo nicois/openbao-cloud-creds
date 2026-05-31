@@ -2,6 +2,13 @@ package cloudconfig
 
 import "time"
 
+const (
+	defaultFlushInterval     = 15 * time.Minute
+	defaultReconcileCadence  = 6 * time.Hour
+	defaultBootstrapDelay    = 24 * time.Hour
+	defaultMaxDeletesPerPass = 10
+)
+
 type PluginConfig struct {
 	Cloud             string        `json:"cloud"`
 	Minters           []Minter      `json:"minters"`
@@ -14,9 +21,9 @@ type PluginConfig struct {
 func DefaultConfig(cloud string) *PluginConfig {
 	return &PluginConfig{
 		Cloud:             cloud,
-		FlushInterval:     15 * time.Minute,
-		ReconcileCadence:  6 * time.Hour,
-		BootstrapDelay:    24 * time.Hour,
-		MaxDeletesPerPass: 10,
+		FlushInterval:     defaultFlushInterval,
+		ReconcileCadence:  defaultReconcileCadence,
+		BootstrapDelay:    defaultBootstrapDelay,
+		MaxDeletesPerPass: defaultMaxDeletesPerPass,
 	}
 }

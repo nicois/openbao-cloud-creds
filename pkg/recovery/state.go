@@ -92,6 +92,10 @@ func (sm *StateMachine) RecordError(httpStatus int, at time.Time) {
 
 	case AuthFailing:
 		// Stay in auth_failing
+
+	case Missing:
+		// Already known-missing; an upstream error does not change that.
+		// State only leaves Missing via a successful RecordSuccess.
 	}
 }
 

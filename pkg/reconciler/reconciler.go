@@ -32,21 +32,21 @@ type Result struct {
 	HitLimit     bool
 }
 
-type Reconciler struct {
+type reconciler struct {
 	config   Config
 	cloud    CloudLister
 	registry Registry
 }
 
-func New(cfg Config, cloud CloudLister, registry Registry) *Reconciler {
-	return &Reconciler{
+func New(cfg Config, cloud CloudLister, registry Registry) *reconciler {
+	return &reconciler{
 		config:   cfg,
 		cloud:    cloud,
 		registry: registry,
 	}
 }
 
-func (r *Reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
+func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 	entities, err := r.cloud.ListTaggedEntities(ctx)
 	if err != nil {
 		return nil, err

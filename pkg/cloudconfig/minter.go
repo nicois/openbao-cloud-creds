@@ -48,11 +48,12 @@ func ValidateMinterSet(minters []Minter) error {
 	var expiring []Minter
 
 	for _, m := range minters {
-		if m.NeverExpires {
+		switch {
+		case m.NeverExpires:
 			hasNeverExpires = true
-		} else if !m.ExpiresAt.IsZero() {
+		case !m.ExpiresAt.IsZero():
 			expiring = append(expiring, m)
-		} else {
+		default:
 			return fmt.Errorf("minter %s has neither expires_at nor never_expires=true", m.ID)
 		}
 	}

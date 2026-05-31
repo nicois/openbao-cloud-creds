@@ -209,7 +209,8 @@ func (t *AccessTracker) ListStaleEntities(ctx context.Context, olderThan time.Du
 		if err := json.Unmarshal(data, &entry); err != nil {
 			continue
 		}
-		parts := strings.SplitN(strings.TrimPrefix(key, "metrics/"), "/", 3)
+		const maxKeyParts = 3 // entityID/role/nodeID
+		parts := strings.SplitN(strings.TrimPrefix(key, "metrics/"), "/", maxKeyParts)
 		if len(parts) < 1 {
 			continue
 		}
