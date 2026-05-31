@@ -129,3 +129,19 @@ Artifact (red→green): `TestCredsIssue_TrackingWriteFailureCompensates` in `plu
 **N/A for the 3 no-revoke plugins (AWS, GCP, OVH):** their tracking record is metrics-only — the credential auto-expires upstream and their reconciler never deletes an upstream entity (it only prunes already-expired local tracking entries; confirmed in `plugins/credential-{aws,gcp,ovh}/path_reconcile.go` / `workers.go`). An untracked credential there is harmless: there is nothing to reconcile/revoke and it self-expires. Forcing a failed issuance of an otherwise-valid self-expiring credential would be a regression, so these keep Warn-and-continue, with the log message clarified to state the impact is metrics-only.
 
 All touched tests pass under `go test -race`; lint clean (golangci-lint v2, 0 issues across all touched modules); full build clean.
+
+### F8 — pkg/worker timing tests sleep-based / flaky — REAL
+
+`TestWorkerTicks` slept a fixed 55ms then asserted the tick count was in the band `[4,6]`; `TestWorkerInitialDelay` slept 25ms then 30ms and asserted 0-then-≥1. Both depend on real wall-clock progress under load, so the tight band flakes on a busy CI runner. **Verdict: REAL.**
+
+**Fix applied (Task 10):** both tests converted to `testing/synctest` (GA in Go 1.26.1). Inside `synctest.Test(t, ...)` the clock is fake and advances only when every bubble goroutine is durably blocked; `synctest.Wait()` blocks until that quiescent state is reached. This makes the assertions exact rather than banded.
+
+Scheduling semantics that fix the exact counts (read from `pkg/worker/worker.go` `run()`):
+- `run()` optionally blocks on `time.After(InitialDelay)` first, then creates `time.NewTicker(interval)`. A ticker fires at the END of each interval (`t=interval, 2*interval, …`), never at `t=0`.
+- `invoke()` calls `fn` inline in the run goroutine (no separate goroutine), so once `synctest.Wait()` returns the count is fully settled.
+
+Exact assertions:
+- `TestWorkerTicks` (10ms interval, no delay): advancing 5 full intervals (`t=10,20,30,40,50ms`) fires exactly **5** ticks.
+- `TestWorkerInitialDelay` (30ms delay, 10ms interval): at `t=25ms` (inside the delay) exactly **0** ticks; the delay ends at `t=30ms`, the ticker's first tick is one interval later at `t=40ms`, so at `t=40ms` exactly **1** tick.
+
+`cancel()` + `wm.Wait()` inside the bubble drains the run goroutine (it returns on `ctx.Done()`), so no lingering bubble goroutines. Verified deterministic with `go test -race -count=10 -run 'TestWorkerTicks|TestWorkerInitialDelay'` (10/10 PASS). The other five worker tests (drain/error/error-handler/panic/concurrent-start) were left as-is — they assert loose lower bounds or use their own managers and do not flake.
