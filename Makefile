@@ -1,7 +1,7 @@
 MODULE_PREFIX := github.com/nicois/openbao-cloud-creds
 
 PLUGIN_DIRS := $(patsubst plugins/%/cmd,%,$(wildcard plugins/*/cmd))
-LINT_DIRS := pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/worker pkg/plugintest $(addprefix plugins/,$(PLUGIN_DIRS))
+LINT_DIRS := pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/localexpiry pkg/worker pkg/plugintest $(addprefix plugins/,$(PLUGIN_DIRS))
 
 .PHONY: build test lint fmt clean smoke-test
 
