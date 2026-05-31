@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	jsonKeyClientID   = "clientId"
-	jsonKeyClientName = "clientName"
-	jsonKeyIsLocked   = "isLocked"
-	jsonKeyType       = "type"
-	jsonKeyTitle      = "title"
-	jsonKeyDetail     = "detail"
+	jsonKeyClientID    = "clientId"
+	jsonKeyClientName  = "clientName"
+	jsonKeyIsLocked    = "isLocked"
+	jsonKeyType        = "type"
+	jsonKeyTitle       = "title"
+	jsonKeyDetail      = "detail"
+	jsonKeyCreatedDate = "createdDate"
 )
 
 type AkamaiServer struct {
@@ -60,6 +61,21 @@ func (s *AkamaiServer) AddRawClient(clientID, clientName string) {
 		jsonKeyClientID:   clientID,
 		jsonKeyClientName: clientName,
 		jsonKeyIsLocked:   false,
+	}
+}
+
+// AddRawClientWithCreatedDate injects an API client with an arbitrary clientId,
+// clientName and createdDate (RFC3339) directly into the fake. Test-only: used
+// to plant an orphan with a controlled age for the fail-closed reconciler's
+// confirmation hold.
+func (s *AkamaiServer) AddRawClientWithCreatedDate(clientID, clientName, createdDate string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clients[clientID] = map[string]interface{}{
+		jsonKeyClientID:    clientID,
+		jsonKeyClientName:  clientName,
+		jsonKeyIsLocked:    false,
+		jsonKeyCreatedDate: createdDate,
 	}
 }
 
@@ -174,13 +190,13 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 	clientID := fmt.Sprintf("akamai-client-%d", s.nextID.Add(1))
 
 	client := map[string]interface{}{
-		jsonKeyClientID:   clientID,
-		jsonKeyClientName: req.ClientName,
-		"authorizedUsers": req.AuthorizedUsers,
-		"apiAccess":       req.APIAccess,
-		"groupAccess":     req.GroupAccess,
-		jsonKeyIsLocked:   false,
-		"createdDate":     "2026-01-01T00:00:00Z",
+		jsonKeyClientID:    clientID,
+		jsonKeyClientName:  req.ClientName,
+		"authorizedUsers":  req.AuthorizedUsers,
+		"apiAccess":        req.APIAccess,
+		"groupAccess":      req.GroupAccess,
+		jsonKeyIsLocked:    false,
+		jsonKeyCreatedDate: fakeCreatedAt,
 	}
 
 	var credentials []map[string]interface{}
@@ -248,9 +264,10 @@ func (s *AkamaiServer) listClients(w http.ResponseWriter, r *http.Request) {
 	for _, c := range s.clients {
 		// List does not return credentials
 		clients = append(clients, map[string]interface{}{
-			jsonKeyClientID:   c[jsonKeyClientID],
-			jsonKeyClientName: c[jsonKeyClientName],
-			jsonKeyIsLocked:   c[jsonKeyIsLocked],
+			jsonKeyClientID:    c[jsonKeyClientID],
+			jsonKeyClientName:  c[jsonKeyClientName],
+			jsonKeyIsLocked:    c[jsonKeyIsLocked],
+			jsonKeyCreatedDate: c[jsonKeyCreatedDate],
 		})
 	}
 	s.mu.Unlock()
@@ -268,9 +285,9 @@ func (s *AkamaiServer) getSelf(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
-		jsonKeyClientID:   "minter-self-id",
-		jsonKeyClientName: "cloud-creds-minter",
-		jsonKeyIsLocked:   false,
-		"createdDate":     "2025-01-01T00:00:00Z",
+		jsonKeyClientID:    "minter-self-id",
+		jsonKeyClientName:  "cloud-creds-minter",
+		jsonKeyIsLocked:    false,
+		jsonKeyCreatedDate: "2025-01-01T00:00:00Z",
 	})
 }

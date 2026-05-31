@@ -24,8 +24,9 @@ func (l *upcloudCloudLister) ListTaggedEntities(ctx context.Context) ([]reconcil
 	for _, t := range tokens {
 		if strings.HasPrefix(t.Name, tokenPrefix) {
 			entities = append(entities, reconciler.UpstreamEntity{
-				ID:   t.ID,
-				Name: t.Name,
+				ID:        t.ID,
+				Name:      t.Name,
+				CreatedAt: reconciler.ParseCreatedAt(t.Created),
 			})
 		}
 	}

@@ -27,8 +27,9 @@ func (l *azureCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler
 		for _, pw := range app.PasswordCredentials {
 			if strings.HasPrefix(pw.DisplayName, keyPrefix) {
 				entities = append(entities, reconciler.UpstreamEntity{
-					ID:   pw.KeyID,
-					Name: pw.DisplayName,
+					ID:        pw.KeyID,
+					Name:      pw.DisplayName,
+					CreatedAt: reconciler.ParseCreatedAt(pw.StartDateTime),
 				})
 			}
 		}

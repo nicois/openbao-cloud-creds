@@ -45,6 +45,20 @@ func (s *DOServer) AddRawToken(id, name string) {
 	}
 }
 
+// AddRawTokenWithCreatedAt injects a token with an arbitrary id, name and
+// created_at (RFC3339) directly into the fake. Test-only: used to plant an
+// orphan with a controlled age so the fail-closed reconciler's confirmation
+// hold can be exercised (delete-vs-skip by age).
+func (s *DOServer) AddRawTokenWithCreatedAt(id, name, createdAt string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokens[id] = map[string]interface{}{
+		"id":             id,
+		jsonKeyName:      name,
+		jsonKeyCreatedAt: createdAt,
+	}
+}
+
 // HasToken reports whether a token with the given id is still held by the fake.
 func (s *DOServer) HasToken(id string) bool {
 	s.mu.Lock()
@@ -105,6 +119,7 @@ func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 		jsonKeyName:        req.Name,
 		"scopes":           req.Scopes,
 		jsonKeyAccessToken: fmt.Sprintf("dop_v1_fake_%s", id),
+		jsonKeyCreatedAt:   fakeCreatedAt,
 	}
 
 	s.mu.Lock()

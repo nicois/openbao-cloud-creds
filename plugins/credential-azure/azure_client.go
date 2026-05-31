@@ -56,9 +56,10 @@ type removePasswordRequest struct {
 }
 
 type passwordCredentialInfo struct {
-	KeyID       string `json:"keyId"`
-	DisplayName string `json:"displayName"`
-	EndDateTime string `json:"endDateTime"`
+	KeyID         string `json:"keyId"`
+	DisplayName   string `json:"displayName"`
+	EndDateTime   string `json:"endDateTime"`
+	StartDateTime string `json:"startDateTime"`
 }
 
 type applicationResponse struct {

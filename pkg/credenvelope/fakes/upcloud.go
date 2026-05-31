@@ -46,6 +46,20 @@ func (s *UpCloudServer) AddRawToken(id, name string) {
 	}
 }
 
+// AddRawTokenWithCreatedAt injects a token with an arbitrary id, name and
+// created timestamp (RFC3339) directly into the fake. Test-only: used to plant
+// an orphan with a controlled age for the fail-closed reconciler's confirmation
+// hold.
+func (s *UpCloudServer) AddRawTokenWithCreatedAt(id, name, created string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokens[id] = map[string]interface{}{
+		"id":        id,
+		jsonKeyName: name,
+		"created":   created,
+	}
+}
+
 // HasToken reports whether a token with the given id is still held by the fake.
 func (s *UpCloudServer) HasToken(id string) bool {
 	s.mu.Lock()
@@ -137,6 +151,7 @@ func (s *UpCloudServer) createToken(w http.ResponseWriter, r *http.Request) {
 		jsonKeyName:  req.Name,
 		"token":      fmt.Sprintf("ucat_fake_%s", id),
 		"expires_at": expiresAt.UTC().Format(time.RFC3339),
+		"created":    fakeCreatedAt,
 	}
 
 	s.mu.Lock()

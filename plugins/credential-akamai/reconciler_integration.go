@@ -24,8 +24,9 @@ func (l *akamaiCloudLister) ListTaggedEntities(ctx context.Context) ([]reconcile
 	for _, c := range clients {
 		if strings.HasPrefix(c.ClientName, clientPrefix) {
 			entities = append(entities, reconciler.UpstreamEntity{
-				ID:   c.ClientID,
-				Name: c.ClientName,
+				ID:        c.ClientID,
+				Name:      c.ClientName,
+				CreatedAt: reconciler.ParseCreatedAt(c.CreatedDate),
 			})
 		}
 	}

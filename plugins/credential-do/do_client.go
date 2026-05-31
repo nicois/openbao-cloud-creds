@@ -33,8 +33,9 @@ type tokenResponse struct {
 }
 
 type tokenInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
 }
 
 type listTokensResponse struct {

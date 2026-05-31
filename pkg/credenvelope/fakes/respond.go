@@ -18,7 +18,13 @@ const (
 	jsonKeyAccessToken      = "access_token"
 	jsonKeyName             = "name"
 	jsonKeyAccount          = "account"
+	jsonKeyCreatedAt        = "created_at"
 )
+
+// fakeCreatedAt is the deterministic creation timestamp the fakes stamp on
+// entities minted through their create paths (RFC3339). Tests that need a
+// specific age use the AddRaw*WithCreatedAt helpers to override it.
+const fakeCreatedAt = "2026-01-01T00:00:00Z"
 
 // injectedErrorValue is the body value used for one-shot injected error
 // responses across the fakes.

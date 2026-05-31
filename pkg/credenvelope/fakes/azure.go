@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	jsonKeyAzureKeyID  = "keyId"
-	jsonKeyDisplayName = "displayName"
-	jsonKeyEndDateTime = "endDateTime"
+	jsonKeyAzureKeyID    = "keyId"
+	jsonKeyDisplayName   = "displayName"
+	jsonKeyEndDateTime   = "endDateTime"
+	jsonKeyStartDateTime = "startDateTime"
 )
 
 type AzureServer struct {
@@ -78,6 +79,21 @@ func (s *AzureServer) AddRawPassword(keyID, displayName string) {
 		jsonKeyAzureKeyID:  keyID,
 		jsonKeyDisplayName: displayName,
 		jsonKeyEndDateTime: "2099-01-01T00:00:00Z",
+	}
+}
+
+// AddRawPasswordWithStartDateTime injects a password credential with an
+// arbitrary keyId, displayName and startDateTime (RFC3339) directly into the
+// fake. Test-only: used to plant an orphan with a controlled age for the
+// fail-closed reconciler's confirmation hold.
+func (s *AzureServer) AddRawPasswordWithStartDateTime(keyID, displayName, startDateTime string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.passwords[keyID] = map[string]interface{}{
+		jsonKeyAzureKeyID:    keyID,
+		jsonKeyDisplayName:   displayName,
+		jsonKeyEndDateTime:   "2099-01-01T00:00:00Z",
+		jsonKeyStartDateTime: startDateTime,
 	}
 }
 
@@ -230,10 +246,11 @@ func (s *AzureServer) addPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	password := map[string]interface{}{
-		jsonKeyAzureKeyID:  keyID,
-		"secretText":       secretText,
-		jsonKeyDisplayName: req.PasswordCredential.DisplayName,
-		jsonKeyEndDateTime: endDateTime,
+		jsonKeyAzureKeyID:    keyID,
+		"secretText":         secretText,
+		jsonKeyDisplayName:   req.PasswordCredential.DisplayName,
+		jsonKeyEndDateTime:   endDateTime,
+		jsonKeyStartDateTime: time.Now().UTC().Format(time.RFC3339),
 	}
 
 	s.mu.Lock()
@@ -293,9 +310,10 @@ func (s *AzureServer) getApplication(w http.ResponseWriter, r *http.Request) {
 	for _, p := range s.passwords {
 		// List doesn't return secretText
 		passwords = append(passwords, map[string]interface{}{
-			jsonKeyAzureKeyID:  p[jsonKeyAzureKeyID],
-			jsonKeyDisplayName: p[jsonKeyDisplayName],
-			jsonKeyEndDateTime: p[jsonKeyEndDateTime],
+			jsonKeyAzureKeyID:    p[jsonKeyAzureKeyID],
+			jsonKeyDisplayName:   p[jsonKeyDisplayName],
+			jsonKeyEndDateTime:   p[jsonKeyEndDateTime],
+			jsonKeyStartDateTime: p[jsonKeyStartDateTime],
 		})
 	}
 	s.mu.Unlock()

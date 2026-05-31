@@ -34,8 +34,9 @@ type tokenResponse struct {
 }
 
 type tokenInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Created string `json:"created"`
 }
 
 func newUpCloudClient(baseURL, username, password string) *upcloudClient {

@@ -37,8 +37,9 @@ type createClientResponse struct {
 }
 
 type clientInfo struct {
-	ClientID   string `json:"clientId"`
-	ClientName string `json:"clientName"`
+	ClientID    string `json:"clientId"`
+	ClientName  string `json:"clientName"`
+	CreatedDate string `json:"createdDate"`
 }
 
 func newAkamaiClient(baseURL string, cred *edgeGridCredential) *akamaiClient {

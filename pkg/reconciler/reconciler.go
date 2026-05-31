@@ -11,6 +11,21 @@ type UpstreamEntity struct {
 	CreatedAt time.Time
 }
 
+// ParseCreatedAt converts an RFC3339 creation timestamp from a cloud list
+// response into a time.Time. An empty or unparseable value yields the zero
+// time, which the fail-closed Run guard treats as "age unconfirmable" (skip).
+// Listers use this so a malformed upstream timestamp can never cause a live
+// credential to be deleted.
+func ParseCreatedAt(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	if ts, err := time.Parse(time.RFC3339, s); err == nil {
+		return ts
+	}
+	return time.Time{}
+}
+
 type CloudLister interface {
 	ListTaggedEntities(ctx context.Context) ([]UpstreamEntity, error)
 	DeleteEntity(ctx context.Context, id string) error
