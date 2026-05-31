@@ -113,3 +113,77 @@ return an error that triggers infinite retry.
 upstream credential" guarantee for the minter-removed case — acceptable because
 TTL expiry is the real guarantee (see the envelope/lease contract), but worth a
 decision note in `docs/decisions.md`.
+
+---
+
+## KI-003 — Azure addPassword Graph propagation lag — [DOCUMENTED-RISK 2026-05-31]
+
+**Status:** DOCUMENTED-RISK (audit F7, 2026-05-31). Not reproducible without a
+real Entra tenant; self-heals within seconds. Consuming clients should implement
+transient 401 retry rather than treating it as fatal.
+
+**Severity:** Low — self-heals automatically within seconds; affects only the
+immediate post-issuance window.
+
+**Symptom:** a freshly-issued Azure `client_secret` may fail authentication
+(typically `AADSTS7000215` or similar Entra errors) for a few seconds immediately
+after issuance, even though the credential was successfully created and returned
+by the plugin.
+
+**Root cause:** Microsoft Graph `addPassword` is eventually consistent across the
+Entra (AAD) directory. A password credential added to an app registration may not
+be visible to authentication services for a brief period (typically a few
+seconds) while the change propagates across the tenant's directory replicas.
+
+**Guidance:** consuming clients should retry a transient 401 immediately after
+issuance rather than treat it as fatal. The credential WILL work once directory
+replication completes. Suggested retry pattern: on the first 401 within the
+first 30s of issuance, wait 1-2 seconds and retry once; if the second attempt
+also 401s, treat it as a real auth failure.
+
+**Can NOT be reproduced against the fake:** the Azure cloud-fake
+(`pkg/credenvelope/fakes/azure.go`) is an `httptest.Server` with instant
+in-memory state, so it has no directory-replication lag. The phenomenon is
+observable only against a real Entra tenant, and then only under specific
+replication topologies.
+
+---
+
+## KI-004 — Exoscale/Vultr background reconciler does not auto-delete orphans — [KNOWN/ACCEPTED 2026-05-31]
+
+**Status:** KNOWN/ACCEPTED (audit F1 residual, 2026-05-31). Safe direction (leak
+over delete-live-cred). Manual reconcile with `ConfirmationHold=0` still works.
+
+**Severity:** Medium — orphaned credentials leak until manual cleanup or natural
+expiry; but TTL expiry is still enforced (short-lived credentials auto-expire
+on lease end via normal revoke), so it's not a security hole.
+
+**Symptom:** the background reconciler worker does not automatically delete
+orphaned upstream credentials for Exoscale and Vultr. Orphans accumulate until
+either they are manually cleaned via the `/reconcile` endpoint or they expire
+naturally on their lease TTL.
+
+**Root cause:** Exoscale's `GET /v2/api-key` and Vultr's `GET /v2/users` list
+APIs return no creation timestamp — only `key-id`/`name`/`role-id` for Exoscale,
+and `id`/`name`/`email`/`api_enabled`/`acls` for Vultr. The fail-closed
+reconciler guard (audit F1 fix, Task 3) skips entities whose age is
+unconfirmable (zero `CreatedAt`) under the 1h `ConfirmationHold`, to avoid
+deleting a live just-issued credential during the create-then-track window. Since
+neither cloud's lister can populate `CreatedAt`, EVERY orphan has zero `CreatedAt`
+and is skipped on the background worker reconcile path.
+
+**Guidance:**
+- Use the manual `/reconcile` endpoint (which uses `ConfirmationHold=0`, so it
+  deletes even zero-`CreatedAt` orphans) to clean Exoscale/Vultr orphans when
+  needed.
+- Or accept the leak: short-lived credentials expire on lease end via normal
+  revoke anyway, so an untracked orphan is not a persistent security hole — it
+  will be deleted when its lease revokes or will auto-expire on the native
+  upstream TTL if one exists.
+- The other 4 hard-revoke plugins (DigitalOcean, UpCloud, Azure, Akamai) DO have
+  list-creation timestamps and their reconcilers now auto-delete confirmably-old
+  orphans normally.
+
+**Safe direction:** this is the intended safe interim behavior for clouds without
+list timestamps — better to leak an orphan (which will be revoked on lease end
+anyway) than to risk hard-deleting a live credential issued in the last hour.

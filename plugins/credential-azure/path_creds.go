@@ -142,6 +142,10 @@ func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
 		}
 	}
 
+	// NOTE: a freshly-added client_secret may fail auth (AADSTS7000215) for a
+	// few seconds due to Entra directory replication lag — see
+	// docs/known-issues.md (KI-003). Self-heals; clients should retry a
+	// transient 401 immediately after issuance.
 	credential := map[string]interface{}{
 		fieldClientID:   a.role.ClientID,
 		"client_secret": a.pwResp.SecretText,
