@@ -5,7 +5,7 @@ Each finding: verdict (REAL / REFUTED / DOCUMENTED-RISK), artifact (test path or
 | # | Finding | Verdict | Artifact | Action |
 |---|---------|---------|----------|--------|
 | F1 | Reconciler ConfirmationHold guard dead (6 plugins) | REAL (fixed) | static: reconciler.go:62 gated on CreatedAt, no lister set it; Task 3 fail-closed + Task 4 populates CreatedAt (4 of 6 clouds; exoscale/vultr have no list timestamp → fail-closed) | fixed (Task 3,4) |
-| F2 | GCP/OVH no HTTP client timeout | REAL | static: http.DefaultClient at iam_client.go + token_client.go | fix (Task 8) |
+| F2 | GCP/OVH no HTTP client timeout | REAL (fixed) | static: http.DefaultClient at iam_client.go + token_client.go | fixed (Task 8) |
 | F3 | OCI fakeOCIClient unsynchronized map | REAL (fixed) | test: TestFakeOCIClient_ConcurrentAccess (-race) | fixed (Task 5): mutex on fakeOCIClient |
 | F4 | OCI rotation-vs-reconcile delete race | REAL (fixed) | test: TestRotationReconcileRace | fixed (Task 5): rotateReconcileMu serializes rotation vs reconcile |
 | F5 | Reconciler DeleteEntity not 404-idempotent (5 plugins) | REAL (fixed) | test: TestDeleteEntity_404IsSuccess + TestRun_DeleteErrorDoesNotAbortPass | fixed (Task 6): treat upstream 404 as success in 5 listers + reconciler log-and-continue per entity |
@@ -50,6 +50,12 @@ Proof per cloud (each red→green): `TestReconcile_PopulatesCreatedAt` in `plugi
 
 ### F2 — GCP/OVH lack client-side HTTP timeout
 GCP issues requests via `http.DefaultClient.Do(req)` at `plugins/credential-gcp/iam_client.go:156` and `:208`; OVH via `http.DefaultClient.Do(req)` at `plugins/credential-ovh/token_client.go:63`. `http.DefaultClient` has no `Timeout` set, so a hung upstream can block indefinitely. By contrast DO (representative of the other 7 plugins) builds its client with an explicit timeout: `plugins/credential-do/do_client.go:13-14` defines `const httpTimeout = 30 * time.Second` and lines 48-49 construct `&http.Client{ Timeout: httpTimeout }`. Verdict: REAL.
+
+**Fix applied (Task 8):** Both packages now define a bounded HTTP client matching the DO pattern:
+- `plugins/credential-gcp/iam_client.go`: added `const httpTimeout = 30 * time.Second` and `var httpClient = &http.Client{Timeout: httpTimeout}` after imports (lines 22-26), replaced `http.DefaultClient.Do(req)` → `httpClient.Do(req)` at the JWT-exchange site (line 162) and the generateAccessToken site (line 214).
+- `plugins/credential-ovh/token_client.go`: added `const httpTimeout = 30 * time.Second` and `var httpClient = &http.Client{Timeout: httpTimeout}` after imports (lines 14-18), replaced `http.DefaultClient.Do(req)` → `httpClient.Do(req)` at the MintToken site (line 69).
+
+Both packages already imported `time` and `net/http`, so no new imports were needed. Build clean, all tests pass (`go test -race`), lint clean (golangci-lint 0 issues). Existing tests remain green because real-client timeout behavior is not exercised — tests use injected fake clients with no network I/O. The fix hardens robustness against hung upstream APIs but does not alter test-exercised semantics.
 
 ### F3 — OCI fakeOCIClient unsynchronized map — REAL
 `fakeOCIClient` (`plugins/credential-oci/oci_client.go:64`) holds `tokens map[string]map[string]*fakeToken`, `nextID int`, and `failNext error` with NO mutex, yet it is shared between the test/request goroutine and the background rotation + reconcile workers (which run as independent goroutines via `worker.Manager`). `CreateAuthToken` writes the map (oci_client.go:99,106), `ListAuthTokens` iterates it (oci_client.go:138), `DeleteAuthToken` deletes from it (oci_client.go:124), and `TokenCount` ranges over it (oci_client.go:161) — all unguarded.
