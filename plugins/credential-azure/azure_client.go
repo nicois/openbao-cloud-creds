@@ -13,6 +13,15 @@ import (
 	"time"
 )
 
+const (
+	// httpTimeout bounds every Azure Graph/login API call the minter client makes.
+	httpTimeout = 30 * time.Second
+
+	// tokenRefreshBuffer refreshes the cached Graph token this long before it
+	// actually expires, so an in-flight request never races the expiry.
+	tokenRefreshBuffer = 5 * time.Minute
+)
+
 type azureClient struct {
 	tenantID      string
 	clientID      string
@@ -66,7 +75,7 @@ func newAzureClient(tenantID, clientID, clientSecret, graphEndpoint, loginEndpoi
 		graphEndpoint: graphEndpoint,
 		loginEndpoint: loginEndpoint,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: httpTimeout,
 		},
 	}
 }
@@ -76,7 +85,7 @@ func (c *azureClient) getToken(ctx context.Context) (string, error) {
 	defer c.mu.Unlock()
 
 	// Return cached token if still valid (with 5-minute buffer)
-	if c.cachedToken != "" && time.Now().Add(5*time.Minute).Before(c.tokenExpiry) {
+	if c.cachedToken != "" && time.Now().Add(tokenRefreshBuffer).Before(c.tokenExpiry) {
 		return c.cachedToken, nil
 	}
 
@@ -88,7 +97,7 @@ func (c *azureClient) getToken(ctx context.Context) (string, error) {
 	form.Set("client_secret", c.clientSecret)
 	form.Set("scope", "https://graph.microsoft.com/.default")
 
-	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -100,7 +109,7 @@ func (c *azureClient) getToken(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -134,7 +143,7 @@ func (c *azureClient) AddPassword(ctx context.Context, appObjectID, displayName 
 	body, _ := json.Marshal(reqBody)
 
 	apiURL := fmt.Sprintf("%s/v1.0/applications/%s/addPassword", c.graphEndpoint, appObjectID)
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -147,7 +156,7 @@ func (c *azureClient) AddPassword(ctx context.Context, appObjectID, displayName 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, resp.StatusCode, fmt.Errorf("azure Graph API addPassword returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -169,7 +178,7 @@ func (c *azureClient) RemovePassword(ctx context.Context, appObjectID, keyID str
 	body, _ := json.Marshal(reqBody)
 
 	apiURL := fmt.Sprintf("%s/v1.0/applications/%s/removePassword", c.graphEndpoint, appObjectID)
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}
@@ -182,7 +191,7 @@ func (c *azureClient) RemovePassword(ctx context.Context, appObjectID, keyID str
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 204 {
+	if resp.StatusCode != http.StatusNoContent {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, fmt.Errorf("azure Graph API removePassword returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -196,7 +205,7 @@ func (c *azureClient) GetApplication(ctx context.Context, appObjectID string) (*
 	}
 
 	apiURL := fmt.Sprintf("%s/v1.0/applications/%s", c.graphEndpoint, appObjectID)
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -208,7 +217,7 @@ func (c *azureClient) GetApplication(ctx context.Context, appObjectID string) (*
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, resp.StatusCode, fmt.Errorf("azure Graph API get application returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}

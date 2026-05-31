@@ -10,6 +10,12 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+const (
+	// Role TTL schema defaults, in seconds (framework.TypeDurationSecond).
+	defaultRoleTTLSeconds    = 3600  // 1h
+	defaultRoleMaxTTLSeconds = 86400 // 24h
+)
+
 type azureRole struct {
 	Name           string        `json:"name"`
 	DefaultTTL     time.Duration `json:"default_ttl"`
@@ -26,25 +32,25 @@ func (b *backend) rolePaths() []*framework.Path {
 		{
 			Pattern: "roles/" + framework.GenericNameRegex("name"),
 			Fields: map[string]*framework.FieldSchema{
-				"name": {
+				fieldName: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
 				"default_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     3600,
+					Default:     defaultRoleTTLSeconds,
 					Description: "Default lease TTL (password expiry)",
 				},
 				"max_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     86400,
+					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum lease TTL",
 				},
-				"app_object_id": {
+				fieldAppObjectID: {
 					Type:        framework.TypeString,
 					Description: "Azure AD application object ID to add passwords to",
 				},
-				"client_id": {
+				fieldClientID: {
 					Type:        framework.TypeString,
 					Description: "The app's client ID (returned in credential envelope)",
 				},
@@ -52,7 +58,7 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Optional Azure subscription ID (returned in envelope for convenience)",
 				},
-				"minter_set": {
+				fieldMinterSet: {
 					Type:        framework.TypeString,
 					Description: "Name of the minter set this role mints from (required)",
 				},
@@ -73,11 +79,11 @@ func (b *backend) rolePaths() []*framework.Path {
 }
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
-	appObjectID := d.Get("app_object_id").(string)
-	clientID := d.Get("client_id").(string)
+	appObjectID := d.Get(fieldAppObjectID).(string)
+	clientID := d.Get(fieldClientID).(string)
 
 	if appObjectID == "" {
 		return logical.ErrorResponse("app_object_id is required"), nil
@@ -86,7 +92,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("client_id is required"), nil
 	}
 
-	minterSet := d.Get("minter_set").(string)
+	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
 		return logical.ErrorResponse("minter_set is required"), nil
 	}
@@ -100,12 +106,12 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	role := &cloudconfig.Role{
 		Name:       name,
-		Cloud:      "azure",
+		Cloud:      cloudName,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
 		CloudConfig: map[string]interface{}{
-			"app_object_id": appObjectID,
-			"client_id":     clientID,
+			fieldAppObjectID: appObjectID,
+			fieldClientID:    clientID,
 		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
@@ -139,7 +145,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 }
 
 func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "roles/"+name)
 	if err != nil {
 		return nil, err
@@ -155,19 +161,19 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"name":            role.Name,
+			fieldName:         role.Name,
 			"default_ttl":     int(role.DefaultTTL.Seconds()),
 			"max_ttl":         int(role.MaxTTL.Seconds()),
-			"app_object_id":   role.AppObjectID,
-			"client_id":       role.ClientID,
+			fieldAppObjectID:  role.AppObjectID,
+			fieldClientID:     role.ClientID,
 			"subscription_id": role.SubscriptionID,
-			"minter_set":      role.MinterSet,
+			fieldMinterSet:    role.MinterSet,
 		},
 	}, nil
 }
 
 func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	if err := req.Storage.Delete(ctx, "roles/"+name); err != nil {
 		return nil, err
 	}

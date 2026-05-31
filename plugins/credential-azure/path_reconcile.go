@@ -46,7 +46,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	registry := &leaseRegistry{storage: req.Storage, ctx: ctx}
 
 	cfg := reconciler.Config{
-		MaxDeletesPerPass: 10,
+		MaxDeletesPerPass: maxDeletesPerPass,
 		ConfirmationHold:  0,
 		DryRun:            dryRun,
 	}

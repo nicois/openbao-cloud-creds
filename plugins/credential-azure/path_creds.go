@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -19,7 +20,7 @@ func (b *backend) credsPaths() []*framework.Path {
 		{
 			Pattern: "creds/" + framework.GenericNameRegex("role"),
 			Fields: map[string]*framework.FieldSchema{
-				"role": {
+				fieldRole: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
@@ -40,33 +41,21 @@ func (b *backend) secretAzure() *framework.Secret {
 }
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	roleName := d.Get("role").(string)
+	roleName := d.Get(fieldRole).(string)
 
-	// Load role from storage
-	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
-	if err != nil {
-		return nil, err
-	}
-	if entry == nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
-	}
-
-	var role azureRole
-	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, err
-	}
-
-	if role.Disabled {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	role, errResp, err := b.loadRole(ctx, req, roleName)
+	if err != nil || errResp != nil {
+		return errResp, err
 	}
 
 	// Select a healthy minter from the role's bound set
-	setName, minterID, client, err := b.selectMinter(role.MinterSet)
+	sel, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		// selectMinter fails when the set is unloaded or every minter in it is
 		// failing — both surface to the client as an upstream auth failure.
 		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", err.Error()), nil
 	}
+	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
 	// Create password credential via Graph API
 	displayName := fmt.Sprintf("cloud-creds-%s-%s", roleName, req.ID)
@@ -88,44 +77,21 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	emitLeaseIssued(roleName)
 
-	// Parse the actual endDateTime from response
-	expiresAt := endDateTime
-	if pwResp.EndDateTime != "" {
-		if parsed, parseErr := time.Parse(time.RFC3339, pwResp.EndDateTime); parseErr == nil {
-			expiresAt = parsed
-		}
-	}
-
-	// Build credential map
-	credential := map[string]interface{}{
-		"client_id":     role.ClientID,
-		"client_secret": pwResp.SecretText,
-		"tenant_id":     b.getTenantID(),
-	}
-	if role.SubscriptionID != "" {
-		credential["subscription_id"] = role.SubscriptionID
-	}
-
-	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
-		Cloud:        "azure",
-		Role:         roleName,
-		Credential:   credential,
-		ExpiresAt:    expiresAt,
-		TTLSeconds:   int(role.DefaultTTL.Seconds()),
-		Renewable:    true,
-		CredentialID: pwResp.KeyID,
-		Scope:        role.AppObjectID,
-		IssuedBy:     "cloud-creds-azure/v0.1",
-		MinterSet:    setName,
-		MinterID:     minterID,
+	env := b.buildEnvelope(envelopeArgs{
+		role:        role,
+		roleName:    roleName,
+		pwResp:      pwResp,
+		endDateTime: endDateTime,
+		setName:     setName,
+		minterID:    minterID,
 	})
 
 	// Track active credential for reconciler
 	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+pwResp.KeyID, map[string]interface{}{
-		"role":          roleName,
-		"minter":        minterID,
-		"app_object_id": role.AppObjectID,
-		"created":       now.UTC().Format(time.RFC3339),
+		fieldRole:        roleName,
+		"minter":         minterID,
+		fieldAppObjectID: role.AppObjectID,
+		"created":        now.UTC().Format(time.RFC3339),
 	})
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
@@ -135,15 +101,84 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	resp := b.Secret("azure_client_secret").Response(env.ToMap(), map[string]interface{}{
 		"upstream_key_id": pwResp.KeyID,
-		"role":            roleName,
-		"minter_set":      setName,
+		fieldRole:         roleName,
+		fieldMinterSet:    setName,
 		"minter_id":       minterID,
-		"app_object_id":   role.AppObjectID,
+		fieldAppObjectID:  role.AppObjectID,
 	})
 	resp.Secret.TTL = role.DefaultTTL
 	resp.Secret.MaxTTL = role.MaxTTL
 
 	return resp, nil
+}
+
+// envelopeArgs carries everything buildEnvelope needs to assemble a response
+// envelope for a freshly minted Azure client secret.
+type envelopeArgs struct {
+	role        *azureRole
+	roleName    string
+	pwResp      *addPasswordResponse
+	endDateTime time.Time
+	setName     string
+	minterID    string
+}
+
+// buildEnvelope assembles the response envelope for a freshly minted Azure
+// client secret, including the cloud-specific credential map and the actual
+// expiry parsed back from the Graph addPassword response.
+func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
+	// Parse the actual endDateTime from response
+	expiresAt := a.endDateTime
+	if a.pwResp.EndDateTime != "" {
+		if parsed, parseErr := time.Parse(time.RFC3339, a.pwResp.EndDateTime); parseErr == nil {
+			expiresAt = parsed
+		}
+	}
+
+	credential := map[string]interface{}{
+		fieldClientID:   a.role.ClientID,
+		"client_secret": a.pwResp.SecretText,
+		fieldTenantID:   b.getTenantID(),
+	}
+	if a.role.SubscriptionID != "" {
+		credential["subscription_id"] = a.role.SubscriptionID
+	}
+
+	return credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
+		Cloud:        cloudName,
+		Role:         a.roleName,
+		Credential:   credential,
+		ExpiresAt:    expiresAt,
+		TTLSeconds:   int(a.role.DefaultTTL.Seconds()),
+		Renewable:    true,
+		CredentialID: a.pwResp.KeyID,
+		Scope:        a.role.AppObjectID,
+		IssuedBy:     "cloud-creds-azure/v0.1",
+		MinterSet:    a.setName,
+		MinterID:     a.minterID,
+	})
+}
+
+// loadRole fetches and validates a role for issuance. It returns either the
+// parsed role, or an *logical.Response describing why issuance can't proceed
+// (role missing/disabled), or a hard error. Exactly one of role/errResp is
+// non-nil when err is nil.
+func (b *backend) loadRole(ctx context.Context, req *logical.Request, roleName string) (*azureRole, *logical.Response, error) {
+	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
+	if err != nil {
+		return nil, nil, err
+	}
+	if entry == nil {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
+	}
+	var role azureRole
+	if err := json.Unmarshal(entry.Value, &role); err != nil {
+		return nil, nil, err
+	}
+	if role.Disabled {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	}
+	return &role, nil, nil
 }
 
 func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
@@ -152,12 +187,12 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		return nil, fmt.Errorf("missing upstream_key_id in internal_data")
 	}
 
-	appObjectID, _ := req.Secret.InternalData["app_object_id"].(string)
+	appObjectID, _ := req.Secret.InternalData[fieldAppObjectID].(string)
 	if appObjectID == "" {
 		return nil, fmt.Errorf("missing app_object_id in internal_data")
 	}
 
-	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
+	minterSet, _ := req.Secret.InternalData[fieldMinterSet].(string)
 	minterID, _ := req.Secret.InternalData["minter_id"].(string)
 	client, err := b.getMinter(minterSet, minterID)
 	if err != nil {
@@ -171,11 +206,11 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 		}
 	}
 
-	roleName, _ := req.Secret.InternalData["role"].(string)
+	roleName, _ := req.Secret.InternalData[fieldRole].(string)
 
 	now := time.Now()
 	httpStatus, err := client.RemovePassword(ctx, appObjectID, keyID)
-	if err != nil && httpStatus != 404 {
+	if err != nil && httpStatus != http.StatusNotFound {
 		b.recordMinterError(minterSet, minterID, httpStatus, now)
 		emitLeaseRevokeFailed(roleName)
 		return nil, fmt.Errorf("revoke failed: %v", err)
@@ -198,20 +233,28 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *f
 	return resp, nil
 }
 
-func (b *backend) selectMinter(setName string) (setID, minterID string, client *azureClient, err error) {
+// selectedMinter bundles the result of selectMinter: the set and minter that
+// were chosen plus a ready-to-use client for them.
+type selectedMinter struct {
+	setID    string
+	minterID string
+	client   *azureClient
+}
+
+func (b *backend) selectMinter(setName string) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	states, ok := b.minterSets[setName]
 	if !ok {
-		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			return setName, id, b.newClientForMinter(ms.minter), nil
+			return selectedMinter{setID: setName, minterID: id, client: b.newClientForMinter(ms.minter)}, nil
 		}
 	}
-	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+	return selectedMinter{}, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
 }
 
 // anyHealthyMinter returns a client for any healthy minter across all sets.

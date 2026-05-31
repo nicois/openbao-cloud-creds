@@ -10,23 +10,44 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+const (
+	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
+	defaultFlushIntervalSeconds    = 900   // 15m
+	defaultReconcileCadenceSeconds = 21600 // 6h
+
+	// reconcilerBootstrapDelay holds off the first reconcile pass after a
+	// (re)start so leases issued just before restart aren't seen as orphans.
+	reconcilerBootstrapDelay = 24 * time.Hour
+
+	// maxDeletesPerPass caps how many orphaned credentials one reconcile pass deletes.
+	maxDeletesPerPass = 10
+
+	// healthCheckInterval is how often the health-check worker probes minters,
+	// and the recovery state machine's re-probe cadence.
+	healthCheckInterval = 5 * time.Minute
+
+	// authFailThreshold is how long upstream auth must keep failing before the
+	// recovery state machine declares a minter hard-failed.
+	authFailThreshold = 30 * time.Second
+)
+
 func (b *backend) configPaths() []*framework.Path {
 	return []*framework.Path{
 		{
 			Pattern: "config",
 			Fields: map[string]*framework.FieldSchema{
-				"tenant_id": {
+				fieldTenantID: {
 					Type:        framework.TypeString,
 					Description: "Azure AD tenant ID",
 				},
 				"flush_interval": {
 					Type:        framework.TypeDurationSecond,
-					Default:     900,
+					Default:     defaultFlushIntervalSeconds,
 					Description: "Metrics flush interval in seconds",
 				},
 				"reconcile_cadence": {
 					Type:        framework.TypeDurationSecond,
-					Default:     21600,
+					Default:     defaultReconcileCadenceSeconds,
 					Description: "Reconciliation cadence in seconds",
 				},
 				"graph_endpoint": {
@@ -49,7 +70,7 @@ func (b *backend) configPaths() []*framework.Path {
 }
 
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	tenantID, ok := d.GetOk("tenant_id")
+	tenantID, ok := d.GetOk(fieldTenantID)
 	if !ok || tenantID.(string) == "" {
 		return logical.ErrorResponse("tenant_id is required"), nil
 	}
@@ -58,11 +79,11 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
-		Cloud:             "azure",
+		Cloud:             cloudName,
 		FlushInterval:     flushInterval,
 		ReconcileCadence:  reconcileCadence,
-		BootstrapDelay:    24 * time.Hour,
-		MaxDeletesPerPass: 10,
+		BootstrapDelay:    reconcilerBootstrapDelay,
+		MaxDeletesPerPass: maxDeletesPerPass,
 	}
 
 	entry, err := logical.StorageEntryJSON("config", cfg)
@@ -75,7 +96,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	// Store tenant_id and endpoints separately for easy retrieval
 	configMeta := map[string]string{
-		"tenant_id":      tenantID.(string),
+		fieldTenantID:    tenantID.(string),
 		"graph_endpoint": d.Get("graph_endpoint").(string),
 		"login_endpoint": d.Get("login_endpoint").(string),
 	}
@@ -123,8 +144,8 @@ func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error
 		return err
 	}
 	b.mu.Lock()
-	if meta["tenant_id"] != "" {
-		b.tenantID = meta["tenant_id"]
+	if meta[fieldTenantID] != "" {
+		b.tenantID = meta[fieldTenantID]
 	}
 	if meta["graph_endpoint"] != "" {
 		b.graphEndpoint = meta["graph_endpoint"]
@@ -152,7 +173,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"cloud":             cfg.Cloud,
+			fieldCloud:          cfg.Cloud,
 			"flush_interval":    int(cfg.FlushInterval.Seconds()),
 			"reconcile_cadence": int(cfg.ReconcileCadence.Seconds()),
 		},
