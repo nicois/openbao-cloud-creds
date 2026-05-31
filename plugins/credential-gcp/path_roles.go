@@ -30,21 +30,21 @@ func (b *backend) rolePaths() []*framework.Path {
 		{
 			Pattern: "roles/" + framework.GenericNameRegex("name"),
 			Fields: map[string]*framework.FieldSchema{
-				"name": {
+				fieldName: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
 				"default_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     3600,
+					Default:     defaultRoleTTLSeconds,
 					Description: "Default token lifetime in seconds (max 3600s by default, up to 43200s with org policy)",
 				},
 				"max_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     3600,
+					Default:     defaultRoleTTLSeconds,
 					Description: "Maximum token lifetime in seconds",
 				},
-				"service_account_email": {
+				fieldServiceAccountEmail: {
 					Type:        framework.TypeString,
 					Description: "Target service account email to impersonate (e.g. my-sa@project.iam.gserviceaccount.com)",
 				},
@@ -53,7 +53,7 @@ func (b *backend) rolePaths() []*framework.Path {
 					Default:     []string{defaultScope},
 					Description: "OAuth2 scopes for the generated access token",
 				},
-				"minter_set": {
+				fieldMinterSet: {
 					Type:        framework.TypeString,
 					Description: "Name of the minter set this role mints from (required)",
 				},
@@ -74,16 +74,16 @@ func (b *backend) rolePaths() []*framework.Path {
 }
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
-	serviceAccountEmail := d.Get("service_account_email").(string)
+	serviceAccountEmail := d.Get(fieldServiceAccountEmail).(string)
 
 	if serviceAccountEmail == "" {
 		return logical.ErrorResponse("service_account_email is required"), nil
 	}
 
-	minterSet := d.Get("minter_set").(string)
+	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
 		return logical.ErrorResponse("minter_set is required"), nil
 	}
@@ -109,7 +109,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	role := &cloudconfig.Role{
 		Name:       name,
-		Cloud:      "gcp",
+		Cloud:      cloudName,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
 		CloudConfig: map[string]interface{}{
@@ -149,7 +149,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 }
 
 func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "roles/"+name)
 	if err != nil {
 		return nil, err
@@ -176,7 +176,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 }
 
 func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	if err := req.Storage.Delete(ctx, "roles/"+name); err != nil {
 		return nil, err
 	}

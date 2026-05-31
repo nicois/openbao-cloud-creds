@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ func (b *backend) credsPaths() []*framework.Path {
 		{
 			Pattern: "creds/" + framework.GenericNameRegex("role"),
 			Fields: map[string]*framework.FieldSchema{
-				"role": {
+				fieldRole: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
@@ -41,31 +42,21 @@ func (b *backend) secretGCP() *framework.Secret {
 }
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	roleName := d.Get("role").(string)
+	roleName := d.Get(fieldRole).(string)
 
-	// Load role from storage
-	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
-	if err != nil {
-		return nil, err
-	}
-	if entry == nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
-	}
-
-	var role gcpRole
-	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, err
-	}
-
-	if role.Disabled {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	role, errResp, err := b.loadRole(ctx, req, roleName)
+	if err != nil || errResp != nil {
+		return errResp, err
 	}
 
 	// Select a healthy minter from the role's bound set
-	setName, minterID, client, err := b.selectMinter(role.MinterSet)
+	sel, err := b.selectMinter(role.MinterSet)
 	if err != nil {
+		// selectMinter fails when the set is unloaded or every minter in it is
+		// failing — both surface to the client as an upstream auth failure.
 		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", err.Error()), nil
 	}
+	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
 	now := time.Now()
 	accessToken, expiresAt, err := client.GenerateAccessToken(ctx, role.ServiceAccountEmail, role.Scopes, role.DefaultTTL)
@@ -87,7 +78,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	credentialID := hashTokenPrefix(accessToken)
 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
-		Cloud: "gcp",
+		Cloud: cloudName,
 		Role:  roleName,
 		Credential: map[string]interface{}{
 			"access_token": accessToken,
@@ -105,7 +96,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	// Track active credential for metrics (no upstream entity to clean up)
 	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+credentialID, map[string]interface{}{
-		"role":       roleName,
+		fieldRole:    roleName,
 		"minter":     minterID,
 		"created":    now.UTC().Format(time.RFC3339),
 		"expires_at": expiresAt.UTC().Format(time.RFC3339),
@@ -118,8 +109,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	resp := b.Secret("gcp_access_token").Response(env.ToMap(), map[string]interface{}{
 		"credential_id": credentialID,
-		"role":          roleName,
-		"minter_set":    setName,
+		fieldRole:       roleName,
+		fieldMinterSet:  setName,
 		"minter_id":     minterID,
 	})
 	resp.Secret.TTL = role.DefaultTTL
@@ -134,7 +125,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 // issued this credential; minter_set is read only for log context.
 func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
 	credentialID, _ := req.Secret.InternalData["credential_id"].(string)
-	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
+	minterSet, _ := req.Secret.InternalData[fieldMinterSet].(string)
 	if credentialID != "" {
 		if err := req.Storage.Delete(ctx, "active-tokens/"+credentialID); err != nil {
 			b.Logger().Warn("failed to remove active credential tracking",
@@ -150,20 +141,51 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, _ *f
 	return logical.ErrorResponse("gcp access tokens cannot be renewed; issue a new credential instead"), nil
 }
 
-func (b *backend) selectMinter(setName string) (setID, minterID string, client IAMCredentialsClient, err error) {
+// selectedMinter bundles the result of selectMinter: the set and minter that
+// were chosen plus a ready-to-use client for them. The client is an
+// IAMCredentialsClient because GCP injects its client (see buildIAMClient).
+type selectedMinter struct {
+	setID    string
+	minterID string
+	client   IAMCredentialsClient
+}
+
+func (b *backend) selectMinter(setName string) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	states, ok := b.minterSets[setName]
 	if !ok {
-		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			return setName, id, b.buildIAMClient(ms.minter), nil
+			return selectedMinter{setID: setName, minterID: id, client: b.buildIAMClient(ms.minter)}, nil
 		}
 	}
-	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+	return selectedMinter{}, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+}
+
+// loadRole fetches and validates a role for issuance. It returns either the
+// parsed role, or an *logical.Response describing why issuance can't proceed
+// (role missing/disabled), or a hard error. Exactly one of role/errResp is
+// non-nil when err is nil.
+func (b *backend) loadRole(ctx context.Context, req *logical.Request, roleName string) (*gcpRole, *logical.Response, error) {
+	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
+	if err != nil {
+		return nil, nil, err
+	}
+	if entry == nil {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
+	}
+	var role gcpRole
+	if err := json.Unmarshal(entry.Value, &role); err != nil {
+		return nil, nil, err
+	}
+	if role.Disabled {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	}
+	return &role, nil, nil
 }
 
 // buildIAMClient creates an IAM Credentials client from a minter. The token
@@ -199,26 +221,28 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 // classifyGCPError maps GCP API errors to HTTP status codes for the state machine.
 func classifyGCPError(err error) int {
 	if err == nil {
-		return 200
+		return http.StatusOK
 	}
 	errMsg := err.Error()
 	if strings.Contains(errMsg, "403") || strings.Contains(errMsg, "PERMISSION_DENIED") {
-		return 403
+		return http.StatusForbidden
 	}
 	if strings.Contains(errMsg, "401") || strings.Contains(errMsg, "UNAUTHENTICATED") || strings.Contains(errMsg, "invalid_grant") {
-		return 401
+		return http.StatusUnauthorized
 	}
 	if strings.Contains(errMsg, "429") || strings.Contains(errMsg, "RESOURCE_EXHAUSTED") {
-		return 429
+		return http.StatusTooManyRequests
 	}
-	return 500
+	return http.StatusInternalServerError
 }
 
-// hashTokenPrefix generates a short identifier from the first 8 chars of a token.
+// hashTokenPrefix generates a short opaque identifier from the leading
+// characters of a token. Only the first credentialIDPrefixLen characters are
+// hashed so the full secret token is never fed through the digest.
 func hashTokenPrefix(token string) string {
 	prefix := token
-	if len(prefix) > 16 {
-		prefix = prefix[:16]
+	if len(prefix) > credentialIDPrefixLen {
+		prefix = prefix[:credentialIDPrefixLen]
 	}
 	h := sha256.Sum256([]byte(prefix))
 	return fmt.Sprintf("%x", h[:8])

@@ -64,10 +64,22 @@ func (c *realIAMClient) getAccessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to parse credentials JSON: %w", err)
 	}
 
+	jwt, tokenURI, err := signServiceAccountJWT(&key)
+	if err != nil {
+		return "", err
+	}
+
+	return exchangeJWTForToken(ctx, tokenURI, jwt)
+}
+
+// signServiceAccountJWT parses the service account's RSA private key and builds
+// a signed JWT assertion. It returns the compact JWT and the token endpoint to
+// POST it to.
+func signServiceAccountJWT(key *serviceAccountKey) (jwt, tokenURI string, err error) {
 	// Parse the private key
 	block, _ := pem.Decode([]byte(key.PrivateKey))
 	if block == nil {
-		return "", fmt.Errorf("failed to decode PEM block from private key")
+		return "", "", fmt.Errorf("failed to decode PEM block from private key")
 	}
 
 	rsaKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
@@ -75,7 +87,7 @@ func (c *realIAMClient) getAccessToken(ctx context.Context) (string, error) {
 		// Try PKCS1 as fallback
 		rsaKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
 		if err != nil {
-			return "", fmt.Errorf("failed to parse private key: %w", err)
+			return "", "", fmt.Errorf("failed to parse private key: %w", err)
 		}
 	}
 
@@ -85,12 +97,12 @@ func (c *realIAMClient) getAccessToken(ctx context.Context) (string, error) {
 		if pk, ok2 := rsaKey.(rsa.PrivateKey); ok2 {
 			privateKey = &pk
 		} else {
-			return "", fmt.Errorf("private key is not RSA")
+			return "", "", fmt.Errorf("private key is not RSA")
 		}
 	}
 
 	// Build JWT
-	tokenURI := key.TokenURI
+	tokenURI = key.TokenURI
 	if tokenURI == "" {
 		tokenURI = "https://oauth2.googleapis.com/token"
 	}
@@ -98,7 +110,7 @@ func (c *realIAMClient) getAccessToken(ctx context.Context) (string, error) {
 	now := time.Now()
 	claims := map[string]interface{}{
 		"iss":   key.ClientEmail,
-		"scope": "https://www.googleapis.com/auth/cloud-platform",
+		"scope": defaultScope,
 		"aud":   tokenURI,
 		"iat":   now.Unix(),
 		"exp":   now.Add(time.Hour).Unix(),
@@ -121,18 +133,21 @@ func (c *realIAMClient) getAccessToken(ctx context.Context) (string, error) {
 
 	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, hash[:])
 	if err != nil {
-		return "", fmt.Errorf("failed to sign JWT: %w", err)
+		return "", "", fmt.Errorf("failed to sign JWT: %w", err)
 	}
 
-	jwt := signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), tokenURI, nil
+}
 
-	// Exchange JWT for access token
+// exchangeJWTForToken POSTs the signed JWT assertion to the token endpoint and
+// returns the resulting OAuth2 access token.
+func exchangeJWTForToken(ctx context.Context, tokenURI, jwt string) (string, error) {
 	data := url.Values{
 		"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"},
 		"assertion":  {jwt},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", tokenURI, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURI, strings.NewReader(data.Encode()))
 	if err != nil {
 		return "", fmt.Errorf("failed to create token request: %w", err)
 	}
@@ -183,7 +198,7 @@ func (c *realIAMClient) GenerateAccessToken(ctx context.Context, serviceAccount 
 	}
 
 	apiURL := fmt.Sprintf("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateAccessToken", serviceAccount)
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("failed to create request: %w", err)
 	}
