@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// defaultTokenLifetimeSeconds is the OVH OAuth2 access-token lifetime (1h) used
+// when the token endpoint omits expires_in (and as the fake client's value).
+const defaultTokenLifetimeSeconds = 3600
+
 // TokenClient abstracts the OVH OAuth2 token endpoint operations used by this plugin.
 type TokenClient interface {
 	// MintToken requests a new access token using client_credentials grant.
@@ -42,7 +46,7 @@ type tokenResponse struct {
 	ErrorDesc   string `json:"error_description,omitempty"`
 }
 
-func (c *realTokenClient) MintToken(ctx context.Context) (string, int, error) {
+func (c *realTokenClient) MintToken(ctx context.Context) (token string, expiresIn int, err error) {
 	data := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {c.clientID},
@@ -50,7 +54,7 @@ func (c *realTokenClient) MintToken(ctx context.Context) (string, int, error) {
 		"scope":         {"all"},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.tokenEndpoint, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.tokenEndpoint, strings.NewReader(data.Encode()))
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to create token request: %w", err)
 	}
@@ -84,12 +88,12 @@ func (c *realTokenClient) MintToken(ctx context.Context) (string, int, error) {
 		return "", 0, fmt.Errorf("OVH token response missing access_token")
 	}
 
-	expiresIn := tokenResp.ExpiresIn
-	if expiresIn <= 0 {
-		expiresIn = 3600 // default 1h
+	ttl := tokenResp.ExpiresIn
+	if ttl <= 0 {
+		ttl = defaultTokenLifetimeSeconds
 	}
 
-	return tokenResp.AccessToken, expiresIn, nil
+	return tokenResp.AccessToken, ttl, nil
 }
 
 func (c *realTokenClient) TestConnection(ctx context.Context) error {
@@ -103,12 +107,12 @@ type fakeTokenClient struct {
 	testConnectionFunc func(ctx context.Context) error
 }
 
-func (f *fakeTokenClient) MintToken(ctx context.Context) (string, int, error) {
+func (f *fakeTokenClient) MintToken(ctx context.Context) (token string, expiresIn int, err error) {
 	if f.mintTokenFunc != nil {
 		return f.mintTokenFunc(ctx)
 	}
 	// Default fake: return a predictable token
-	return "ovh-fake-token-" + fmt.Sprintf("%d", time.Now().UnixNano()), 3600, nil
+	return "ovh-fake-token-" + fmt.Sprintf("%d", time.Now().UnixNano()), defaultTokenLifetimeSeconds, nil
 }
 
 func (f *fakeTokenClient) TestConnection(ctx context.Context) error {

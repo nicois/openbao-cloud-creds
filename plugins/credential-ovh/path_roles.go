@@ -11,8 +11,14 @@ import (
 )
 
 const (
-	// OVH OAuth2 access tokens have a fixed 1-hour lifetime.
+	// OVH OAuth2 access tokens have a fixed 1-hour lifetime; role TTLs may not
+	// exceed it.
 	maxOVHTTL = 3600 * time.Second
+
+	// Role TTL schema defaults, in seconds (framework.TypeDurationSecond). Both
+	// default to the OVH token lifetime (1h) since that is the hard ceiling.
+	defaultRoleTTLSeconds    = 3600 // 1h
+	defaultRoleMaxTTLSeconds = 3600 // 1h
 )
 
 type ovhRole struct {
@@ -28,21 +34,21 @@ func (b *backend) rolePaths() []*framework.Path {
 		{
 			Pattern: "roles/" + framework.GenericNameRegex("name"),
 			Fields: map[string]*framework.FieldSchema{
-				"name": {
+				fieldName: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
 				"default_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     3600,
+					Default:     defaultRoleTTLSeconds,
 					Description: "Default lease TTL in seconds (max 3600s — OVH tokens are fixed 1h)",
 				},
 				"max_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     3600,
+					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum lease TTL in seconds (max 3600s)",
 				},
-				"minter_set": {
+				fieldMinterSet: {
 					Type:        framework.TypeString,
 					Description: "Name of the minter set this role mints from (required)",
 				},
@@ -63,7 +69,7 @@ func (b *backend) rolePaths() []*framework.Path {
 }
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
 
@@ -75,7 +81,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("default_ttl must not exceed 3600 seconds (OVH tokens have a fixed 1-hour lifetime)"), nil
 	}
 
-	minterSet := d.Get("minter_set").(string)
+	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
 		return logical.ErrorResponse("minter_set is required"), nil
 	}
@@ -89,7 +95,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	role := &cloudconfig.Role{
 		Name:       name,
-		Cloud:      "ovh",
+		Cloud:      cloudName,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
 	}
@@ -116,7 +122,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 }
 
 func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "roles/"+name)
 	if err != nil {
 		return nil, err
@@ -141,7 +147,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 }
 
 func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	if err := req.Storage.Delete(ctx, "roles/"+name); err != nil {
 		return nil, err
 	}

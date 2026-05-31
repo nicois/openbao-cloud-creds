@@ -12,6 +12,27 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+const (
+	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
+	defaultFlushIntervalSeconds    = 900   // 15m
+	defaultReconcileCadenceSeconds = 21600 // 6h
+
+	// reconcilerBootstrapDelay holds off the first reconcile pass after a
+	// (re)start so leases issued just before restart aren't seen as orphans.
+	reconcilerBootstrapDelay = 24 * time.Hour
+
+	// maxDeletesPerPass caps how many orphaned tracking entries one reconcile pass deletes.
+	maxDeletesPerPass = 10
+
+	// healthCheckInterval is how often the health-check worker probes minters,
+	// and the recovery state machine's re-probe cadence.
+	healthCheckInterval = 5 * time.Minute
+
+	// authFailThreshold is how long upstream auth must keep failing before the
+	// recovery state machine declares a minter hard-failed.
+	authFailThreshold = 30 * time.Second
+)
+
 // regionEndpoints maps OVH region codes to their OAuth2 token endpoints.
 var regionEndpoints = map[string]string{
 	"eu": "https://www.ovh.com/auth/oauth2/token",
@@ -24,7 +45,7 @@ func (b *backend) configPaths() []*framework.Path {
 		{
 			Pattern: "config",
 			Fields: map[string]*framework.FieldSchema{
-				"region": {
+				fieldRegion: {
 					Type:        framework.TypeString,
 					Default:     "eu",
 					Description: "OVH region: eu, ca, or us (determines token endpoint URL)",
@@ -36,12 +57,12 @@ func (b *backend) configPaths() []*framework.Path {
 				},
 				"flush_interval": {
 					Type:        framework.TypeDurationSecond,
-					Default:     900,
+					Default:     defaultFlushIntervalSeconds,
 					Description: "Metrics flush interval in seconds",
 				},
 				"reconcile_cadence": {
 					Type:        framework.TypeDurationSecond,
-					Default:     21600,
+					Default:     defaultReconcileCadenceSeconds,
 					Description: "Reconciliation cadence in seconds",
 				},
 			},
@@ -54,7 +75,7 @@ func (b *backend) configPaths() []*framework.Path {
 }
 
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	region := d.Get("region").(string)
+	region := d.Get(fieldRegion).(string)
 	if _, valid := regionEndpoints[region]; !valid {
 		return logical.ErrorResponse("invalid region %q: must be eu, ca, or us", region), nil
 	}
@@ -63,11 +84,11 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
-		Cloud:             "ovh",
+		Cloud:             cloudName,
 		FlushInterval:     flushInterval,
 		ReconcileCadence:  reconcileCadence,
-		BootstrapDelay:    24 * time.Hour,
-		MaxDeletesPerPass: 10,
+		BootstrapDelay:    reconcilerBootstrapDelay,
+		MaxDeletesPerPass: maxDeletesPerPass,
 	}
 
 	entry, err := logical.StorageEntryJSON("config", cfg)
@@ -158,8 +179,8 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"cloud":             cfg.Cloud,
-			"region":            b.getRegion(),
+			fieldCloud:          cfg.Cloud,
+			fieldRegion:         b.getRegion(),
 			"flush_interval":    int(cfg.FlushInterval.Seconds()),
 			"reconcile_cadence": int(cfg.ReconcileCadence.Seconds()),
 		},
