@@ -10,23 +10,44 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+const (
+	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
+	defaultFlushIntervalSeconds    = 900   // 15m
+	defaultReconcileCadenceSeconds = 21600 // 6h
+
+	// reconcilerBootstrapDelay holds off the first reconcile pass after a
+	// (re)start so leases issued just before restart aren't seen as orphans.
+	reconcilerBootstrapDelay = 24 * time.Hour
+
+	// maxDeletesPerPass caps how many orphaned tokens one reconcile pass deletes.
+	maxDeletesPerPass = 10
+
+	// healthCheckInterval is how often the health-check worker probes minters,
+	// and the recovery state machine's re-probe cadence.
+	healthCheckInterval = 5 * time.Minute
+
+	// authFailThreshold is how long upstream auth must keep failing before the
+	// recovery state machine declares a minter hard-failed.
+	authFailThreshold = 30 * time.Second
+)
+
 func (b *backend) configPaths() []*framework.Path {
 	return []*framework.Path{
 		{
 			Pattern: "config",
 			Fields: map[string]*framework.FieldSchema{
-				"username": {
+				fieldUsername: {
 					Type:        framework.TypeString,
 					Description: "UpCloud account username for API authentication",
 				},
 				"flush_interval": {
 					Type:        framework.TypeDurationSecond,
-					Default:     900,
+					Default:     defaultFlushIntervalSeconds,
 					Description: "Metrics flush interval in seconds",
 				},
 				"reconcile_cadence": {
 					Type:        framework.TypeDurationSecond,
-					Default:     21600,
+					Default:     defaultReconcileCadenceSeconds,
 					Description: "Reconciliation cadence in seconds",
 				},
 				"upcloud_api_url": {
@@ -44,7 +65,7 @@ func (b *backend) configPaths() []*framework.Path {
 }
 
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	username := d.Get("username").(string)
+	username := d.Get(fieldUsername).(string)
 	if username == "" {
 		return logical.ErrorResponse("username is required"), nil
 	}
@@ -53,11 +74,11 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
-		Cloud:             "upcloud",
+		Cloud:             cloudName,
 		FlushInterval:     flushInterval,
 		ReconcileCadence:  reconcileCadence,
-		BootstrapDelay:    24 * time.Hour,
-		MaxDeletesPerPass: 10,
+		BootstrapDelay:    reconcilerBootstrapDelay,
+		MaxDeletesPerPass: maxDeletesPerPass,
 	}
 
 	entry, err := logical.StorageEntryJSON("config", cfg)
@@ -73,8 +94,8 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	// Store username and api url separately so a reloaded backend (failover/
 	// restart) can rehydrate them before any config write happens. KI-001.
 	usernameEntry, err := logical.StorageEntryJSON("config/username", map[string]string{
-		"username": username,
-		"api_url":  apiURL,
+		fieldUsername: username,
+		"api_url":     apiURL,
 	})
 	if err != nil {
 		return nil, err
@@ -120,8 +141,8 @@ func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error
 		return err
 	}
 	b.mu.Lock()
-	if meta["username"] != "" {
-		b.username = meta["username"]
+	if meta[fieldUsername] != "" {
+		b.username = meta[fieldUsername]
 	}
 	if meta["api_url"] != "" {
 		b.apiURL = meta["api_url"]
@@ -146,7 +167,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"cloud":             cfg.Cloud,
+			fieldCloud:          cfg.Cloud,
 			"flush_interval":    int(cfg.FlushInterval.Seconds()),
 			"reconcile_cadence": int(cfg.ReconcileCadence.Seconds()),
 		},

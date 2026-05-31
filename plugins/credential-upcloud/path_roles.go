@@ -10,6 +10,12 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+const (
+	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
+	defaultRoleTTLSeconds    = 900  // 15m
+	defaultRoleMaxTTLSeconds = 3600 // 1h
+)
+
 type upcloudRole struct {
 	Name       string        `json:"name"`
 	DefaultTTL time.Duration `json:"default_ttl"`
@@ -24,25 +30,25 @@ func (b *backend) rolePaths() []*framework.Path {
 		{
 			Pattern: "roles/" + framework.GenericNameRegex("name"),
 			Fields: map[string]*framework.FieldSchema{
-				"name": {
+				fieldName: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
 				"default_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     900,
+					Default:     defaultRoleTTLSeconds,
 					Description: "Default lease TTL",
 				},
 				"max_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     3600,
+					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum lease TTL",
 				},
-				"scopes": {
+				fieldScopes: {
 					Type:        framework.TypeString,
 					Description: "Comma-separated UpCloud token scopes",
 				},
-				"minter_set": {
+				fieldMinterSet: {
 					Type:        framework.TypeString,
 					Description: "Name of the minter set this role mints from (required)",
 				},
@@ -63,12 +69,12 @@ func (b *backend) rolePaths() []*framework.Path {
 }
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
-	scopes := d.Get("scopes").(string)
+	scopes := d.Get(fieldScopes).(string)
 
-	minterSet := d.Get("minter_set").(string)
+	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
 		return logical.ErrorResponse("minter_set is required"), nil
 	}
@@ -82,11 +88,11 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	role := &cloudconfig.Role{
 		Name:       name,
-		Cloud:      "upcloud",
+		Cloud:      cloudName,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
 		CloudConfig: map[string]interface{}{
-			"scopes": scopes,
+			fieldScopes: scopes,
 		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
@@ -113,7 +119,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 }
 
 func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "roles/"+name)
 	if err != nil {
 		return nil, err
@@ -129,17 +135,17 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"name":        role.Name,
-			"default_ttl": int(role.DefaultTTL.Seconds()),
-			"max_ttl":     int(role.MaxTTL.Seconds()),
-			"scopes":      role.Scopes,
-			"minter_set":  role.MinterSet,
+			fieldName:      role.Name,
+			"default_ttl":  int(role.DefaultTTL.Seconds()),
+			"max_ttl":      int(role.MaxTTL.Seconds()),
+			fieldScopes:    role.Scopes,
+			fieldMinterSet: role.MinterSet,
 		},
 	}, nil
 }
 
 func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	if err := req.Storage.Delete(ctx, "roles/"+name); err != nil {
 		return nil, err
 	}
