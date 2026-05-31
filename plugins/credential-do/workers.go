@@ -23,7 +23,7 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 		return
 	}
 
-	wm := worker.New()
+	wm := worker.New(worker.WithErrorHandler(b.workerErrorHandler()))
 
 	wm.Register("health-check", 5*time.Minute, worker.Opts{}, b.healthCheckWorker)
 

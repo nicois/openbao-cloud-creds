@@ -4,14 +4,16 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-metrics"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 )
 
 func emitGauge(key []string, val float32, labels []metrics.Label) {
 	metrics.SetGaugeWithLabels(key, val, labels)
 }
 
-func emitCounter(key []string, val float32, labels []metrics.Label) {
-	metrics.IncrCounterWithLabels(key, val, labels)
+func emitCounter(key []string, labels []metrics.Label) {
+	metrics.IncrCounterWithLabels(key, 1, labels)
 }
 
 func (b *backend) emitMinterMetrics() {
@@ -46,14 +48,14 @@ func (b *backend) emitMinterMetrics() {
 }
 
 func emitLeaseIssued(role string) {
-	emitCounter([]string{"cloud_creds", "lease_issued_total"}, 1, []metrics.Label{
+	emitCounter([]string{"cloud_creds", "lease_issued_total"}, []metrics.Label{
 		{Name: "cloud", Value: "upcloud"},
 		{Name: "role", Value: role},
 	})
 }
 
 func emitLeaseRevokeFailed(role string) {
-	emitCounter([]string{"cloud_creds", "lease_revoke_failures_total"}, 1, []metrics.Label{
+	emitCounter([]string{"cloud_creds", "lease_revoke_failures_total"}, []metrics.Label{
 		{Name: "cloud", Value: "upcloud"},
 		{Name: "role", Value: role},
 	})
@@ -63,4 +65,14 @@ func emitOrphansFound(count int) {
 	emitGauge([]string{"cloud_creds", "orphans_found"}, float32(count), []metrics.Label{
 		{Name: "cloud", Value: "upcloud"},
 	})
+}
+
+// workerErrorHandler returns a handler that logs and counts periodic worker
+// errors and recovered panics.
+func (b *backend) workerErrorHandler() worker.ErrorHandler {
+	return func(name string, err error) {
+		b.Logger().Warn("worker error", "worker", name, "error", err)
+		emitCounter([]string{"cloud_creds", "worker_errors_total"},
+			[]metrics.Label{{Name: "cloud", Value: "upcloud"}, {Name: "worker", Value: name}})
+	}
 }
