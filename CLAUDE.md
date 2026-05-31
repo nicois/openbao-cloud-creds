@@ -62,7 +62,7 @@ Go workspace (`go.work`) with per-module `go.mod`; use the full module path, not
 ```bash
 go build github.com/nicois/openbao-cloud-creds/...
 go test -race github.com/nicois/openbao-cloud-creds/...
-make lint          # golangci-lint v2 across every module
+make lint          # golangci-lint v2 (pinned v2.12.2) across every module — config in .golangci.yml
 make smoke-test    # build each plugin + register/enable in a live OpenBao dev server (needs `bao` on PATH)
 ```
 
@@ -75,7 +75,8 @@ go test -tags=cloud_real ./plugins/credential-do/...
 
 - Go 1.26.1 (workspace `go.work` + per-module `go.mod`)
 - One plugin = one Go module under `plugins/<name>/`
-- Shared code under `pkg/` — plugins import; never the other way around
+- Shared code under `pkg/` — plugins import; never the other way around. Genuinely-identical helper bodies are extracted into focused `pkg/` packages with cloud identity passed as a parameter (e.g. `pkg/telemetry` for metric emitters, `pkg/metricspath` for the metrics query endpoints, `pkg/localexpiry` for no-revoke local-entry pruning), preserving per-plugin module isolation — never collapse the plugin modules themselves
+- Each plugin keeps a `consts.go` defining its `cloudName`, `metricNamespace`, and field-name constants (`fieldCloud`/`fieldRole`/`fieldMinterSet`/…); HTTP status codes use `net/http` constants and TTL/duration values are named consts (no magic numbers/literals — enforced by lint)
 - Mount path is always `cloud-creds/<cloud>/...`
 - Owner-tag scheme always uses prefix `cloud-creds-<role>-` or label `owner=cloud-creds`
 - Every error response includes a stable `error_code` (Go constants in `pkg/credenvelope/errors.go`); adding one is a spec change

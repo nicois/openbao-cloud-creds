@@ -88,3 +88,26 @@ performs the upstream delete" property in these edge cases, which is acceptable
 because the real guarantee is TTL expiry — every issued credential has a bounded
 lifetime. A clean no-op lets the lease release rather than accumulating infinite
 failed retries.
+
+## Why a strict golangci-lint v2 config (the "slow-accretion" smell set)
+
+The repo adopted a deliberately strict `.golangci.yml` (v2, ~20 linters:
+complexity — gocyclo/gocognit/cyclop/funlen/nestif/maintidx; magic-numbers and
+repeated-literals — mnd/goconst; duplication — dupl/gocritic; dead/comment-rot —
+unused/unparam/ineffassign/wastedassign/godox/godot/predeclared; plus a tuned
+revive ruleset), pinned to golangci-lint v2.12.2 and run per-module in CI.
+
+Decision: enforce it across every module with zero `//nolint` suppressions.
+Rationale: with one plugin per cloud and ten near-parallel plugins, the failure
+mode is *drift* — a helper that subtly diverges, a magic number that means
+something different in one cloud, copy-paste that rots. The complexity and
+duplication linters fire on exactly that drift, which is what pushed the
+genuinely-shared code into `pkg/` (telemetry, metricspath, localexpiry) instead
+of ten copies. The no-nolint rule is load-bearing: when a linter fires, the fix
+is to restructure (extract a helper, name a constant, drop a dead param), not to
+suppress — suppressions are where drift hides. Carried-forward exceptions live
+in the config itself (not inline), e.g. the `(io.Closer).Close` errcheck
+exclusion and `revive`'s disabled `unused-parameter`/`unused-receiver` for the
+SDK-mandated handler signatures. Test files are excluded from the
+complexity/literal linters (test code legitimately repeats literals and is
+structurally loose). See `docs/superpowers/specs/2026-05-31-golangci-config-upgrade-design.md`.
