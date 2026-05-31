@@ -19,6 +19,13 @@ import (
 	"time"
 )
 
+// httpTimeout bounds every GCP API call the minter client makes.
+const httpTimeout = 30 * time.Second
+
+var httpClient = &http.Client{
+	Timeout: httpTimeout,
+}
+
 // IAMCredentialsClient abstracts the GCP IAM Credentials API operations used by this plugin.
 type IAMCredentialsClient interface {
 	GenerateAccessToken(ctx context.Context, serviceAccount string, scopes []string, lifetime time.Duration) (token string, expiry time.Time, err error)
@@ -153,7 +160,7 @@ func exchangeJWTForToken(ctx context.Context, tokenURI, jwt string) (string, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("token request failed: %w", err)
 	}
@@ -205,7 +212,7 @@ func (c *realIAMClient) GenerateAccessToken(ctx context.Context, serviceAccount 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+authToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("request failed: %w", err)
 	}

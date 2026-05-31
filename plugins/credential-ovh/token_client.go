@@ -11,6 +11,13 @@ import (
 	"time"
 )
 
+// httpTimeout bounds every OVH OAuth2 API call the minter client makes.
+const httpTimeout = 30 * time.Second
+
+var httpClient = &http.Client{
+	Timeout: httpTimeout,
+}
+
 // defaultTokenLifetimeSeconds is the OVH OAuth2 access-token lifetime (1h) used
 // when the token endpoint omits expires_in (and as the fake client's value).
 const defaultTokenLifetimeSeconds = 3600
@@ -60,7 +67,7 @@ func (c *realTokenClient) MintToken(ctx context.Context) (token string, expiresI
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", 0, fmt.Errorf("token request failed: %w", err)
 	}
