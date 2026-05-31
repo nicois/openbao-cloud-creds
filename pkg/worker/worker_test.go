@@ -3,6 +3,7 @@ package worker_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -90,6 +91,83 @@ func TestWorkerErrorDoesNotCrash(t *testing.T) {
 
 	if count.Load() < 2 {
 		t.Fatalf("worker should keep ticking after errors, got %d", count.Load())
+	}
+}
+
+func TestWorker_ErrorHandlerInvokedOnError(t *testing.T) {
+	var mu sync.Mutex
+	var gotName string
+	var gotErr error
+	h := func(name string, err error) {
+		mu.Lock()
+		gotName, gotErr = name, err
+		mu.Unlock()
+	}
+	m := worker.New(worker.WithErrorHandler(h))
+	m.Register("failer", 5*time.Millisecond, worker.Opts{}, func(ctx context.Context) error {
+		return fmt.Errorf("boom")
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	m.Start(ctx)
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	m.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if gotName != "failer" {
+		t.Fatalf("expected failer, got %q", gotName)
+	}
+	if gotErr == nil || gotErr.Error() != "boom" {
+		t.Fatalf("expected boom, got %v", gotErr)
+	}
+}
+
+func TestWorker_PanicRecoveredAndReported(t *testing.T) {
+	var mu sync.Mutex
+	var calls int
+	var lastErr error
+	h := func(name string, err error) {
+		mu.Lock()
+		calls++
+		lastErr = err
+		mu.Unlock()
+	}
+	m := worker.New(worker.WithErrorHandler(h))
+	m.Register("panicker", 5*time.Millisecond, worker.Opts{}, func(ctx context.Context) error {
+		panic("kaboom")
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	m.Start(ctx)
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	m.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if calls == 0 {
+		t.Fatal("expected panic reported via handler")
+	}
+	if lastErr == nil || !strings.Contains(lastErr.Error(), "panicked") {
+		t.Fatalf("expected panicked error, got %v", lastErr)
+	}
+}
+
+func TestWorker_NilHandlerStillRecoversPanic(t *testing.T) {
+	var ticks int32
+	m := worker.New() // no handler
+	m.Register("panicker", 5*time.Millisecond, worker.Opts{}, func(ctx context.Context) error {
+		panic("kaboom")
+	})
+	m.Register("counter", 5*time.Millisecond, worker.Opts{}, func(ctx context.Context) error {
+		atomic.AddInt32(&ticks, 1)
+		return nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	m.Start(ctx)
+	time.Sleep(40 * time.Millisecond)
+	cancel()
+	m.Wait()
+	if atomic.LoadInt32(&ticks) == 0 {
+		t.Fatal("counter should keep ticking despite sibling panic")
 	}
 }
 

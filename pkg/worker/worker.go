@@ -2,11 +2,23 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
 
 type WorkerFunc func(ctx context.Context) error
+
+// ErrorHandler is called when a worker tick returns an error or panics.
+type ErrorHandler func(worker string, err error)
+
+// Option configures a Manager.
+type Option func(*Manager)
+
+// WithErrorHandler sets the handler invoked on a worker error or recovered panic.
+func WithErrorHandler(h ErrorHandler) Option {
+	return func(m *Manager) { m.errHandler = h }
+}
 
 type Opts struct {
 	InitialDelay time.Duration
@@ -24,10 +36,16 @@ type Manager struct {
 	workers []registration
 	wg      sync.WaitGroup
 	running bool
+	// errHandler is set once via options in New (before Start) and only read by run goroutines thereafter; do not mutate after Start.
+	errHandler ErrorHandler
 }
 
-func New() *Manager {
-	return &Manager{}
+func New(opts ...Option) *Manager {
+	m := &Manager{}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 func (m *Manager) Register(name string, interval time.Duration, opts Opts, fn WorkerFunc) {
@@ -83,7 +101,18 @@ func (m *Manager) run(ctx context.Context, w registration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_ = w.fn(ctx)
+			if err := m.invoke(ctx, w); err != nil && m.errHandler != nil {
+				m.errHandler(w.name, err)
+			}
 		}
 	}
+}
+
+func (m *Manager) invoke(ctx context.Context, w registration) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("worker %q panicked: %v", w.name, r)
+		}
+	}()
+	return w.fn(ctx)
 }
