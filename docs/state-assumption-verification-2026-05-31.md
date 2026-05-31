@@ -19,6 +19,18 @@ Each finding: verdict (REAL / REFUTED / DOCUMENTED-RISK), artifact (test path or
 ### F1 — Reconciler ConfirmationHold guard is dead code
 The guard lives at `pkg/reconciler/reconciler.go:62`: `if r.config.ConfirmationHold > 0 && !entity.CreatedAt.IsZero() {` (with the age comparison at line 63 `if now.Sub(entity.CreatedAt) < r.config.ConfirmationHold {`). `UpstreamEntity.CreatedAt` is declared at reconciler.go:11. All six listers construct `reconciler.UpstreamEntity{...}` setting ONLY `ID` and `Name`, never `CreatedAt`: credential-do reconciler_integration.go:26-29 (ID=t.ID, Name=t.Name), credential-azure:29-32 (ID=pw.KeyID, Name=pw.DisplayName), credential-vultr:26-29 (ID=u.ID, Name=u.Name), credential-exoscale:26-29 (ID=k.KeyID, Name=k.Name), credential-upcloud:26-29 (ID=t.ID, Name=t.Name), credential-akamai:26-29 (ID=c.ClientID, Name=c.ClientName). Since `CreatedAt` is always the zero value, `!entity.CreatedAt.IsZero()` is always false, so the ConfirmationHold branch is unreachable. Verdict: REAL.
 
+**Fix landed (Task 3, fail-closed core).** `pkg/reconciler/reconciler.go` now treats unconfirmable age as a reason to SKIP the delete rather than proceed. The guard became:
+```go
+if r.config.ConfirmationHold > 0 {
+    if entity.CreatedAt.IsZero() || now.Sub(entity.CreatedAt) < r.config.ConfirmationHold {
+        continue
+    }
+}
+```
+Previously, a zero `CreatedAt` bypassed the hold entirely (delete allowed); now a zero `CreatedAt` means we cannot confirm the orphan is older than the hold, so we fail closed and skip it this pass. Proven by `TestRun_FailsClosedWhenAgeUnconfirmable` (`pkg/reconciler/reconciler_test.go`), which was RED against the old guard (`got 1` delete) and GREEN after the fix; the precision path is covered by `TestRun_DeletesConfirmablyOldOrphan` (old → deleted) and `TestRun_SkipsRecentConfirmableOrphan` (recent → skipped), both written to pass before and after.
+
+**Interim consequence until Task 4.** No lister populates `CreatedAt` yet, so on the worker reconcile path (`ConfirmationHold = 1h`) EVERY orphan now has zero `CreatedAt` and is skipped — orphan cleanup is effectively PAUSED on the worker path. This is the intended safe interim state: better to leak orphans for one task than risk hard-deleting a live credential. Task 4 restores precise cleanup by populating `CreatedAt` in each lister, after which confirmably-old orphans are deleted again while just-issued credentials inside the create-then-track window remain protected.
+
 ### F2 — GCP/OVH lack client-side HTTP timeout
 GCP issues requests via `http.DefaultClient.Do(req)` at `plugins/credential-gcp/iam_client.go:156` and `:208`; OVH via `http.DefaultClient.Do(req)` at `plugins/credential-ovh/token_client.go:63`. `http.DefaultClient` has no `Timeout` set, so a hung upstream can block indefinitely. By contrast DO (representative of the other 7 plugins) builds its client with an explicit timeout: `plugins/credential-do/do_client.go:13-14` defines `const httpTimeout = 30 * time.Second` and lines 48-49 construct `&http.Client{ Timeout: httpTimeout }`. Verdict: REAL.
 

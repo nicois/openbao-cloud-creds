@@ -135,3 +135,63 @@ func TestMaxDeletesPerPass(t *testing.T) {
 		t.Fatal("expected HitLimit=true")
 	}
 }
+
+// TestRun_FailsClosedWhenAgeUnconfirmable proves that with a ConfirmationHold
+// set, an orphan whose CreatedAt is zero (age unconfirmable) is NOT deleted.
+// This is the safety core: absent age info, do not delete.
+func TestRun_FailsClosedWhenAgeUnconfirmable(t *testing.T) {
+	cloud := &fakeCloudLister{entities: []reconciler.UpstreamEntity{
+		{ID: "orphan-zerotime", Name: "cloud-creds-role-a-1"}, // CreatedAt zero
+	}}
+	reg := &fakeRegistry{known: map[string]bool{}}
+	r := reconciler.New(reconciler.Config{
+		MaxDeletesPerPass: 10,
+		ConfirmationHold:  1 * time.Hour,
+	}, cloud, reg)
+
+	res, err := r.Run(context.Background(), time.Now())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Deleted != 0 {
+		t.Fatalf("fail-closed: expected 0 deletes for unconfirmable-age orphan, got %d", res.Deleted)
+	}
+	if len(cloud.entities) != 1 {
+		t.Fatal("unconfirmable-age orphan must not be deleted")
+	}
+}
+
+// TestRun_DeletesConfirmablyOldOrphan proves a CreatedAt older than the hold
+// is still deleted (the precision path still works).
+func TestRun_DeletesConfirmablyOldOrphan(t *testing.T) {
+	now := time.Now()
+	cloud := &fakeCloudLister{entities: []reconciler.UpstreamEntity{
+		{ID: "old-orphan", Name: "cloud-creds-role-a-1", CreatedAt: now.Add(-2 * time.Hour)},
+	}}
+	reg := &fakeRegistry{known: map[string]bool{}}
+	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10, ConfirmationHold: 1 * time.Hour}, cloud, reg)
+	res, err := r.Run(context.Background(), now)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Deleted != 1 {
+		t.Fatalf("expected confirmably-old orphan deleted, got %d", res.Deleted)
+	}
+}
+
+// TestRun_SkipsRecentConfirmableOrphan: CreatedAt within the hold => skip.
+func TestRun_SkipsRecentConfirmableOrphan(t *testing.T) {
+	now := time.Now()
+	cloud := &fakeCloudLister{entities: []reconciler.UpstreamEntity{
+		{ID: "fresh-orphan", Name: "cloud-creds-role-a-1", CreatedAt: now.Add(-5 * time.Minute)},
+	}}
+	reg := &fakeRegistry{known: map[string]bool{}}
+	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10, ConfirmationHold: 1 * time.Hour}, cloud, reg)
+	res, err := r.Run(context.Background(), now)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Deleted != 0 {
+		t.Fatalf("expected fresh orphan skipped, got %d", res.Deleted)
+	}
+}

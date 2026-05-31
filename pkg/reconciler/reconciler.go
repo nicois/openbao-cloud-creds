@@ -59,8 +59,13 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 			continue
 		}
 
-		if r.config.ConfirmationHold > 0 && !entity.CreatedAt.IsZero() {
-			if now.Sub(entity.CreatedAt) < r.config.ConfirmationHold {
+		// Fail closed: when a confirmation hold is configured, only delete an
+		// orphan whose age we can confirm is older than the hold. If CreatedAt
+		// is unknown (zero), we cannot confirm the entity isn't a just-issued
+		// credential still in its create-then-track window, so we skip it this
+		// pass rather than risk deleting a live credential.
+		if r.config.ConfirmationHold > 0 {
+			if entity.CreatedAt.IsZero() || now.Sub(entity.CreatedAt) < r.config.ConfirmationHold {
 				continue
 			}
 		}
