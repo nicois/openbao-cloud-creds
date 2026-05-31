@@ -10,6 +10,12 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+const (
+	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
+	defaultRoleTTLSeconds    = 900  // 15m
+	defaultRoleMaxTTLSeconds = 3600 // 1h
+)
+
 type awsRole struct {
 	Name        string            `json:"name"`
 	DefaultTTL  time.Duration     `json:"default_ttl"`
@@ -26,21 +32,21 @@ func (b *backend) rolePaths() []*framework.Path {
 		{
 			Pattern: "roles/" + framework.GenericNameRegex("name"),
 			Fields: map[string]*framework.FieldSchema{
-				"name": {
+				fieldName: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
 				"default_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     900,
+					Default:     defaultRoleTTLSeconds,
 					Description: "Default STS session duration (min 900s/15m, max 43200s/12h)",
 				},
 				"max_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     3600,
+					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum STS session duration",
 				},
-				"iam_role_arn": {
+				fieldIAMRoleARN: {
 					Type:        framework.TypeString,
 					Description: "IAM role ARN to assume via STS",
 				},
@@ -52,7 +58,7 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "External ID for cross-account assume role",
 				},
-				"minter_set": {
+				fieldMinterSet: {
 					Type:        framework.TypeString,
 					Description: "Name of the minter set this role mints from (required)",
 				},
@@ -73,16 +79,16 @@ func (b *backend) rolePaths() []*framework.Path {
 }
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
-	iamRoleARN := d.Get("iam_role_arn").(string)
+	iamRoleARN := d.Get(fieldIAMRoleARN).(string)
 
 	if iamRoleARN == "" {
 		return logical.ErrorResponse("iam_role_arn is required"), nil
 	}
 
-	minterSet := d.Get("minter_set").(string)
+	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
 		return logical.ErrorResponse("minter_set is required"), nil
 	}
@@ -106,11 +112,11 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	role := &cloudconfig.Role{
 		Name:       name,
-		Cloud:      "aws",
+		Cloud:      cloudName,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
 		CloudConfig: map[string]interface{}{
-			"iam_role_arn": iamRoleARN,
+			fieldIAMRoleARN: iamRoleARN,
 		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
@@ -149,7 +155,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 }
 
 func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "roles/"+name)
 	if err != nil {
 		return nil, err
@@ -164,11 +170,11 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 	}
 
 	data := map[string]interface{}{
-		"name":         role.Name,
-		"default_ttl":  int(role.DefaultTTL.Seconds()),
-		"max_ttl":      int(role.MaxTTL.Seconds()),
-		"iam_role_arn": role.IAMRoleARN,
-		"minter_set":   role.MinterSet,
+		fieldName:       role.Name,
+		"default_ttl":   int(role.DefaultTTL.Seconds()),
+		"max_ttl":       int(role.MaxTTL.Seconds()),
+		fieldIAMRoleARN: role.IAMRoleARN,
+		fieldMinterSet:  role.MinterSet,
 	}
 	if role.SessionTags != nil {
 		data["session_tags"] = role.SessionTags
@@ -181,7 +187,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 }
 
 func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	if err := req.Storage.Delete(ctx, "roles/"+name); err != nil {
 		return nil, err
 	}

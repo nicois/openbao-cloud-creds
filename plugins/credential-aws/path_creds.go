@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -22,7 +23,7 @@ func (b *backend) credsPaths() []*framework.Path {
 		{
 			Pattern: "creds/" + framework.GenericNameRegex("role"),
 			Fields: map[string]*framework.FieldSchema{
-				"role": {
+				fieldRole: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
@@ -43,39 +44,63 @@ func (b *backend) secretAWS() *framework.Secret {
 }
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	roleName := d.Get("role").(string)
+	roleName := d.Get(fieldRole).(string)
 
-	// Load role from storage
-	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
-	if err != nil {
-		return nil, err
-	}
-	if entry == nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
-	}
-
-	var role awsRole
-	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, err
-	}
-
-	if role.Disabled {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	role, errResp, err := b.loadRole(ctx, req, roleName)
+	if err != nil || errResp != nil {
+		return errResp, err
 	}
 
 	// Select a healthy minter from the role's bound set
-	setName, minterID, client, err := b.selectMinter(role.MinterSet)
+	sel, err := b.selectMinter(role.MinterSet)
 	if err != nil {
 		// selectMinter fails when the set is unloaded or every minter in it is
 		// failing — both surface to the client as an upstream auth failure.
 		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", err.Error()), nil
 	}
 
-	// Build AssumeRole input
-	sessionName := fmt.Sprintf("cloud-creds-%s-%s", roleName, req.ID)
+	now := time.Now()
+	output, err := sel.client.AssumeRole(ctx, buildAssumeRoleInput(role, roleName, req.ID))
+	if err != nil {
+		b.recordMinterError(sel.setID, sel.minterID, classifyAWSError(err), now)
+		// We can't reliably classify the upstream failure at this layer, so
+		// ErrInternal is the honest, stable code to return.
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "upstream error: %v", err), nil
+	}
+	b.recordMinterSuccess(sel.setID, sel.minterID, now)
+
+	if b.accessTracker != nil {
+		b.accessTracker.RecordAccess(sel.setID+"/"+sel.minterID, roleName, now)
+	}
+
+	emitLeaseIssued(roleName)
+
+	return b.buildCredsResponse(ctx, req, credsResponseArgs{
+		role:     role,
+		roleName: roleName,
+		sel:      sel,
+		output:   output,
+		now:      now,
+	}), nil
+}
+
+// credsResponseArgs bundles the inputs to buildCredsResponse so it stays under
+// the argument-limit lint cap.
+type credsResponseArgs struct {
+	role     *awsRole
+	roleName string
+	sel      selectedMinter
+	output   *sts.AssumeRoleOutput
+	now      time.Time
+}
+
+// buildAssumeRoleInput assembles the STS AssumeRoleInput for a role, including
+// the truncated session name, optional session tags, and optional external ID.
+func buildAssumeRoleInput(role *awsRole, roleName, reqID string) *sts.AssumeRoleInput {
+	sessionName := fmt.Sprintf("cloud-creds-%s-%s", roleName, reqID)
 	// AWS session name max 64 chars, alphanumeric + =,.@-_
-	if len(sessionName) > 64 {
-		sessionName = sessionName[:64]
+	if len(sessionName) > maxSessionNameLen {
+		sessionName = sessionName[:maxSessionNameLen]
 	}
 
 	durationSeconds := int32(role.DefaultTTL.Seconds())
@@ -87,7 +112,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	// Add session tags for safety boundary
 	if len(role.SessionTags) > 0 {
-		var tags []ststypes.Tag
+		tags := make([]ststypes.Tag, 0, len(role.SessionTags))
 		for k, v := range role.SessionTags {
 			tags = append(tags, ststypes.Tag{
 				Key:   aws.String(k),
@@ -102,22 +127,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		input.ExternalId = aws.String(role.ExternalID)
 	}
 
-	now := time.Now()
-	output, err := client.AssumeRole(ctx, input)
-	if err != nil {
-		b.recordMinterError(setName, minterID, classifyAWSError(err), now)
-		// We can't reliably classify the upstream failure at this layer, so
-		// ErrInternal is the honest, stable code to return.
-		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "upstream error: %v", err), nil
-	}
-	b.recordMinterSuccess(setName, minterID, now)
+	return input
+}
 
-	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
-	}
-
-	emitLeaseIssued(roleName)
-
+// buildCredsResponse builds the envelope, persists the active-credential
+// tracking entry, and returns the lease response for a successful AssumeRole.
+func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, args credsResponseArgs) *logical.Response {
+	output := args.output
 	// STS credentials have a fixed expiration set by AWS
 	expiresAt := *output.Credentials.Expiration
 	ttlSeconds := int(time.Until(expiresAt).Seconds())
@@ -125,8 +141,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	accessKeyID := aws.ToString(output.Credentials.AccessKeyId)
 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
-		Cloud: "aws",
-		Role:  roleName,
+		Cloud: cloudName,
+		Role:  args.roleName,
 		Credential: map[string]interface{}{
 			"access_key_id":     accessKeyID,
 			"secret_access_key": aws.ToString(output.Credentials.SecretAccessKey),
@@ -136,17 +152,17 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		TTLSeconds:   ttlSeconds,
 		Renewable:    false,
 		CredentialID: accessKeyID,
-		Scope:        role.IAMRoleARN,
+		Scope:        args.role.IAMRoleARN,
 		IssuedBy:     "cloud-creds-aws/v0.1",
-		MinterSet:    setName,
-		MinterID:     minterID,
+		MinterSet:    args.sel.setID,
+		MinterID:     args.sel.minterID,
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)
 	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+accessKeyID, map[string]interface{}{
-		"role":       roleName,
-		"minter":     minterID,
-		"created":    now.UTC().Format(time.RFC3339),
+		fieldRole:    args.roleName,
+		"minter":     args.sel.minterID,
+		"created":    args.now.UTC().Format(time.RFC3339),
 		"expires_at": expiresAt.UTC().Format(time.RFC3339),
 	})
 	if activeEntry != nil {
@@ -157,14 +173,36 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	resp := b.Secret("aws_sts_credentials").Response(env.ToMap(), map[string]interface{}{
 		"access_key_id": accessKeyID,
-		"role":          roleName,
-		"minter_set":    setName,
-		"minter_id":     minterID,
+		fieldRole:       args.roleName,
+		fieldMinterSet:  args.sel.setID,
+		"minter_id":     args.sel.minterID,
 	})
-	resp.Secret.TTL = role.DefaultTTL
-	resp.Secret.MaxTTL = role.MaxTTL
+	resp.Secret.TTL = args.role.DefaultTTL
+	resp.Secret.MaxTTL = args.role.MaxTTL
 
-	return resp, nil
+	return resp
+}
+
+// loadRole fetches and validates a role for issuance. It returns either the
+// parsed role, or an *logical.Response describing why issuance can't proceed
+// (role missing/disabled), or a hard error. Exactly one of role/errResp is
+// non-nil when err is nil.
+func (b *backend) loadRole(ctx context.Context, req *logical.Request, roleName string) (*awsRole, *logical.Response, error) {
+	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
+	if err != nil {
+		return nil, nil, err
+	}
+	if entry == nil {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
+	}
+	var role awsRole
+	if err := json.Unmarshal(entry.Value, &role); err != nil {
+		return nil, nil, err
+	}
+	if role.Disabled {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	}
+	return &role, nil, nil
 }
 
 // pathCredsRevoke is a no-op for AWS STS credentials — they expire naturally.
@@ -173,7 +211,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 // issued this credential; minter_set is read only for log context.
 func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
 	accessKeyID, _ := req.Secret.InternalData["access_key_id"].(string)
-	minterSet, _ := req.Secret.InternalData["minter_set"].(string)
+	minterSet, _ := req.Secret.InternalData[fieldMinterSet].(string)
 	if accessKeyID != "" {
 		if err := req.Storage.Delete(ctx, "active-tokens/"+accessKeyID); err != nil {
 			b.Logger().Warn("failed to remove active credential tracking",
@@ -190,20 +228,29 @@ func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, _ *f
 	return logical.ErrorResponse("aws STS credentials cannot be renewed; issue a new credential instead"), nil
 }
 
-func (b *backend) selectMinter(setName string) (setID, minterID string, client STSClient, err error) {
+// selectedMinter bundles the result of selectMinter: the set and minter that
+// were chosen plus a ready-to-use STS client for them. The client is built via
+// b.buildSTSClient, which honors the injected stsClientFn factory when set.
+type selectedMinter struct {
+	setID    string
+	minterID string
+	client   STSClient
+}
+
+func (b *backend) selectMinter(setName string) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	states, ok := b.minterSets[setName]
 	if !ok {
-		return "", "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	for id, ms := range states {
 		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
-			return setName, id, b.buildSTSClient(ms.minter), nil
+			return selectedMinter{setID: setName, minterID: id, client: b.buildSTSClient(ms.minter)}, nil
 		}
 	}
-	return "", "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+	return selectedMinter{}, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
 }
 
 // buildSTSClient creates an STS client from a minter. The token field stores
@@ -219,7 +266,7 @@ func (b *backend) buildSTSClient(m cloudconfig.Minter) STSClient {
 
 	region := b.region
 	if region == "" {
-		region = "us-east-1"
+		region = defaultRegion
 	}
 
 	if b.stsClientFn != nil {
@@ -251,17 +298,17 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 // classifyAWSError maps AWS SDK errors to HTTP status codes for state machine.
 func classifyAWSError(err error) int {
 	if err == nil {
-		return 200
+		return http.StatusOK
 	}
 	errMsg := err.Error()
 	if strings.Contains(errMsg, "AccessDenied") || strings.Contains(errMsg, "403") {
-		return 403
+		return http.StatusForbidden
 	}
 	if strings.Contains(errMsg, "ExpiredToken") || strings.Contains(errMsg, "InvalidClientTokenId") || strings.Contains(errMsg, "401") {
-		return 401
+		return http.StatusUnauthorized
 	}
 	if strings.Contains(errMsg, "Throttling") || strings.Contains(errMsg, "429") {
-		return 429
+		return http.StatusTooManyRequests
 	}
-	return 500
+	return http.StatusInternalServerError
 }
