@@ -25,7 +25,7 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 
 	wm := worker.New(worker.WithErrorHandler(b.workerErrorHandler()))
 
-	wm.Register("health-check", 5*time.Minute, worker.Opts{}, b.healthCheckWorker)
+	wm.Register("health-check", healthCheckInterval, worker.Opts{}, b.healthCheckWorker)
 
 	wm.Register("metrics-flush", cfg.FlushInterval, worker.Opts{}, func(ctx context.Context) error {
 		return b.accessTracker.Flush(ctx, time.Now())
@@ -93,45 +93,38 @@ func (b *backend) rotationWorker(ctx context.Context, storage logical.Storage) e
 	rolesChecked := 0
 
 	for _, roleName := range roleNames {
-		roleEntry, err := storage.Get(ctx, "roles/"+roleName)
-		if err != nil {
-			continue
-		}
-		if roleEntry == nil {
-			continue
-		}
-
-		var role ociRole
-		if err := json.Unmarshal(roleEntry.Value, &role); err != nil {
-			continue
-		}
-
-		if role.Disabled {
+		role, ok := loadRole(ctx, storage, roleName)
+		if !ok || role.Disabled {
 			continue
 		}
 
 		rolesChecked++
-
-		for i := 0; i < role.SlotCount; i++ {
-			s, err := loadSlot(ctx, storage, roleName, i)
-			if err != nil || s == nil {
-				continue
-			}
-
-			if s.State == slotActive && now.After(s.NextRotationAt) {
-				if err := b.rotateSlot(ctx, storage, &role, i); err != nil {
-					b.Logger().Warn("rotation worker: failed to rotate slot",
-						"role", roleName,
-						"slot", i,
-						"error", err,
-					)
-				}
-			}
-		}
+		b.rotateDueSlots(ctx, storage, role, now)
 	}
 
 	emitRotationCheckCompleted(rolesChecked)
 	return nil
+}
+
+// rotateDueSlots rotates every active slot of the role whose next_rotation_at
+// is in the past as of now. Rotation failures are logged and skipped, matching
+// the original inline behavior.
+func (b *backend) rotateDueSlots(ctx context.Context, storage logical.Storage, role *ociRole, now time.Time) {
+	for i := 0; i < role.SlotCount; i++ {
+		s, err := loadSlot(ctx, storage, role.Name, i)
+		if err != nil || s == nil {
+			continue
+		}
+		if s.State == slotActive && now.After(s.NextRotationAt) {
+			if err := b.rotateSlot(ctx, storage, role, i); err != nil {
+				b.Logger().Warn("rotation worker: failed to rotate slot",
+					"role", role.Name,
+					"slot", i,
+					"error", err,
+				)
+			}
+		}
+	}
 }
 
 // reconcileWorker runs the reconciliation logic from the background worker.
@@ -141,85 +134,13 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		return err
 	}
 
-	// Collect known token IDs
-	knownTokenIDs := make(map[string]bool)
-	for _, roleName := range roleNames {
-		roleEntry, err := storage.Get(ctx, "roles/"+roleName)
-		if err != nil {
-			continue
-		}
-		if roleEntry == nil {
-			continue
-		}
-		var role ociRole
-		if err := json.Unmarshal(roleEntry.Value, &role); err != nil {
-			continue
-		}
-		slots, err := loadAllSlots(ctx, storage, roleName, role.SlotCount)
-		if err != nil {
-			continue
-		}
-		for _, s := range slots {
-			if s.TokenID != "" {
-				knownTokenIDs[s.TokenID] = true
-			}
-		}
+	pass := &reconcilePass{
+		knownTokenIDs: collectKnownTokenIDs(ctx, storage, roleNames),
+		dryRun:        false,
+		maxDeletes:    b.maxDeletesForPass(),
 	}
+	res := b.reconcileOrphans(ctx, storage, roleNames, pass)
 
-	// Find and delete orphans
-	orphansFound := 0
-	maxDeletes := 10
-	b.mu.RLock()
-	if b.config != nil {
-		maxDeletes = b.config.MaxDeletesPerPass
-	}
-	b.mu.RUnlock()
-
-	deleted := 0
-	for _, roleName := range roleNames {
-		roleEntry, err := storage.Get(ctx, "roles/"+roleName)
-		if err != nil {
-			continue
-		}
-		if roleEntry == nil {
-			continue
-		}
-		var role ociRole
-		if err := json.Unmarshal(roleEntry.Value, &role); err != nil {
-			continue
-		}
-
-		// List/delete via a healthy minter from the role's bound set.
-		_, client, selErr := b.selectMinterForSet(role.MinterSet)
-		if selErr != nil {
-			continue
-		}
-
-		tokens, err := client.ListAuthTokens(ctx, role.UserOCID)
-		if err != nil {
-			continue
-		}
-
-		for _, t := range tokens {
-			if !isOwnedToken(t.Description) {
-				continue
-			}
-			if !knownTokenIDs[t.ID] {
-				orphansFound++
-				if deleted < maxDeletes {
-					if err := client.DeleteAuthToken(ctx, role.UserOCID, t.ID); err == nil {
-						deleted++
-					}
-				}
-			}
-		}
-	}
-
-	emitOrphansFound(orphansFound)
+	emitOrphansFound(res.orphansFound)
 	return nil
-}
-
-// isOwnedToken checks if a token description matches the owner-tag scheme.
-func isOwnedToken(description string) bool {
-	return len(description) >= len(ociTokenPrefix) && description[:len(ociTokenPrefix)] == ociTokenPrefix
 }

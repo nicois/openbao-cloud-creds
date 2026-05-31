@@ -44,7 +44,7 @@ func newSigningOCIClient(token, region string) *signingOCIClient {
 	return &signingOCIClient{token: token, region: region}
 }
 
-func (c *signingOCIClient) CreateAuthToken(_ context.Context, _, _ string) (string, string, error) {
+func (c *signingOCIClient) CreateAuthToken(_ context.Context, _, _ string) (tokenValue, tokenID string, err error) {
 	return "", "", fmt.Errorf("upstream_auth_failed: OCI request signing not implemented in this build")
 }
 
@@ -67,6 +67,10 @@ type fakeOCIClient struct {
 	failNext error
 }
 
+// fakeStartingTokenID is the starting counter for synthetic token OCIDs the
+// in-memory fake hands out.
+const fakeStartingTokenID = 1000
+
 type fakeToken struct {
 	id          string
 	value       string
@@ -77,7 +81,7 @@ type fakeToken struct {
 func newFakeOCIClient() *fakeOCIClient {
 	return &fakeOCIClient{
 		tokens: make(map[string]map[string]*fakeToken),
-		nextID: 1000,
+		nextID: fakeStartingTokenID,
 	}
 }
 
@@ -85,16 +89,16 @@ func (f *fakeOCIClient) SetNextError(err error) {
 	f.failNext = err
 }
 
-func (f *fakeOCIClient) CreateAuthToken(_ context.Context, userID, description string) (string, string, error) {
+func (f *fakeOCIClient) CreateAuthToken(_ context.Context, userID, description string) (tokenValue, tokenID string, err error) {
 	if f.failNext != nil {
-		err := f.failNext
+		err = f.failNext
 		f.failNext = nil
 		return "", "", err
 	}
 
 	f.nextID++
-	tokenID := fmt.Sprintf("ocid1.credential.oc1..fake%d", f.nextID)
-	tokenValue := fmt.Sprintf("faketoken_%d", f.nextID)
+	tokenID = fmt.Sprintf("ocid1.credential.oc1..fake%d", f.nextID)
+	tokenValue = fmt.Sprintf("faketoken_%d", f.nextID)
 
 	if f.tokens[userID] == nil {
 		f.tokens[userID] = make(map[string]*fakeToken)

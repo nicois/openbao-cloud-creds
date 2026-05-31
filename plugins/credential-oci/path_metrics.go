@@ -8,6 +8,10 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+// defaultStaleAfterSeconds is the default "older_than" window for the stale
+// entity query.
+const defaultStaleAfterSeconds = 604800 // 7d
+
 func (b *backend) metricsPaths() []*framework.Path {
 	return []*framework.Path{
 		{
@@ -27,7 +31,7 @@ func (b *backend) metricsPaths() []*framework.Path {
 			Fields: map[string]*framework.FieldSchema{
 				"older_than": {
 					Type:        framework.TypeDurationSecond,
-					Default:     604800,
+					Default:     defaultStaleAfterSeconds,
 					Description: "Return entities not accessed within this duration",
 				},
 			},

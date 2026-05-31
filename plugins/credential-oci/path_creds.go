@@ -13,11 +13,11 @@ import (
 func (b *backend) credsPaths() []*framework.Path {
 	return []*framework.Path{
 		{
-			Pattern: "creds/" + framework.GenericNameRegex("role"),
+			Pattern: "creds/" + framework.GenericNameRegex(fieldRole),
 			Fields: map[string]*framework.FieldSchema{
-				"role": {
+				fieldRole: {
 					Type:        framework.TypeString,
-					Description: "Name of the role",
+					Description: descRoleName,
 				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -36,7 +36,7 @@ func (b *backend) secretOCI() *framework.Secret {
 }
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	roleName := d.Get("role").(string)
+	roleName := d.Get(fieldRole).(string)
 
 	// Load role from storage
 	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
@@ -92,7 +92,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	emitLeaseIssued(roleName)
 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
-		Cloud: "oci",
+		Cloud: cloudName,
 		Role:  roleName,
 		Credential: map[string]interface{}{
 			"auth_token": best.TokenValue,
@@ -109,11 +109,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	})
 
 	resp := b.Secret("oci_auth_token").Response(env.ToMap(), map[string]interface{}{
-		"role":       roleName,
-		"slot_index": best.SlotIndex,
-		"token_id":   best.TokenID,
-		"minter_set": best.MinterSet,
-		"minter_id":  best.MinterID,
+		fieldRole:      roleName,
+		fieldSlotIndex: best.SlotIndex,
+		"token_id":     best.TokenID,
+		fieldMinterSet: best.MinterSet,
+		"minter_id":    best.MinterID,
 	})
 	resp.Secret.TTL = time.Duration(ttlSeconds) * time.Second
 	resp.Secret.MaxTTL = role.MaxTTL

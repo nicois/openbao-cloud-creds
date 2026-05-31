@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"time"
 
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -30,35 +29,43 @@ func (b *backend) reconcilePaths() []*framework.Path {
 	}
 }
 
-func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	mode := d.Get("mode").(string)
-	dryRun := mode == "dry_run"
-
-	if b.anyHealthyMinter() == nil {
-		return logical.ErrorResponse("cannot reconcile: no healthy minter available"), nil
+// maxDeletesForPass returns the per-pass orphan-delete cap, honoring the
+// configured override when present.
+func (b *backend) maxDeletesForPass() int {
+	maxDeletes := maxDeletesPerPass
+	b.mu.RLock()
+	if b.config != nil {
+		maxDeletes = b.config.MaxDeletesPerPass
 	}
+	b.mu.RUnlock()
+	return maxDeletes
+}
 
-	// List all roles
-	roleNames, err := req.Storage.List(ctx, "roles/")
-	if err != nil {
-		return nil, err
+// loadRole reads and unmarshals a role by name. Returns (nil, false) for any
+// read/parse error or a missing entry, matching the callers' skip-on-error
+// behavior.
+func loadRole(ctx context.Context, storage logical.Storage, roleName string) (*ociRole, bool) {
+	roleEntry, err := storage.Get(ctx, "roles/"+roleName)
+	if err != nil || roleEntry == nil {
+		return nil, false
 	}
+	var role ociRole
+	if err := json.Unmarshal(roleEntry.Value, &role); err != nil {
+		return nil, false
+	}
+	return &role, true
+}
 
-	// Collect all known token IDs from slot storage
+// collectKnownTokenIDs builds the set of token IDs currently recorded in slot
+// storage across all given roles.
+func collectKnownTokenIDs(ctx context.Context, storage logical.Storage, roleNames []string) map[string]bool {
 	knownTokenIDs := make(map[string]bool)
 	for _, roleName := range roleNames {
-		roleEntry, err := req.Storage.Get(ctx, "roles/"+roleName)
-		if err != nil {
+		role, ok := loadRole(ctx, storage, roleName)
+		if !ok {
 			continue
 		}
-		if roleEntry == nil {
-			continue
-		}
-		var role ociRole
-		if err := json.Unmarshal(roleEntry.Value, &role); err != nil {
-			continue
-		}
-		slots, err := loadAllSlots(ctx, req.Storage, roleName, role.SlotCount)
+		slots, err := loadAllSlots(ctx, storage, roleName, role.SlotCount)
 		if err != nil {
 			continue
 		}
@@ -68,28 +75,32 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 			}
 		}
 	}
+	return knownTokenIDs
+}
 
-	// For each role, list upstream tokens and find orphans
-	orphansFound := 0
-	deleted := 0
-	maxDeletes := 10
+// reconcileResult tallies a reconcile pass.
+type reconcileResult struct {
+	orphansFound int
+	deleted      int
+}
 
-	b.mu.RLock()
-	if b.config != nil {
-		maxDeletes = b.config.MaxDeletesPerPass
-	}
-	b.mu.RUnlock()
+// reconcilePass bundles the inputs and running tally of a single reconcile
+// sweep so the per-role/per-token helpers stay within the argument limit.
+type reconcilePass struct {
+	knownTokenIDs map[string]bool
+	dryRun        bool
+	maxDeletes    int
+	result        reconcileResult
+}
 
+// reconcileOrphans lists upstream tokens for every role and deletes those that
+// carry our owner prefix but are not recorded in slot storage. When dryRun is
+// true no deletes are issued, but orphans are still counted. deleted never
+// exceeds maxDeletes.
+func (b *backend) reconcileOrphans(ctx context.Context, storage logical.Storage, roleNames []string, pass *reconcilePass) reconcileResult {
 	for _, roleName := range roleNames {
-		roleEntry, err := req.Storage.Get(ctx, "roles/"+roleName)
-		if err != nil {
-			continue
-		}
-		if roleEntry == nil {
-			continue
-		}
-		var role ociRole
-		if err := json.Unmarshal(roleEntry.Value, &role); err != nil {
+		role, ok := loadRole(ctx, storage, roleName)
+		if !ok {
 			continue
 		}
 
@@ -104,35 +115,63 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 			continue
 		}
 
-		for _, t := range tokens {
-			// Only consider tokens with our prefix
-			if !strings.HasPrefix(t.Description, ociTokenPrefix) {
-				continue
-			}
-			// If not in our known set, it's an orphan
-			if !knownTokenIDs[t.ID] {
-				orphansFound++
-				if !dryRun && deleted < maxDeletes {
-					if err := client.DeleteAuthToken(ctx, role.UserOCID, t.ID); err == nil {
-						deleted++
-					}
-				}
+		pass.reconcileRoleTokens(ctx, client, role, tokens)
+	}
+	return pass.result
+}
+
+// reconcileRoleTokens scans one role's upstream tokens, counting orphans (ours
+// by prefix, not recorded in slot storage) and deleting them unless the pass is
+// a dry run, up to maxDeletes total across the pass.
+func (p *reconcilePass) reconcileRoleTokens(ctx context.Context, client OCIIAMClient, role *ociRole, tokens []AuthTokenInfo) {
+	for _, t := range tokens {
+		// Only consider tokens with our prefix.
+		if !strings.HasPrefix(t.Description, ociTokenPrefix) {
+			continue
+		}
+		// If not in our known set, it's an orphan.
+		if p.knownTokenIDs[t.ID] {
+			continue
+		}
+		p.result.orphansFound++
+		if !p.dryRun && p.result.deleted < p.maxDeletes {
+			if err := client.DeleteAuthToken(ctx, role.UserOCID, t.ID); err == nil {
+				p.result.deleted++
 			}
 		}
 	}
+}
 
-	now := time.Now()
-	_ = now
+func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	mode := d.Get("mode").(string)
+	dryRun := mode == "dry_run"
 
-	emitOrphansFound(orphansFound)
+	if b.anyHealthyMinter() == nil {
+		return logical.ErrorResponse("cannot reconcile: no healthy minter available"), nil
+	}
+
+	roleNames, err := req.Storage.List(ctx, "roles/")
+	if err != nil {
+		return nil, err
+	}
+
+	maxDeletes := b.maxDeletesForPass()
+	pass := &reconcilePass{
+		knownTokenIDs: collectKnownTokenIDs(ctx, req.Storage, roleNames),
+		dryRun:        dryRun,
+		maxDeletes:    maxDeletes,
+	}
+	res := b.reconcileOrphans(ctx, req.Storage, roleNames, pass)
+
+	emitOrphansFound(res.orphansFound)
 
 	return &logical.Response{
 		Data: map[string]interface{}{
 			"mode":          mode,
 			"dry_run":       dryRun,
-			"orphans_found": orphansFound,
-			"deleted":       deleted,
-			"hit_limit":     deleted >= maxDeletes,
+			"orphans_found": res.orphansFound,
+			"deleted":       res.deleted,
+			"hit_limit":     res.deleted >= maxDeletes,
 		},
 	}, nil
 }

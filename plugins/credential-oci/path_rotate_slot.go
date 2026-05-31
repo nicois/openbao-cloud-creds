@@ -13,13 +13,13 @@ import (
 func (b *backend) rotateSlotPaths() []*framework.Path {
 	return []*framework.Path{
 		{
-			Pattern: "rotate-slot/" + framework.GenericNameRegex("role") + "/" + framework.GenericNameRegex("slot_index"),
+			Pattern: "rotate-slot/" + framework.GenericNameRegex(fieldRole) + "/" + framework.GenericNameRegex(fieldSlotIndex),
 			Fields: map[string]*framework.FieldSchema{
-				"role": {
+				fieldRole: {
 					Type:        framework.TypeString,
-					Description: "Name of the role",
+					Description: descRoleName,
 				},
-				"slot_index": {
+				fieldSlotIndex: {
 					Type:        framework.TypeString,
 					Description: "Index of the slot to rotate (0 or 1)",
 				},
@@ -32,8 +32,8 @@ func (b *backend) rotateSlotPaths() []*framework.Path {
 }
 
 func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	roleName := d.Get("role").(string)
-	slotIndexStr := d.Get("slot_index").(string)
+	roleName := d.Get(fieldRole).(string)
+	slotIndexStr := d.Get(fieldSlotIndex).(string)
 
 	slotIndex, err := strconv.Atoi(slotIndexStr)
 	if err != nil {
@@ -70,8 +70,8 @@ func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"role":             roleName,
-			"slot_index":       slotIndex,
+			fieldRole:          roleName,
+			fieldSlotIndex:     slotIndex,
 			"rotated":          true,
 			"new_token_id":     updated.TokenID,
 			"next_rotation_at": updated.NextRotationAt.UTC().Format("2006-01-02T15:04:05Z"),

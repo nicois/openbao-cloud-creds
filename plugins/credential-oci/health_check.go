@@ -2,6 +2,7 @@ package credentialoci
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
@@ -29,7 +30,7 @@ func (b *backend) healthCheckWorker(ctx context.Context) error {
 		// GetUser verifies the minter credentials are valid. The minter ID is the
 		// configured credential identifier, used as a stand-in user reference.
 		if err := client.GetUser(ctx, p.id); err != nil {
-			p.sm.RecordError(401, now)
+			p.sm.RecordError(http.StatusUnauthorized, now)
 		} else {
 			p.sm.RecordSuccess(now)
 		}
