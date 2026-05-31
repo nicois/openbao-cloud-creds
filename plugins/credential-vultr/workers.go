@@ -25,7 +25,7 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 
 	wm := worker.New(worker.WithErrorHandler(b.workerErrorHandler()))
 
-	wm.Register("health-check", 5*time.Minute, worker.Opts{}, b.healthCheckWorker)
+	wm.Register("health-check", healthCheckInterval, worker.Opts{}, b.healthCheckWorker)
 
 	wm.Register("metrics-flush", cfg.FlushInterval, worker.Opts{}, func(ctx context.Context) error {
 		return b.accessTracker.Flush(ctx, time.Now())
@@ -76,7 +76,7 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 	registry := &leaseRegistry{storage: storage, ctx: ctx}
 
 	b.mu.RLock()
-	maxDeletes := 10
+	maxDeletes := maxDeletesPerPass
 	if b.config != nil {
 		maxDeletes = b.config.MaxDeletesPerPass
 	}

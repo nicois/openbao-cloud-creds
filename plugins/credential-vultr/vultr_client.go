@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// httpTimeout bounds every upstream Vultr API call.
+const httpTimeout = 30 * time.Second
+
 type vultrClient struct {
 	baseURL    string
 	token      string
@@ -47,7 +50,7 @@ func newVultrClient(baseURL, token string) *vultrClient {
 		baseURL: baseURL,
 		token:   token,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: httpTimeout,
 		},
 	}
 }
@@ -59,7 +62,7 @@ func (c *vultrClient) CreateUser(ctx context.Context, name, email string, acls [
 		APIEnabled: true,
 		ACLs:       acls,
 	})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/v2/users", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v2/users", bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -72,7 +75,7 @@ func (c *vultrClient) CreateUser(ctx context.Context, name, email string, acls [
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 201 {
+	if resp.StatusCode != http.StatusCreated {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, resp.StatusCode, fmt.Errorf("vultr API returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -85,7 +88,7 @@ func (c *vultrClient) CreateUser(ctx context.Context, name, email string, acls [
 }
 
 func (c *vultrClient) CheckHealth(ctx context.Context) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v2/account", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v2/account", http.NoBody)
 	if err != nil {
 		return 0, err
 	}
@@ -102,7 +105,7 @@ func (c *vultrClient) CheckHealth(ctx context.Context) (int, error) {
 }
 
 func (c *vultrClient) ListUsers(ctx context.Context) ([]userInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v2/users", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v2/users", http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +117,7 @@ func (c *vultrClient) ListUsers(ctx context.Context) ([]userInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("vultr API list users returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -127,7 +130,7 @@ func (c *vultrClient) ListUsers(ctx context.Context) ([]userInfo, error) {
 }
 
 func (c *vultrClient) DeleteUser(ctx context.Context, userID string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/v2/users/"+userID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v2/users/"+userID, http.NoBody)
 	if err != nil {
 		return 0, err
 	}
@@ -139,7 +142,7 @@ func (c *vultrClient) DeleteUser(ctx context.Context, userID string) (int, error
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 204 {
+	if resp.StatusCode != http.StatusNoContent {
 		return resp.StatusCode, fmt.Errorf("vultr API delete returned %d", resp.StatusCode)
 	}
 	return resp.StatusCode, nil

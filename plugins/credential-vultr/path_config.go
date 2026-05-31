@@ -10,6 +10,27 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+const (
+	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
+	defaultFlushIntervalSeconds    = 900   // 15m
+	defaultReconcileCadenceSeconds = 21600 // 6h
+
+	// reconcilerBootstrapDelay holds off the first reconcile pass after a
+	// (re)start so leases issued just before restart aren't seen as orphans.
+	reconcilerBootstrapDelay = 24 * time.Hour
+
+	// maxDeletesPerPass caps how many orphaned users one reconcile pass deletes.
+	maxDeletesPerPass = 10
+
+	// healthCheckInterval is how often the health-check worker probes minters,
+	// and the recovery state machine's re-probe cadence.
+	healthCheckInterval = 5 * time.Minute
+
+	// authFailThreshold is how long upstream auth must keep failing before the
+	// recovery state machine declares a minter hard-failed.
+	authFailThreshold = 30 * time.Second
+)
+
 func (b *backend) configPaths() []*framework.Path {
 	return []*framework.Path{
 		{
@@ -17,12 +38,12 @@ func (b *backend) configPaths() []*framework.Path {
 			Fields: map[string]*framework.FieldSchema{
 				"flush_interval": {
 					Type:        framework.TypeDurationSecond,
-					Default:     900,
+					Default:     defaultFlushIntervalSeconds,
 					Description: "Metrics flush interval in seconds",
 				},
 				"reconcile_cadence": {
 					Type:        framework.TypeDurationSecond,
-					Default:     21600,
+					Default:     defaultReconcileCadenceSeconds,
 					Description: "Reconciliation cadence in seconds",
 				},
 				"vultr_api_url": {
@@ -44,11 +65,11 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
-		Cloud:             "vultr",
+		Cloud:             cloudName,
 		FlushInterval:     flushInterval,
 		ReconcileCadence:  reconcileCadence,
-		BootstrapDelay:    24 * time.Hour,
-		MaxDeletesPerPass: 10,
+		BootstrapDelay:    reconcilerBootstrapDelay,
+		MaxDeletesPerPass: maxDeletesPerPass,
 	}
 
 	entry, err := logical.StorageEntryJSON("config", cfg)
@@ -130,7 +151,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"cloud":             cfg.Cloud,
+			fieldCloud:          cfg.Cloud,
 			"flush_interval":    int(cfg.FlushInterval.Seconds()),
 			"reconcile_cadence": int(cfg.ReconcileCadence.Seconds()),
 		},

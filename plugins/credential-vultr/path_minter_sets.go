@@ -146,8 +146,8 @@ func (b *backend) loadMinterSet(set *cloudconfig.MinterSet) {
 			set:    set.Name,
 			minter: m,
 			sm: recovery.NewStateMachine(recovery.Config{
-				AuthFailThreshold:   30 * time.Second,
-				HealthCheckInterval: 5 * time.Minute,
+				AuthFailThreshold:   authFailThreshold,
+				HealthCheckInterval: healthCheckInterval,
 			}),
 		}
 	}
