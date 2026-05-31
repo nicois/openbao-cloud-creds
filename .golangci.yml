@@ -1,3 +1,8 @@
+# golangci-lint v2 config tuned for "slow accretion" code smells.
+# Adopted from qualcheck/.golangci.yml, reconciled with this repo's deliberate
+# exclusions (see docs/superpowers/specs/2026-05-31-golangci-config-upgrade-design.md).
+# Run with: golangci-lint run   (golangci-lint v2.x)
+
 version: "2"
 
 run:
@@ -9,26 +14,105 @@ formatters:
     - goimports
 
 linters:
+  default: standard
+
   enable:
-    - errcheck
-    - govet
-    - staticcheck
-    - unused
-    - ineffassign
-    - misspell
-    - unconvert
-    - unparam
+    # Family 1: growth / complexity drift
+    - gocyclo
+    - gocognit
+    - cyclop
+    - funlen
+    - nestif
+    - maintidx
+    # Family 2: boolean/flag params & enums
     - revive
+    - mnd
+    - goconst
+    - exhaustive
+    # Family 3: copy-paste & near-duplication
+    - dupl
+    - dupword
+    # Family 4: dead / orphaned & comment rot
+    - unused
+    - unparam
+    - ineffassign
+    - wastedassign
+    - godox
+    - godot
+    - predeclared
+    - gocritic
+
   settings:
     errcheck:
       exclude-functions:
         - (io.Closer).Close
         - (net/http.ResponseWriter).Write
+    gocyclo:
+      min-complexity: 15
+    gocognit:
+      min-complexity: 20
+    cyclop:
+      max-complexity: 15
+      package-average: 8.0
+    funlen:
+      lines: 80
+      statements: 50
+      ignore-comments: true
+    nestif:
+      min-complexity: 4
+    maintidx:
+      under: 20
+    mnd:
+      checks: [argument, case, condition, operation, return, assign]
+      ignored-numbers: ["0", "1", "2"]
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+      numbers: true
+    exhaustive:
+      default-signifies-exhaustive: true
+    dupl:
+      threshold: 100
+    godox:
+      keywords: [TODO, FIXME, HACK, BUG, OPTIMIZE]
+    godot:
+      scope: declarations
+      capital: false
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - opinionated
+        - performance
+      disabled-checks:
+        - hugeParam
     revive:
       rules:
-        - name: exported
-          disabled: true
-        - name: package-comments
-          disabled: true
+        - name: argument-limit
+          arguments: [5]
+        - name: function-result-limit
+          arguments: [3]
+        - name: flag-parameter
+        - name: function-length
+          arguments: [60, 0]
+        - name: cognitive-complexity
+          arguments: [20]
+        - name: cyclomatic
+          arguments: [15]
+        - name: max-public-structs
+          arguments: [5]
         - name: unused-parameter
           disabled: true
+        - name: unused-receiver
+          disabled: true
+        - name: deep-exit
+        - name: unhandled-error
+          arguments: ["fmt.Printf", "fmt.Println"]
+        - name: confusing-naming
+        - name: identical-branches
+
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go
+        linters: [funlen, gocyclo, gocognit, dupl, maintidx, goconst, mnd, revive, cyclop]
