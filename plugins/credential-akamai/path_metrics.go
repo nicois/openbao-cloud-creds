@@ -27,7 +27,7 @@ func (b *backend) metricsPaths() []*framework.Path {
 			Fields: map[string]*framework.FieldSchema{
 				"older_than": {
 					Type:        framework.TypeDurationSecond,
-					Default:     604800,
+					Default:     defaultStaleOlderThanSeconds,
 					Description: "Return entities not accessed within this duration",
 				},
 			},

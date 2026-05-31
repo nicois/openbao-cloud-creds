@@ -25,31 +25,31 @@ func (b *backend) rolePaths() []*framework.Path {
 		{
 			Pattern: "roles/" + framework.GenericNameRegex("name"),
 			Fields: map[string]*framework.FieldSchema{
-				"name": {
+				fieldName: {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
 				"default_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     900,
+					Default:     defaultRoleTTLSeconds,
 					Description: "Default lease TTL",
 				},
 				"max_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Default:     3600,
+					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum lease TTL",
 				},
-				"group_id": {
+				fieldGroupID: {
 					Type:        framework.TypeInt,
 					Default:     0,
 					Description: "Akamai group ID for access",
 				},
-				"api_access": {
+				fieldAPIAccess: {
 					Type:        framework.TypeString,
 					Default:     "",
 					Description: "JSON string defining which APIs to grant access to",
 				},
-				"minter_set": {
+				fieldMinterSet: {
 					Type:        framework.TypeString,
 					Description: "Name of the minter set this role mints from (required)",
 				},
@@ -70,13 +70,13 @@ func (b *backend) rolePaths() []*framework.Path {
 }
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
-	groupID := d.Get("group_id").(int)
-	apiAccess := d.Get("api_access").(string)
+	groupID := d.Get(fieldGroupID).(int)
+	apiAccess := d.Get(fieldAPIAccess).(string)
 
-	minterSet := d.Get("minter_set").(string)
+	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
 		return logical.ErrorResponse("minter_set is required"), nil
 	}
@@ -90,12 +90,12 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	role := &cloudconfig.Role{
 		Name:       name,
-		Cloud:      "akamai",
+		Cloud:      cloudName,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
 		CloudConfig: map[string]interface{}{
-			"group_id":   groupID,
-			"api_access": apiAccess,
+			fieldGroupID:   groupID,
+			fieldAPIAccess: apiAccess,
 		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
@@ -123,7 +123,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 }
 
 func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "roles/"+name)
 	if err != nil {
 		return nil, err
@@ -139,18 +139,18 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"name":        role.Name,
-			"default_ttl": int(role.DefaultTTL.Seconds()),
-			"max_ttl":     int(role.MaxTTL.Seconds()),
-			"group_id":    role.GroupID,
-			"api_access":  role.APIAccess,
-			"minter_set":  role.MinterSet,
+			fieldName:      role.Name,
+			"default_ttl":  int(role.DefaultTTL.Seconds()),
+			"max_ttl":      int(role.MaxTTL.Seconds()),
+			fieldGroupID:   role.GroupID,
+			fieldAPIAccess: role.APIAccess,
+			fieldMinterSet: role.MinterSet,
 		},
 	}, nil
 }
 
 func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	name := d.Get("name").(string)
+	name := d.Get(fieldName).(string)
 	if err := req.Storage.Delete(ctx, "roles/"+name); err != nil {
 		return nil, err
 	}

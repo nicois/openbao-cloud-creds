@@ -2,6 +2,7 @@ package credentialakamai
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
@@ -34,7 +35,7 @@ func (b *backend) healthCheckWorker(ctx context.Context) error {
 		if err != nil {
 			continue
 		}
-		if status == 200 {
+		if status == http.StatusOK {
 			p.sm.RecordSuccess(now)
 		} else {
 			p.sm.RecordError(status, now)

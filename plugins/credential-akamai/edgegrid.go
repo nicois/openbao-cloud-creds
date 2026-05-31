@@ -20,11 +20,15 @@ type edgeGridCredential struct {
 	Host         string
 }
 
+// edgeGridTokenParts is the number of colon-separated components in a minter
+// token: client_token, access_token, client_secret.
+const edgeGridTokenParts = 3
+
 // parseEdgeGridToken parses a colon-separated minter token into components.
-// Format: "client_token:access_token:client_secret"
+// Format: "client_token:access_token:client_secret".
 func parseEdgeGridToken(token string) (*edgeGridCredential, error) {
-	parts := strings.SplitN(token, ":", 3)
-	if len(parts) != 3 {
+	parts := strings.SplitN(token, ":", edgeGridTokenParts)
+	if len(parts) != edgeGridTokenParts {
 		return nil, fmt.Errorf("minter token must be in format 'client_token:access_token:client_secret'")
 	}
 	if parts[0] == "" || parts[1] == "" || parts[2] == "" {
@@ -85,7 +89,9 @@ func signRequest(req *http.Request, cred *edgeGridCredential) {
 
 func hmacSHA256(key, data []byte) []byte {
 	mac := hmac.New(sha256.New, key)
-	mac.Write(data)
+	// hash.Hash.Write is documented never to return an error; the result is
+	// discarded deliberately. This does not change the signing bytes.
+	_, _ = mac.Write(data)
 	return mac.Sum(nil)
 }
 
@@ -95,7 +101,7 @@ func hashBody(body []byte) string {
 }
 
 func generateNonce() string {
-	b := make([]byte, 16)
+	b := make([]byte, nonceBytes)
 	_, _ = rand.Read(b)
 	return fmt.Sprintf("%x", b)
 }

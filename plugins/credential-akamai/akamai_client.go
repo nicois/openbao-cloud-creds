@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
 type akamaiClient struct {
@@ -47,7 +46,7 @@ func newAkamaiClient(baseURL string, cred *edgeGridCredential) *akamaiClient {
 		baseURL:    baseURL,
 		credential: cred,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: httpTimeout,
 		},
 	}
 }
@@ -59,7 +58,7 @@ func (c *akamaiClient) CreateClient(ctx context.Context, name string, apiAccess,
 		APIAccess:       apiAccess,
 		GroupAccess:     groupAccess,
 	})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/identity-management/v3/api-clients?createCredential=true", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/identity-management/v3/api-clients?createCredential=true", bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -73,7 +72,7 @@ func (c *akamaiClient) CreateClient(ctx context.Context, name string, apiAccess,
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 201 {
+	if resp.StatusCode != http.StatusCreated {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, resp.StatusCode, fmt.Errorf("akamai API returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -86,7 +85,7 @@ func (c *akamaiClient) CreateClient(ctx context.Context, name string, apiAccess,
 }
 
 func (c *akamaiClient) CheckHealth(ctx context.Context) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/identity-management/v3/api-clients/self", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/identity-management/v3/api-clients/self", http.NoBody)
 	if err != nil {
 		return 0, err
 	}
@@ -104,7 +103,7 @@ func (c *akamaiClient) CheckHealth(ctx context.Context) (int, error) {
 }
 
 func (c *akamaiClient) ListClients(ctx context.Context) ([]clientInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/identity-management/v3/api-clients", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/identity-management/v3/api-clients", http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +116,7 @@ func (c *akamaiClient) ListClients(ctx context.Context) ([]clientInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("akamai API list clients returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -130,7 +129,7 @@ func (c *akamaiClient) ListClients(ctx context.Context) ([]clientInfo, error) {
 }
 
 func (c *akamaiClient) DeleteClient(ctx context.Context, clientID string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/identity-management/v3/api-clients/"+clientID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/identity-management/v3/api-clients/"+clientID, http.NoBody)
 	if err != nil {
 		return 0, err
 	}
@@ -143,7 +142,7 @@ func (c *akamaiClient) DeleteClient(ctx context.Context, clientID string) (int, 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 204 {
+	if resp.StatusCode != http.StatusNoContent {
 		return resp.StatusCode, fmt.Errorf("akamai API delete returned %d", resp.StatusCode)
 	}
 	return resp.StatusCode, nil
