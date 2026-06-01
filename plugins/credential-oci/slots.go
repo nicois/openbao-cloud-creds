@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -232,6 +231,7 @@ func (b *backend) rotateSlot(ctx context.Context, storage logical.Storage, role 
 // set. Slots for a role are always provisioned and rotated using a minter from
 // the role's bound set.
 func (b *backend) selectMinterForSet(setName string) (minterID string, client OCIIAMClient, err error) {
+	now := time.Now()
 	b.mu.RLock()
 	states, ok := b.minterSets[setName]
 	if !ok {
@@ -240,7 +240,7 @@ func (b *backend) selectMinterForSet(setName string) (minterID string, client OC
 	}
 	var token string
 	for id, ms := range states {
-		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+		if ms.sm.Selectable(now) {
 			minterID = id
 			token = ms.minter.Token
 			break
@@ -275,12 +275,13 @@ func (b *backend) getMinterClient(setName, minterID string) OCIIAMClient {
 // anyHealthyMinter returns a client for any healthy minter across all sets.
 // Used by the reconciler, which lists owner-tagged tokens regardless of set.
 func (b *backend) anyHealthyMinter() OCIIAMClient {
+	now := time.Now()
 	b.mu.RLock()
 	var token string
 	found := false
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+			if ms.sm.Selectable(now) {
 				token = ms.minter.Token
 				found = true
 				break
