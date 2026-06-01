@@ -1,16 +1,22 @@
 package credentialakamai
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"crypto/rand"
 )
+
+// maxBodyHashBytes is EdgeGrid's documented cap on the bytes hashed for the
+// request-body portion of the signature.
+const maxBodyHashBytes = 131072
 
 // edgeGridCredential holds the components needed for EdgeGrid authentication.
 type edgeGridCredential struct {
@@ -41,11 +47,17 @@ func parseEdgeGridToken(token string) (*edgeGridCredential, error) {
 	}, nil
 }
 
-// signRequest applies EdgeGrid HMAC-SHA256 authentication to an HTTP request.
+// signRequest applies EdgeGrid HMAC-SHA256 authentication to an HTTP request,
+// generating the timestamp and nonce.
 func signRequest(req *http.Request, cred *edgeGridCredential) {
 	timestamp := time.Now().UTC().Format("20060102T15:04:05+0000")
-	nonce := generateNonce()
+	signRequestAt(req, cred, timestamp, generateNonce())
+}
 
+// signRequestAt is the deterministic core of signRequest: the timestamp and
+// nonce are supplied by the caller so the signature is reproducible (used by
+// signRequest with generated values, and by tests with fixed values).
+func signRequestAt(req *http.Request, cred *edgeGridCredential, timestamp, nonce string) {
 	// Build auth header data prefix (without signature)
 	authData := fmt.Sprintf("EG1-HMAC-SHA256 client_token=%s;access_token=%s;timestamp=%s;nonce=%s;",
 		cred.ClientToken, cred.AccessToken, timestamp, nonce)
@@ -59,13 +71,20 @@ func signRequest(req *http.Request, cred *edgeGridCredential) {
 	host := req.URL.Host
 	pathAndQuery := req.URL.RequestURI()
 
-	// Body hash (for POST/PUT with content)
+	// Body hash (for POST/PUT with content). EdgeGrid hashes at most the first
+	// maxBodyHashBytes of the body; the body is buffered and restored so the
+	// real send is unaffected.
 	bodyHash := ""
-	if req.Body != nil && (req.Method == "POST" || req.Method == "PUT") {
-		// We don't read the body for signing in this implementation.
-		// EdgeGrid typically only hashes the first 131072 bytes.
-		// For API client creation, the body content is included.
-		bodyHash = hashBody(nil) // empty for simplicity; real impl would buffer
+	if req.Body != nil && (req.Method == http.MethodPost || req.Method == http.MethodPut) {
+		buf, err := io.ReadAll(req.Body)
+		if err == nil {
+			req.Body = io.NopCloser(bytes.NewReader(buf)) // restore for the real send
+			hashInput := buf
+			if len(hashInput) > maxBodyHashBytes {
+				hashInput = hashInput[:maxBodyHashBytes]
+			}
+			bodyHash = hashBody(hashInput)
+		}
 	}
 
 	// Canonical request: method\tscheme\thost\tpath+query\theaders\tbody_hash\t
