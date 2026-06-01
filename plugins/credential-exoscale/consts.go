@@ -27,6 +27,9 @@ const (
 	defaultRoleMaxTTLSeconds       = 3600
 	defaultStaleAfterSeconds       = 604800
 	defaultFlushIntervalSeconds    = 900
+	// defaultMinterExpiryWarnSeconds is the default near-expiry warn threshold (7d),
+	// matching cloudconfig.MinMinterGap.
+	defaultMinterExpiryWarnSeconds = 604800
 )
 
 // Worker and reconciler timing/count constants.
