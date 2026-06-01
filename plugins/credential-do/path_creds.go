@@ -64,10 +64,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	tokenResp, httpStatus, err := client.CreateToken(ctx, tokenName, scopes)
 	if err != nil {
 		b.recordMinterError(setName, minterID, httpStatus, now)
-		b.Logger().Warn("upstream credential issuance failed",
-			"cloud", cloudName, "status", httpStatus, "error", err)
-		return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
-			"upstream credential issuance failed"), nil
+		return b.issuanceError(httpStatus, err), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
@@ -297,4 +294,13 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 			ms.sm.RecordError(httpStatus, at)
 		}
 	}
+}
+
+// issuanceError logs the raw upstream error operator-side and returns a
+// client-safe error response with the classified error_code (no upstream body).
+func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
+	b.Logger().Warn("upstream credential issuance failed",
+		"cloud", cloudName, "status", httpStatus, "error", err)
+	return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
+		"upstream credential issuance failed")
 }
