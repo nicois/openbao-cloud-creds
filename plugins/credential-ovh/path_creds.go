@@ -64,10 +64,9 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 	accessToken, expiresIn, err := client.MintToken(ctx)
 	if err != nil {
-		b.recordMinterError(setName, minterID, classifyOVHError(err), now)
-		// We can't reliably classify the OAuth2 token-minting failure at this
-		// layer, so ErrInternal is the honest, stable code to return.
-		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "upstream error: %v", err), nil
+		status := classifyOVHError(err)
+		b.recordMinterError(setName, minterID, status, now)
+		return b.issuanceError(status, err), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
@@ -230,6 +229,15 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 			ms.sm.RecordError(httpStatus, at)
 		}
 	}
+}
+
+// issuanceError logs the raw upstream failure (operator-only) and returns a
+// classified, body-free error response for the client (audit2 #4,#5).
+func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
+	b.Logger().Warn("upstream credential issuance failed",
+		"cloud", cloudName, "status", httpStatus, "error", err)
+	return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
+		"upstream credential issuance failed")
 }
 
 // classifyOVHError maps OVH OAuth2 errors to HTTP status codes for the state machine.
