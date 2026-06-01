@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	credentialaws "github.com/nicois/openbao-cloud-creds/plugins/credential-aws"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -320,6 +321,39 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 	}
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected error response for upstream failure")
+	}
+}
+
+func TestCredsIssue_ClassifiesQuotaError(t *testing.T) {
+	b, storage := setupConfiguredBackend(t)
+
+	// Replace the STS factory so AssumeRole returns a throttling error, which
+	// classifyAWSError maps to HTTP 429.
+	credentialaws.SetSTSClientFactory(b, func(accessKeyID, secretAccessKey, region, endpoint string) credentialaws.STSClient {
+		return credentialaws.NewFakeSTSClient(
+			func(ctx context.Context, params *sts.AssumeRoleInput) (*sts.AssumeRoleOutput, error) {
+				return nil, fmt.Errorf("Throttling: Rate exceeded")
+			},
+			nil,
+		)
+	})
+
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.ReadOperation, Path: "creds/test-role", Storage: storage,
+	})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("expected error response, got %v", resp)
+	}
+	msg := resp.Error().Error()
+	if !strings.HasPrefix(msg, string(credenvelope.ErrUpstreamQuotaExceeded)+":") {
+		t.Fatalf("expected upstream_quota_exceeded code, got %q", msg)
+	}
+	// #5: the raw upstream error detail must NOT leak to the client.
+	if strings.Contains(msg, "Throttling") || strings.Contains(msg, "Rate exceeded") {
+		t.Fatalf("client message leaked upstream detail: %q", msg)
 	}
 }
 

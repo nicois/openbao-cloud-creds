@@ -62,10 +62,9 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 	output, err := sel.client.AssumeRole(ctx, buildAssumeRoleInput(role, roleName, req.ID))
 	if err != nil {
-		b.recordMinterError(sel.setID, sel.minterID, classifyAWSError(err), now)
-		// We can't reliably classify the upstream failure at this layer, so
-		// ErrInternal is the honest, stable code to return.
-		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "upstream error: %v", err), nil
+		status := classifyAWSError(err)
+		b.recordMinterError(sel.setID, sel.minterID, status, now)
+		return b.issuanceError(status, err), nil
 	}
 	b.recordMinterSuccess(sel.setID, sel.minterID, now)
 
@@ -299,6 +298,15 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 			ms.sm.RecordError(httpStatus, at)
 		}
 	}
+}
+
+// issuanceError logs the raw upstream failure (operator-only) and returns a
+// classified, body-free error response for the client (audit2 #4,#5).
+func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
+	b.Logger().Warn("upstream credential issuance failed",
+		"cloud", cloudName, "status", httpStatus, "error", err)
+	return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
+		"upstream credential issuance failed")
 }
 
 // classifyAWSError maps AWS SDK errors to HTTP status codes for state machine.
