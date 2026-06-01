@@ -141,7 +141,6 @@ func TestMinterSetIsolation(t *testing.T) {
 		t.Fatalf("role2 used wrong minter: set=%v id=%v", meta["minter_set"], meta["minter_id"])
 	}
 }
-
 func TestCredsRevoke(t *testing.T) {
 	srv := fakes.NewDOServer()
 	defer srv.Close()

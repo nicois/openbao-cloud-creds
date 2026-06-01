@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
-	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -47,8 +46,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return errResp, err
 	}
 
+	now := time.Now()
+
 	// Select a healthy minter from the role's bound set
-	sel, err := b.selectMinter(role.MinterSet)
+	sel, err := b.selectMinter(role.MinterSet, now)
 	if err != nil {
 		// selectMinter fails when the set is unloaded or every minter in it is
 		// failing — both surface to the client as an upstream auth failure.
@@ -59,8 +60,6 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Mint token via DO API
 	scopes := strings.Split(role.Scopes, ",")
 	tokenName := fmt.Sprintf("cloud-creds-%s-%s", roleName, req.ID)
-
-	now := time.Now()
 	tokenResp, httpStatus, err := client.CreateToken(ctx, tokenName, scopes)
 	if err != nil {
 		b.recordMinterError(setName, minterID, httpStatus, now)
@@ -182,7 +181,7 @@ type selectedMinter struct {
 	client   *doClient
 }
 
-func (b *backend) selectMinter(setName string) (selectedMinter, error) {
+func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -192,7 +191,7 @@ func (b *backend) selectMinter(setName string) (selectedMinter, error) {
 	}
 	apiURL := b.doAPIURL()
 	for id, ms := range states {
-		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+		if ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: newDOClient(apiURL, ms.minter.Token)}, nil
 		}
 	}
@@ -227,10 +226,11 @@ func (b *backend) anyHealthyMinter() (*doClient, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
+	now := time.Now()
 	apiURL := b.doAPIURL()
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+			if ms.sm.Selectable(now) {
 				return newDOClient(apiURL, ms.minter.Token), nil
 			}
 		}
@@ -243,10 +243,11 @@ func (b *backend) anyHealthyMinter() (*doClient, error) {
 func (b *backend) anyHealthyMinterInSet(setName string) (*doClient, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
+	now := time.Now()
 	apiURL := b.doAPIURL()
 	if states, ok := b.minterSets[setName]; ok {
 		for _, ms := range states {
-			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+			if ms.sm.Selectable(now) {
 				return newDOClient(apiURL, ms.minter.Token), nil
 			}
 		}
