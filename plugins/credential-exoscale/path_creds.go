@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
-	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -59,8 +58,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
 	}
 
+	now := time.Now()
+
 	// Select a healthy minter from the role's bound set
-	sel, err := b.selectMinter(role.MinterSet)
+	sel, err := b.selectMinter(role.MinterSet, now)
 	if err != nil {
 		// selectMinter fails when the set is unloaded or every minter in it is
 		// failing — both surface to the client as an upstream auth failure.
@@ -71,7 +72,6 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Mint API key via Exoscale API
 	keyName := fmt.Sprintf("cloud-creds-%s-%s", roleName, req.ID)
 
-	now := time.Now()
 	keyResp, httpStatus, err := client.CreateAPIKey(ctx, keyName, role.RoleID)
 	if err != nil {
 		b.recordMinterError(setName, minterID, httpStatus, now)
@@ -218,7 +218,7 @@ type selectedMinter struct {
 	client   *exoscaleClient
 }
 
-func (b *backend) selectMinter(setName string) (selectedMinter, error) {
+func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -228,7 +228,7 @@ func (b *backend) selectMinter(setName string) (selectedMinter, error) {
 	}
 	apiURL := b.exoscaleAPIURL()
 	for id, ms := range states {
-		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+		if ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: newExoscaleClient(apiURL, ms.minter.Token)}, nil
 		}
 	}
@@ -241,10 +241,11 @@ func (b *backend) anyHealthyMinter() (*exoscaleClient, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
+	now := time.Now()
 	apiURL := b.exoscaleAPIURL()
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+			if ms.sm.Selectable(now) {
 				return newExoscaleClient(apiURL, ms.minter.Token), nil
 			}
 		}
@@ -257,10 +258,11 @@ func (b *backend) anyHealthyMinter() (*exoscaleClient, error) {
 func (b *backend) anyHealthyMinterInSet(setName string) (*exoscaleClient, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
+	now := time.Now()
 	apiURL := b.exoscaleAPIURL()
 	if states, ok := b.minterSets[setName]; ok {
 		for _, ms := range states {
-			if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+			if ms.sm.Selectable(now) {
 				return newExoscaleClient(apiURL, ms.minter.Token), nil
 			}
 		}
