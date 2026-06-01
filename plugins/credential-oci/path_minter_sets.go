@@ -27,12 +27,32 @@ func (b *backend) minterSetPaths() []*framework.Path {
 			},
 		},
 		{
+			Pattern: "minter-sets/" + framework.GenericNameRegex(fieldName) + "/rotate",
+			Fields: map[string]*framework.FieldSchema{
+				fieldName:     {Type: framework.TypeString, Description: "Name of the minter set"},
+				fieldMinterID: {Type: framework.TypeString, Description: "ID of the minter in the set to rotate"},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathMinterSetRotate},
+			},
+		},
+		{
 			Pattern: "minter-sets/?$",
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ListOperation: &framework.PathOperation{Callback: b.pathMinterSetList},
 			},
 		},
 	}
+}
+
+// pathMinterSetRotate is the uniform minter rotate endpoint. OCI auth-token
+// minters cannot be self-rotated headlessly by the plugin, so this always
+// rejects before any state change — the endpoint exists only so clients see one
+// consistent surface across all clouds. (This is distinct from OCI's phased
+// per-slot rotation at rotate-slot/..., which rotates issued credentials, not
+// the minter identities.) Rotate OCI minters out-of-band.
+func (b *backend) pathMinterSetRotate(_ context.Context, _ *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
+	return logical.ErrorResponse("minter rotation is not supported for %s; rotate this minter out-of-band", cloudName), nil
 }
 
 // parseMinters converts the raw "minters" field into cloudconfig.Minters. The

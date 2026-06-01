@@ -12,6 +12,12 @@ const (
 	fieldScopes    = "scopes"
 	fieldMinterSet = "minter_set"
 	fieldCloud     = "cloud"
+	// fieldMinterID names the minter targeted by the rotate endpoint.
+	fieldMinterID = "minter_id"
+	// fieldMinterRetireGrace is the config field/response key for the retirement
+	// grace; present for a uniform config surface across all clouds (DO never
+	// marks a minter retired, so no sweep ever consumes it).
+	fieldMinterRetireGrace = "minter_retire_grace"
 )
 
 // Path and field keys reused across schemas, request handlers, and tests.

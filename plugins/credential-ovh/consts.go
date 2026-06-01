@@ -12,6 +12,12 @@ const (
 	fieldRegion    = "region"
 	fieldMinterSet = "minter_set"
 	fieldCloud     = "cloud"
+	// fieldMinterID names the minter targeted by the rotate endpoint.
+	fieldMinterID = "minter_id"
+	// fieldMinterRetireGrace is the config field/response key for the retirement
+	// grace; present for a uniform config surface across all clouds (OVH never
+	// marks a minter retired, so no sweep ever consumes it).
+	fieldMinterRetireGrace = "minter_retire_grace"
 )
 
 // metricNamespace is the leading segment of every metric key this plugin emits.
