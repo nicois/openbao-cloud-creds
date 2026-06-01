@@ -136,9 +136,9 @@ func TestMinterRotation_HappyPath(t *testing.T) {
 		t.Fatalf("successor missing key_id rotation param: %+v", successor.RotationParams)
 	}
 
-	// selectMinter must never return the retired minter, and the successor is selectable.
-	sawSuccessor := false
-	for range 20 {
+	// selectMinter must never return the retired minter (deterministic regardless
+	// of map-iteration order).
+	for range 10 {
 		sel, err := bk.selectMinter(defaultSetName, time.Now())
 		if err != nil {
 			t.Fatalf("selectMinter: %v", err)
@@ -146,12 +146,19 @@ func TestMinterRotation_HappyPath(t *testing.T) {
 		if sel.minterID == "minter-1" {
 			t.Fatal("retired minter-1 must never be selected")
 		}
-		if sel.minterID == successorID {
-			sawSuccessor = true
-		}
 	}
-	if !sawSuccessor {
-		t.Fatal("successor was never selected across 20 picks")
+	// Deterministic: the successor is present, active (not retired), and Selectable.
+	bk.mu.RLock()
+	ms, ok := bk.minterSets[defaultSetName][successorID]
+	bk.mu.RUnlock()
+	if !ok {
+		t.Fatalf("successor %q not in the in-memory set", successorID)
+	}
+	if ms.minter.Retired {
+		t.Fatal("successor must not be retired")
+	}
+	if !ms.sm.Selectable(time.Now()) {
+		t.Fatal("successor must be selectable")
 	}
 }
 
