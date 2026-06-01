@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -24,6 +25,16 @@ func (b *backend) minterSetPaths() []*framework.Path {
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathMinterSetWrite},
 				logical.ReadOperation:   &framework.PathOperation{Callback: b.pathMinterSetRead},
 				logical.DeleteOperation: &framework.PathOperation{Callback: b.pathMinterSetDelete},
+			},
+		},
+		{
+			Pattern: "minter-sets/" + framework.GenericNameRegex("name") + "/rotate",
+			Fields: map[string]*framework.FieldSchema{
+				fieldName:     {Type: framework.TypeString, Description: "Name of the minter set"},
+				fieldMinterID: {Type: framework.TypeString, Description: "ID of the minter in the set to rotate"},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathMinterSetRotate},
 			},
 		},
 		{
@@ -71,6 +82,13 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 			}
 			minter.ExpiresAt = t
 		}
+		if rp, ok := mMap[fieldRotationParams].(map[string]interface{}); ok {
+			params := make(map[string]string, len(rp))
+			for k, v := range rp {
+				params[k] = fmt.Sprintf("%v", v)
+			}
+			minter.RotationParams = params
+		}
 		minters = append(minters, minter)
 	}
 	return minters, nil
@@ -99,6 +117,215 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 	b.loadMinterSet(set)
 	go b.startWorkers(b.baseCtx, req.Storage)
 	return nil, nil
+}
+
+// readSet loads a persisted minter set from storage, or nil if absent.
+func (b *backend) readSet(ctx context.Context, storage logical.Storage, name string) (*cloudconfig.MinterSet, error) {
+	entry, err := storage.Get(ctx, "minter-sets/"+name)
+	if err != nil {
+		return nil, err
+	}
+	if entry == nil {
+		return nil, nil
+	}
+	var set cloudconfig.MinterSet
+	if err := json.Unmarshal(entry.Value, &set); err != nil {
+		return nil, err
+	}
+	return &set, nil
+}
+
+// persistSet writes the set to storage and refreshes the in-memory snapshot.
+func (b *backend) persistSet(ctx context.Context, storage logical.Storage, set *cloudconfig.MinterSet) error {
+	entry, err := logical.StorageEntryJSON("minter-sets/"+set.Name, set)
+	if err != nil {
+		return err
+	}
+	if err := storage.Put(ctx, entry); err != nil {
+		return err
+	}
+	b.loadMinterSet(set)
+	return nil
+}
+
+// withRotatedSuccessor returns a fresh slice equal to minters but with the
+// minter at oldIdx marked retired (RetiredAt=retiredAt) and the given successor
+// appended active. Index iteration avoids copying Minter by value in a range
+// loop. Used for both the synthetic-successor pre-mint validation and the
+// real-successor commit, so the two views are constructed identically.
+func withRotatedSuccessor(minters []cloudconfig.Minter, oldIdx int, retiredAt time.Time, successor cloudconfig.Minter) []cloudconfig.Minter {
+	out := make([]cloudconfig.Minter, 0, len(minters)+1)
+	for i := range minters {
+		m := minters[i]
+		if i == oldIdx {
+			m.Retired = true
+			m.RetiredAt = retiredAt
+		}
+		out = append(out, m)
+	}
+	return append(out, successor)
+}
+
+// pathMinterSetRotate rotates one minter in a set: it first validates the
+// prospective post-rotation set against a synthetic successor (no cloud call),
+// and only if that passes mints the real successor — a new IAM access key on the
+// SAME minter IAM user (make-before-break) — health-checks it via STS, then
+// (atomically, under rotateSweepMu) appends the successor active and marks the
+// original retired. The original's upstream access key stays alive until the
+// retired-sweep deletes it after minter_retire_grace — so no other raft node,
+// whose in-memory snapshot may still hold the original as selectable, ever loses
+// its minter mid-flight.
+func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	name := d.Get(fieldName).(string)
+	minterID := d.Get(fieldMinterID).(string)
+	if minterID == "" {
+		return logical.ErrorResponse("minter_id is required"), nil
+	}
+
+	b.rotateSweepMu.Lock()
+	defer b.rotateSweepMu.Unlock()
+
+	set, err := b.readSet(ctx, req.Storage, name)
+	if err != nil {
+		return nil, err
+	}
+	if set == nil {
+		return logical.ErrorResponse("minter set %q does not exist", name), nil
+	}
+
+	oldIdx := -1
+	for i := range set.Minters {
+		if set.Minters[i].ID == minterID {
+			oldIdx = i
+			break
+		}
+	}
+	if oldIdx == -1 {
+		return logical.ErrorResponse("minter %q not found in set %q", minterID, name), nil
+	}
+	old := set.Minters[oldIdx]
+	if old.Retired {
+		return logical.ErrorResponse("minter %q is already retired", minterID), nil
+	}
+
+	// 1. Validate the prospective post-rotation set FIRST, using a SYNTHETIC
+	//    successor — no cloud call yet. ValidateMinterSet only inspects
+	//    NeverExpires/ExpiresAt/Retired; AWS access keys never expire so the
+	//    successor inherits old.NeverExpires (matching RotateMinter), making the
+	//    synthetic stand-in exact. Validating before minting means a rotation
+	//    that would break the set never consumes one of the IAM user's scarce
+	//    access-key slots (cap of maxAccessKeysPerUser) — load-bearing here
+	//    (audit2 #9).
+	retiredAt := time.Now()
+	synthetic := cloudconfig.Minter{
+		ID:           old.ID + "-rot-pending",
+		NeverExpires: old.NeverExpires,
+	}
+	if !old.NeverExpires {
+		synthetic.ExpiresAt = old.ExpiresAt
+	}
+	if verr := cloudconfig.ValidateMinterSet(withRotatedSuccessor(set.Minters, oldIdx, retiredAt, synthetic)); verr != nil {
+		return logical.ErrorResponse("rotation would invalidate the minter set: %v", verr), nil
+	}
+
+	// 2. Validation passed: NOW mint the real successor (a new access key on the
+	//    minter IAM user), using a healthy active minter as the rotator: prefer
+	//    the minter being rotated if it is itself selectable, else any other
+	//    active minter in the set.
+	rotator, err := b.rotationRotator(name, minterID, time.Now())
+	if err != nil {
+		return logical.ErrorResponse("no healthy minter to perform rotation: %v", err), nil
+	}
+	successor, err := rotator.RotateMinter(ctx, old)
+	if err != nil {
+		return logical.ErrorResponse("rotation failed: %v", err), nil
+	}
+
+	// 3. Health-check the successor via an STS client built from ITS token
+	//    (GetCallerIdentity, the same probe healthCheckWorker uses). If it fails,
+	//    clean up the just-created access key and reject with no state change.
+	if herr := b.checkSuccessorHealth(ctx, successor); herr != nil {
+		b.cleanupSuccessor(ctx, successor)
+		return logical.ErrorResponse("successor minter failed health check: %v", herr), nil
+	}
+
+	// 4. Commit: append the real successor active, mark the old retired, then
+	//    persist the set and refresh the in-memory snapshot.
+	set.Minters = withRotatedSuccessor(set.Minters, oldIdx, retiredAt, successor)
+	if err := b.persistSet(ctx, req.Storage, set); err != nil {
+		// Persist failed after creating the successor key: best-effort clean up so
+		// we don't leak an access key no set references.
+		b.cleanupSuccessor(ctx, successor)
+		return nil, err
+	}
+
+	emitMinterRotated(name)
+	b.Logger().Info("minter rotated",
+		"cloud", cloudName, "minter_set", name,
+		"retired_minter_id", minterID, "successor_id", successor.ID)
+
+	return &logical.Response{Data: map[string]interface{}{
+		"successor_id":      successor.ID,
+		"retired_minter_id": minterID,
+		"retired_at":        retiredAt,
+	}}, nil
+}
+
+// rotationRotator returns a minterRotator (wrapping an IAM key-management client)
+// to mint the successor: the minter being rotated if it is itself selectable,
+// otherwise any other healthy active minter in the set (so a wedged minter can
+// still be rotated out by a sibling).
+func (b *backend) rotationRotator(setName, minterID string, now time.Time) (*minterRotator, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	states, ok := b.minterSets[setName]
+	if !ok {
+		return nil, fmt.Errorf("minter set %q not loaded", setName)
+	}
+	if ms, ok := states[minterID]; ok && !ms.minter.Retired && ms.sm.Selectable(now) {
+		return &minterRotator{client: b.buildIAMMinterClient(ms.minter)}, nil
+	}
+	for id, ms := range states {
+		if id == minterID {
+			continue
+		}
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
+			return &minterRotator{client: b.buildIAMMinterClient(ms.minter)}, nil
+		}
+	}
+	return nil, fmt.Errorf("no healthy active minter in set %q", setName)
+}
+
+// checkSuccessorHealth verifies the successor's access key authenticates by
+// calling STS GetCallerIdentity AS that key (the same probe healthCheckWorker
+// uses). Returns nil when the successor is usable.
+func (b *backend) checkSuccessorHealth(ctx context.Context, successor cloudconfig.Minter) error {
+	b.mu.RLock()
+	client := b.buildSTSClient(successor)
+	b.mu.RUnlock()
+	if _, err := client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// cleanupSuccessor best-effort deletes a just-created successor access key
+// upstream when the rotation is aborted (health-check failure or persist
+// failure). Uses an IAM client built from the SUCCESSOR's own token (it can
+// delete its own key). Failures are logged, not returned — the rotation is
+// already being rejected.
+func (b *backend) cleanupSuccessor(ctx context.Context, successor cloudconfig.Minter) {
+	accessKeyID := successor.RotationParams[fieldAccessKeyID]
+	if accessKeyID == "" {
+		return
+	}
+	b.mu.RLock()
+	client := b.buildIAMMinterClient(successor)
+	b.mu.RUnlock()
+	if err := client.DeleteAccessKey(ctx, accessKeyID); err != nil && !isNoSuchEntity(err) {
+		b.Logger().Warn("failed to clean up aborted-rotation successor access key",
+			"cloud", cloudName, "access_key_id", accessKeyID, "error", err)
+	}
 }
 
 func (b *backend) pathMinterSetRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {

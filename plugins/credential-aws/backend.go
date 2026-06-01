@@ -32,6 +32,19 @@ type backend struct {
 	workerMgr         *worker.Manager
 	workerCancel      context.CancelFunc
 	stsClientFn       STSClientFactory
+	// iamMinterClientFn builds the IAM access-key management client used for
+	// minter self-rotation (CreateAccessKey/DeleteAccessKey/ListAccessKeys on the
+	// minter IAM user). Mirrors stsClientFn: tests inject a fake; when nil the
+	// real SigV4-signed IAM client is used. This is the KEY-MANAGEMENT client,
+	// distinct from the STS issuance client.
+	iamMinterClientFn IAMMinterClientFactory
+	// rotateSweepMu serializes minter rotation (the rotate endpoint) against the
+	// retired-sweep, so a rotation's read-modify-write of a set never interleaves
+	// with the sweep's. Held WITHOUT b.mu across the whole orchestration / sweep
+	// body; b.mu is taken only inside the small helpers (loadMinterSet,
+	// selectMinter, …) — never across a rotateSweepMu critical section — so no
+	// AB-BA deadlock with b.mu exists.
+	rotateSweepMu sync.Mutex
 	// baseCtx is the parent context for all worker goroutines; baseCancel is
 	// fired from Clean (backend teardown) so leaked workers cannot outlive the
 	// backend. Worker launch sites use baseCtx rather than context.Background().

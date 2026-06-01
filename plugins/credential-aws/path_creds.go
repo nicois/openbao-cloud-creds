@@ -280,6 +280,30 @@ func (b *backend) buildSTSClient(m cloudconfig.Minter) STSClient {
 	return newRealSTSClient(accessKeyID, secretAccessKey, region, b.stsEndpoint)
 }
 
+// buildIAMMinterClient creates an IAM key-management client from a minter's
+// access_key_id:secret_access_key token, honoring the injected
+// iamMinterClientFn factory when set (tests inject a fake). Callers MUST hold
+// b.mu (read or write); it reads b.region without locking of its own. This is
+// the KEY-MANAGEMENT client used by rotation, NOT the STS issuance client.
+func (b *backend) buildIAMMinterClient(m cloudconfig.Minter) IAMMinterClient {
+	parts := strings.SplitN(m.Token, ":", 2)
+	accessKeyID := parts[0]
+	secretAccessKey := ""
+	if len(parts) > 1 {
+		secretAccessKey = parts[1]
+	}
+
+	region := b.region
+	if region == "" {
+		region = defaultRegion
+	}
+
+	if b.iamMinterClientFn != nil {
+		return b.iamMinterClientFn(accessKeyID, secretAccessKey, region)
+	}
+	return newRealIAMMinterClient(accessKeyID, secretAccessKey, region)
+}
+
 func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
