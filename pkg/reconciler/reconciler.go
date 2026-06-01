@@ -31,8 +31,13 @@ type CloudLister interface {
 	DeleteEntity(ctx context.Context, id string) error
 }
 
+// Registry enumerates the lease IDs this node knows about. Run calls KnownIDs
+// once per pass and membership-checks in memory (O(N), not a List-per-entity
+// O(N^2) scan). Returning an error aborts the pass WITHOUT deleting anything:
+// an incomplete known-set could misclassify a live credential as an orphan, so
+// the safe response to "cannot enumerate known leases" is to delete nothing.
 type Registry interface {
-	IsKnown(id string) bool
+	KnownIDs(ctx context.Context) (map[string]struct{}, error)
 }
 
 // MinConfirmationHold is the floor for an operator-requested confirmation hold
@@ -83,8 +88,16 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 
 	result := &Result{}
 
+	known, kerr := r.registry.KnownIDs(ctx)
+	if kerr != nil {
+		// Fail closed: without a complete known-set we cannot safely decide
+		// what is an orphan, so abort the pass rather than risk deleting a
+		// live credential.
+		return nil, kerr
+	}
+
 	for _, entity := range entities {
-		if r.registry.IsKnown(entity.ID) {
+		if _, ok := known[entity.ID]; ok {
 			continue
 		}
 

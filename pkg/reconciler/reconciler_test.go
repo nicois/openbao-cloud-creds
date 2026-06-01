@@ -2,6 +2,7 @@ package reconciler_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -40,11 +41,21 @@ func (f *fakeCloudLister) DeleteEntity(ctx context.Context, id string) error {
 }
 
 type fakeRegistry struct {
-	known map[string]bool
+	known     map[string]bool
+	callCount int
+	err       error
 }
 
-func (f *fakeRegistry) IsKnown(id string) bool {
-	return f.known[id]
+func (f *fakeRegistry) KnownIDs(_ context.Context) (map[string]struct{}, error) {
+	f.callCount++
+	if f.err != nil {
+		return nil, f.err
+	}
+	set := make(map[string]struct{}, len(f.known))
+	for id := range f.known {
+		set[id] = struct{}{}
+	}
+	return set, nil
 }
 
 func TestDetectsOrphans(t *testing.T) {
@@ -243,5 +254,45 @@ func TestRun_SkipsRecentConfirmableOrphan(t *testing.T) {
 func TestMinConfirmationHold(t *testing.T) {
 	if reconciler.MinConfirmationHold != 5*time.Minute {
 		t.Fatalf("MinConfirmationHold: expected 5m, got %v", reconciler.MinConfirmationHold)
+	}
+}
+
+func TestRun_CallsKnownIDsExactlyOnce(t *testing.T) {
+	cloud := &fakeCloudLister{
+		entities: []reconciler.UpstreamEntity{
+			{ID: "a", Name: "cloud-creds-r-1"},
+			{ID: "b", Name: "cloud-creds-r-2"},
+			{ID: "c", Name: "cloud-creds-r-3"},
+		},
+	}
+	reg := &fakeRegistry{known: map[string]bool{"a": true}}
+	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10}, cloud, reg)
+	if _, err := r.Run(context.Background(), time.Now()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reg.callCount != 1 {
+		t.Fatalf("KnownIDs called %d times, want exactly 1 (O(N), not O(N^2))", reg.callCount)
+	}
+}
+
+func TestRun_KnownIDsErrorIsFailClosed(t *testing.T) {
+	cloud := &fakeCloudLister{
+		entities: []reconciler.UpstreamEntity{
+			{ID: "orphan-1", Name: "cloud-creds-r-1"},
+		},
+	}
+	reg := &fakeRegistry{err: errors.New("storage unreachable")}
+	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10}, cloud, reg)
+	res, err := r.Run(context.Background(), time.Now())
+	if err == nil {
+		t.Fatal("expected Run to return the KnownIDs error (fail-closed), got nil")
+	}
+	if res != nil && res.Deleted != 0 {
+		t.Fatalf("fail-closed must delete nothing, deleted %d", res.Deleted)
+	}
+	// fakeCloudLister.DeleteEntity removes the entity from its slice, so a
+	// fail-closed pass must leave orphan-1 present (it was never deleted).
+	if len(cloud.entities) != 1 {
+		t.Fatalf("fail-closed must not delete; entities now %v", cloud.entities)
 	}
 }
