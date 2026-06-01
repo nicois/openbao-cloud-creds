@@ -62,19 +62,16 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return nil, err
 	}
 
-	best := freshestSlot(slots)
+	now := time.Now()
+
+	best := freshestSlot(slots, now)
 	if best == nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrPoolExhausted, "role %q has no active credential slots", roleName), nil
 	}
 
-	now := time.Now()
-
-	// TTL = time until this slot's next rotation
+	// TTL = time until this slot's next rotation. freshestSlot has already
+	// excluded overdue slots, so NextRotationAt is guaranteed in the future.
 	ttlSeconds := int(best.NextRotationAt.Sub(now).Seconds())
-	if ttlSeconds < 0 {
-		// Slot is overdue for rotation but still usable until rotated
-		ttlSeconds = 0
-	}
 
 	// Use the configured default_ttl if it's smaller than remaining time
 	defaultTTLSec := int(role.DefaultTTL.Seconds())

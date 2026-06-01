@@ -92,13 +92,18 @@ func deleteSlots(ctx context.Context, storage logical.Storage, roleName string, 
 	return nil
 }
 
-// freshestSlot returns the slot with the most recent RotatedAt time.
-// Returns nil if no active slots exist.
-func freshestSlot(slots []*slot) *slot {
+// freshestSlot returns the active slot with the most recent RotatedAt time that
+// is not yet overdue for rotation as of now. Slots whose NextRotationAt has
+// already passed are skipped: serving one would yield a TTL <= 0, violating the
+// "TTL is always honest" invariant. Returns nil if no eligible slot exists.
+func freshestSlot(slots []*slot, now time.Time) *slot {
 	var best *slot
 	for _, s := range slots {
 		if s.State != slotActive {
 			continue
+		}
+		if !s.NextRotationAt.After(now) {
+			continue // overdue: TTL would be <= 0; not eligible to serve
 		}
 		if best == nil || s.RotatedAt.After(best.RotatedAt) {
 			best = s
