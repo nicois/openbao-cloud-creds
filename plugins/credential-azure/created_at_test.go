@@ -84,4 +84,6 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 
 type allOrphansRegistry struct{}
 
-func (allOrphansRegistry) IsKnown(string) bool { return false }
+func (allOrphansRegistry) KnownIDs(context.Context) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
