@@ -1,6 +1,7 @@
 package recovery_test
 
 import (
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -169,5 +170,51 @@ func TestStateMachine_ConcurrentAccess(t *testing.T) {
 		// valid terminal state
 	default:
 		t.Fatalf("state machine returned invalid state: %q", sm.State())
+	}
+}
+
+func TestSelectable_429Cooldown(t *testing.T) {
+	sm := recovery.NewStateMachine(recovery.Config{AuthFailThreshold: time.Hour, HealthCheckInterval: time.Minute})
+	t0 := time.Now()
+	sm.RecordError(http.StatusTooManyRequests, t0)
+	if sm.Selectable(t0.Add(1 * time.Second)) {
+		t.Fatal("expected not selectable during 429 cool-down")
+	}
+	if !sm.Selectable(t0.Add(recovery.RateLimitCooldown + time.Second)) {
+		t.Fatal("expected selectable after cool-down elapsed")
+	}
+}
+
+func TestSelectable_NonRateLimitErrorNoCooldown(t *testing.T) {
+	sm := recovery.NewStateMachine(recovery.Config{AuthFailThreshold: time.Hour, HealthCheckInterval: time.Minute})
+	t0 := time.Now()
+	sm.RecordError(http.StatusInternalServerError, t0)
+	if !sm.Selectable(t0.Add(time.Second)) {
+		t.Fatal("a transient (non-429) error must not make the minter unselectable")
+	}
+}
+
+func TestSelectable_AuthFailingNotSelectable(t *testing.T) {
+	sm := recovery.NewStateMachine(recovery.Config{AuthFailThreshold: 0, HealthCheckInterval: time.Minute})
+	t0 := time.Now()
+	// A single 401 from Healthy only reaches TransientFailing; a second 401
+	// (with threshold 0, elapsed >= 0) drives the transition to AuthFailing.
+	sm.RecordError(http.StatusUnauthorized, t0)
+	sm.RecordError(http.StatusUnauthorized, t0)
+	if sm.State() != recovery.AuthFailing {
+		t.Fatalf("expected auth_failing, got %q", sm.State())
+	}
+	if sm.Selectable(t0.Add(time.Second)) {
+		t.Fatal("auth_failing minter must not be selectable")
+	}
+}
+
+func TestSelectable_SuccessClearsCooldown(t *testing.T) {
+	sm := recovery.NewStateMachine(recovery.Config{AuthFailThreshold: time.Hour, HealthCheckInterval: time.Minute})
+	t0 := time.Now()
+	sm.RecordError(http.StatusTooManyRequests, t0)
+	sm.RecordSuccess(t0.Add(time.Second))
+	if !sm.Selectable(t0.Add(2 * time.Second)) {
+		t.Fatal("RecordSuccess must clear the cool-down")
 	}
 }
