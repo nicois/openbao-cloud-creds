@@ -5,6 +5,7 @@ import (
 
 	metrics "github.com/hashicorp/go-metrics"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 )
@@ -29,6 +30,8 @@ func (b *backend) emitMinterMetrics() {
 				{Name: "cred_id", Value: id},
 			}
 
+			emit.Gauge("minter_age_seconds", float32(now.Sub(ms.minter.CreatedAt).Seconds()), labels)
+
 			state := string(ms.sm.State())
 			emit.Gauge("upstream_state", 1, append(labels, metrics.Label{Name: "state", Value: state}))
 			emit.Gauge("upstream_consecutive_failures", float32(ms.sm.ConsecutiveFailures()), labels)
@@ -39,8 +42,19 @@ func (b *backend) emitMinterMetrics() {
 			}
 
 			if !ms.minter.ExpiresAt.IsZero() {
-				expiresIn := ms.minter.ExpiresAt.Sub(now).Seconds()
-				emit.Gauge("upstream_expires_in_seconds", float32(expiresIn), labels)
+				expiresIn := ms.minter.ExpiresAt.Sub(now)
+				emit.Gauge("upstream_expires_in_seconds", float32(expiresIn.Seconds()), labels)
+
+				warnThreshold := cloudconfig.MinMinterGap
+				if b.config != nil && b.config.MinterExpiryWarn > 0 {
+					warnThreshold = b.config.MinterExpiryWarn
+				}
+				if expiresIn > 0 && expiresIn < warnThreshold {
+					b.Logger().Warn("minter nearing expiry",
+						"cloud", cloudName, "minter_set", setName, "minter_id", id,
+						"expires_in_seconds", int(expiresIn.Seconds()),
+						"warn_threshold_seconds", int(warnThreshold.Seconds()))
+				}
 			}
 		}
 	}

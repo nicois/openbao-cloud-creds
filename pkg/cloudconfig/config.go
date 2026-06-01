@@ -16,6 +16,7 @@ type PluginConfig struct {
 	ReconcileCadence  time.Duration `json:"reconcile_cadence"`
 	BootstrapDelay    time.Duration `json:"bootstrap_delay"`
 	MaxDeletesPerPass int           `json:"max_deletes_per_pass"`
+	MinterExpiryWarn  time.Duration `json:"minter_expiry_warn"`
 }
 
 func DefaultConfig(cloud string) *PluginConfig {
@@ -25,5 +26,6 @@ func DefaultConfig(cloud string) *PluginConfig {
 		ReconcileCadence:  defaultReconcileCadence,
 		BootstrapDelay:    defaultBootstrapDelay,
 		MaxDeletesPerPass: defaultMaxDeletesPerPass,
+		MinterExpiryWarn:  MinMinterGap,
 	}
 }

@@ -26,6 +26,9 @@ const (
 	defaultFlushIntervalSeconds = 900
 	// defaultReconcileCadenceSeconds is the default reconciliation cadence (6h).
 	defaultReconcileCadenceSeconds = 21600
+	// defaultMinterExpiryWarnSeconds is the default near-expiry warn threshold (7d),
+	// matching cloudconfig.MinMinterGap.
+	defaultMinterExpiryWarnSeconds = 604800
 	// defaultRoleTTLSeconds is the default/maximum role token lifetime (1h);
 	// GCP caps access-token lifetime at 3600s by default.
 	defaultRoleTTLSeconds = 3600
