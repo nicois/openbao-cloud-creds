@@ -18,6 +18,13 @@ type ExoscaleServer struct {
 	apiKeys    map[string]map[string]interface{}
 	nextID     atomic.Int64
 	nextStatus int
+	// failHealthPrefix, when non-empty, makes GET /v2/zone (the minter health
+	// check) return 500 for any request whose bearer key has it as a prefix.
+	// Test-only: lets a test fail a freshly-minted successor key's CheckHealth
+	// deterministically (the successor authenticates AS its own key, which the
+	// fake mints with a distinct prefix) without disturbing the minting client's
+	// health.
+	failHealthPrefix string
 }
 
 func NewExoscaleServer() *ExoscaleServer {
@@ -64,6 +71,31 @@ func (s *ExoscaleServer) SetNextStatus(code int) {
 	s.nextStatus = code
 }
 
+// SetFailHealthForKeyPrefix makes GET /v2/zone return 500 for any request whose
+// bearer key starts with prefix (empty disables). Test-only: the rotate
+// successor health-check builds a client AS the successor key, which the fake
+// mints with the "EXOsecret_fake_" prefix, so failing that prefix exercises the
+// successor-health-check-failed path while the minting client (a key with a
+// different prefix) stays healthy.
+func (s *ExoscaleServer) SetFailHealthForKeyPrefix(prefix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failHealthPrefix = prefix
+}
+
+// RoleIDForKey returns the role-id recorded for a created key-id (empty if
+// absent). Test-only: lets a rotation test assert the successor key was created
+// with the minter's own role-id.
+func (s *ExoscaleServer) RoleIDForKey(keyID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if k, ok := s.apiKeys[keyID]; ok {
+		v, _ := k["role-id"].(string)
+		return v
+	}
+	return ""
+}
+
 func (s *ExoscaleServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v2/zone", s.listZones)
@@ -83,7 +115,7 @@ func (s *ExoscaleServer) checkInjectedError(w http.ResponseWriter) bool {
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
 			jsonKeyError: map[string]interface{}{
-				jsonKeyCode:    "SERVER_ERROR",
+				jsonKeyCode:    errCodeServerError,
 				jsonKeyMessage: fmt.Sprintf("injected %d", status),
 			},
 		})
@@ -182,6 +214,25 @@ func (s *ExoscaleServer) listZones(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
 		return
 	}
+
+	// Per-key health failure: when the request authenticates as a key whose
+	// bearer value carries the prefix a test marked via SetFailHealthForKeyPrefix,
+	// fail just those keys' health checks.
+	key := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	s.mu.Lock()
+	failPrefix := s.failHealthPrefix
+	s.mu.Unlock()
+	if failPrefix != "" && strings.HasPrefix(key, failPrefix) {
+		w.WriteHeader(http.StatusInternalServerError)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    errCodeServerError,
+				jsonKeyMessage: msgHealthCheckDisabledByKnob,
+			},
+		})
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
 		"zones": []map[string]interface{}{

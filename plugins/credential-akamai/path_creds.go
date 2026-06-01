@@ -170,20 +170,20 @@ func leaseShortID(id string) string {
 func roleAccess(role *akamaiRole) (apiAccess, groupAccess interface{}) {
 	if role.APIAccess != "" {
 		if err := json.Unmarshal([]byte(role.APIAccess), &apiAccess); err != nil {
-			apiAccess = map[string]interface{}{"apis": []interface{}{}}
+			apiAccess = map[string]interface{}{jsonKeyAPIs: []interface{}{}}
 		}
 	} else {
-		apiAccess = map[string]interface{}{"apis": []interface{}{}}
+		apiAccess = map[string]interface{}{jsonKeyAPIs: []interface{}{}}
 	}
 
 	if role.GroupID > 0 {
 		groupAccess = map[string]interface{}{
-			"groups": []interface{}{
+			jsonKeyGroups: []interface{}{
 				map[string]interface{}{"groupId": role.GroupID},
 			},
 		}
 	} else {
-		groupAccess = map[string]interface{}{"groups": []interface{}{}}
+		groupAccess = map[string]interface{}{jsonKeyGroups: []interface{}{}}
 	}
 	return apiAccess, groupAccess
 }
@@ -288,7 +288,7 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	for id, ms := range states {
-		if ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
 			c, err := b.clientFor(ms)
 			if err != nil {
 				continue
@@ -308,7 +308,7 @@ func (b *backend) anyHealthyMinter() (*akamaiClient, error) {
 	now := time.Now()
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				c, err := b.clientFor(ms)
 				if err != nil {
 					continue
@@ -328,7 +328,7 @@ func (b *backend) anyHealthyMinterInSet(setName string) (*akamaiClient, error) {
 	now := time.Now()
 	if states, ok := b.minterSets[setName]; ok {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				c, err := b.clientFor(ms)
 				if err != nil {
 					continue

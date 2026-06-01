@@ -218,7 +218,7 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 	apiURL := b.upcloudAPIURL()
 	username := b.username
 	for id, ms := range states {
-		if ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: newUpCloudClient(apiURL, username, ms.minter.Token)}, nil
 		}
 	}
@@ -236,7 +236,7 @@ func (b *backend) anyHealthyMinter() (*upcloudClient, error) {
 	username := b.username
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return newUpCloudClient(apiURL, username, ms.minter.Token), nil
 			}
 		}
@@ -254,7 +254,7 @@ func (b *backend) anyHealthyMinterInSet(setName string) (*upcloudClient, error) 
 	username := b.username
 	if states, ok := b.minterSets[setName]; ok {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return newUpCloudClient(apiURL, username, ms.minter.Token), nil
 			}
 		}

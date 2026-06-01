@@ -14,7 +14,24 @@ const (
 	fieldCloud               = "cloud"
 	fieldMinterSet           = "minter_set"
 	fieldServiceAccountEmail = "service_account_email"
+
+	// fieldMinterID is the rotate-endpoint field naming the minter to rotate.
+	fieldMinterID = "minter_id"
+	// fieldMinterRetireGrace is the config field/response key for the retirement
+	// grace (seconds before a retired minter's upstream SA key is swept).
+	fieldMinterRetireGrace = "minter_retire_grace"
+	// fieldRotationParams is the per-minter rotation metadata map key (after
+	// rotation it carries the successor's upstream SA key resource name used by
+	// the retired-sweep to delete it).
+	fieldRotationParams = "rotation_params"
+	// fieldKeyName is the rotation_params entry holding a minter's upstream SA key
+	// resource name (set on rotation successors; absent on operator-provided
+	// originals).
+	fieldKeyName = "key_name"
 )
+
+// pathConfig is the bare config endpoint path (operational + cloud settings).
+const pathConfig = "config"
 
 // metricNamespace is the leading segment of every metric key this plugin emits.
 const metricNamespace = "cloud_creds"
@@ -29,6 +46,12 @@ const (
 	// defaultMinterExpiryWarnSeconds is the default near-expiry warn threshold (7d),
 	// matching cloudconfig.MinMinterGap.
 	defaultMinterExpiryWarnSeconds = 604800
+	// defaultMinterRetireGraceSeconds is the default grace (7d, = cloudconfig.MinMinterGap)
+	// between marking a minter retired and the retired-sweep deleting its upstream
+	// SA key. The grace must exceed the worst-case interval before every raft node
+	// reloads the set, so no node's in-memory snapshot still selects a minter whose
+	// upstream key has been deleted.
+	defaultMinterRetireGraceSeconds = 604800
 	// defaultRoleTTLSeconds is the default/maximum role token lifetime (1h);
 	// GCP caps access-token lifetime at 3600s by default.
 	defaultRoleTTLSeconds = 3600

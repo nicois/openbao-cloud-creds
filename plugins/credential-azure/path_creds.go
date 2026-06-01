@@ -261,7 +261,7 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	for id, ms := range states {
-		if ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: b.newClientForMinter(ms.minter)}, nil
 		}
 	}
@@ -277,7 +277,7 @@ func (b *backend) anyHealthyMinter() (*azureClient, error) {
 	now := time.Now()
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return b.newClientForMinter(ms.minter), nil
 			}
 		}
@@ -293,7 +293,7 @@ func (b *backend) anyHealthyMinterInSet(setName string) (*azureClient, error) {
 	now := time.Now()
 	if states, ok := b.minterSets[setName]; ok {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return b.newClientForMinter(ms.minter), nil
 			}
 		}

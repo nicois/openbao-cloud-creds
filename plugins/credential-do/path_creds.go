@@ -191,7 +191,7 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 	}
 	apiURL := b.doAPIURL()
 	for id, ms := range states {
-		if ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: newDOClient(apiURL, ms.minter.Token)}, nil
 		}
 	}
@@ -230,7 +230,7 @@ func (b *backend) anyHealthyMinter() (*doClient, error) {
 	apiURL := b.doAPIURL()
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return newDOClient(apiURL, ms.minter.Token), nil
 			}
 		}
@@ -247,7 +247,7 @@ func (b *backend) anyHealthyMinterInSet(setName string) (*doClient, error) {
 	apiURL := b.doAPIURL()
 	if states, ok := b.minterSets[setName]; ok {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return newDOClient(apiURL, ms.minter.Token), nil
 			}
 		}

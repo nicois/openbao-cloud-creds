@@ -228,7 +228,7 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 	}
 	apiURL := b.exoscaleAPIURL()
 	for id, ms := range states {
-		if ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: newExoscaleClient(apiURL, ms.minter.Token)}, nil
 		}
 	}
@@ -245,7 +245,7 @@ func (b *backend) anyHealthyMinter() (*exoscaleClient, error) {
 	apiURL := b.exoscaleAPIURL()
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return newExoscaleClient(apiURL, ms.minter.Token), nil
 			}
 		}
@@ -262,7 +262,7 @@ func (b *backend) anyHealthyMinterInSet(setName string) (*exoscaleClient, error)
 	apiURL := b.exoscaleAPIURL()
 	if states, ok := b.minterSets[setName]; ok {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return newExoscaleClient(apiURL, ms.minter.Token), nil
 			}
 		}

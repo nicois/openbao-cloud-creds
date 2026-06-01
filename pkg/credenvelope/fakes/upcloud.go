@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// jsonKeyCanCreateTokens is the UpCloud token field marking a token as itself
+// able to create further tokens (mint-capable). Recorded by the fake so a
+// rotation test can assert the successor was minted mint-capable.
+const jsonKeyCanCreateTokens = "can_create_tokens"
 
 type UpCloudServer struct {
 	*httptest.Server
@@ -16,6 +22,12 @@ type UpCloudServer struct {
 	tokens     map[string]map[string]interface{}
 	nextID     atomic.Int64
 	nextStatus int
+	// failHealthPrefix, when non-empty, makes GET /1.3/account return 500 for any
+	// request whose basic-auth password has it as a prefix. Test-only: lets a
+	// test fail freshly-minted successor tokens' CheckHealth deterministically
+	// (the successor authenticates AS its own token, which the fake mints with a
+	// distinct prefix) without disturbing the minting client's health.
+	failHealthPrefix string
 }
 
 func NewUpCloudServer() *UpCloudServer {
@@ -74,6 +86,31 @@ func (s *UpCloudServer) SetNextStatus(code int) {
 	s.nextStatus = code
 }
 
+// SetFailHealthForTokenPrefix makes GET /1.3/account return 500 for any request
+// whose basic-auth password starts with prefix (empty disables). Test-only: the
+// rotate successor health-check builds a client AS the successor token, which
+// the fake mints with the "ucat_fake_" prefix, so failing that prefix exercises
+// the successor-health-check-failed path while the minting client (a token with
+// a different prefix) stays healthy.
+func (s *UpCloudServer) SetFailHealthForTokenPrefix(prefix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failHealthPrefix = prefix
+}
+
+// CanCreateTokens reports the can_create_tokens flag recorded for a created
+// token id (false if absent). Test-only: lets a rotation test assert the
+// successor was minted itself-mint-capable.
+func (s *UpCloudServer) CanCreateTokens(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, ok := s.tokens[id]; ok {
+		v, _ := t[jsonKeyCanCreateTokens].(bool)
+		return v
+	}
+	return false
+}
+
 func (s *UpCloudServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /1.3/account", s.getAccount)
@@ -93,8 +130,8 @@ func (s *UpCloudServer) checkInjectedError(w http.ResponseWriter) bool {
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
 			jsonKeyError: map[string]interface{}{
-				"error_code":    "SERVER_ERROR",
-				"error_message": fmt.Sprintf("injected %d", status),
+				jsonKeyErrorCode:    errCodeServerError,
+				jsonKeyErrorMessage: fmt.Sprintf("injected %d", status),
 			},
 		})
 		return true
@@ -108,8 +145,8 @@ func (s *UpCloudServer) checkBasicAuth(w http.ResponseWriter, r *http.Request) b
 		w.WriteHeader(http.StatusUnauthorized)
 		writeJSON(w, map[string]interface{}{
 			jsonKeyError: map[string]interface{}{
-				"error_code":    "AUTHENTICATION_FAILED",
-				"error_message": "missing or invalid credentials",
+				jsonKeyErrorCode:    "AUTHENTICATION_FAILED",
+				jsonKeyErrorMessage: "missing or invalid credentials",
 			},
 		})
 		return false
@@ -147,11 +184,12 @@ func (s *UpCloudServer) createToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := map[string]interface{}{
-		"id":         id,
-		jsonKeyName:  req.Name,
-		"token":      fmt.Sprintf("ucat_fake_%s", id),
-		"expires_at": expiresAt.UTC().Format(time.RFC3339),
-		"created":    fakeCreatedAt,
+		"id":                   id,
+		jsonKeyName:            req.Name,
+		"token":                fmt.Sprintf("ucat_fake_%s", id),
+		"expires_at":           expiresAt.UTC().Format(time.RFC3339),
+		"created":              fakeCreatedAt,
+		jsonKeyCanCreateTokens: req.CanCreateTokens,
 	}
 
 	s.mu.Lock()
@@ -197,6 +235,24 @@ func (s *UpCloudServer) getAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.checkInjectedError(w) {
+		return
+	}
+
+	// Per-token health failure: when the request authenticates as a token whose
+	// value carries the prefix a test marked via SetFailHealthForTokenPrefix,
+	// fail just those tokens' health checks.
+	_, password, _ := r.BasicAuth()
+	s.mu.Lock()
+	failPrefix := s.failHealthPrefix
+	s.mu.Unlock()
+	if failPrefix != "" && strings.HasPrefix(password, failPrefix) {
+		w.WriteHeader(http.StatusInternalServerError)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyError: map[string]interface{}{
+				jsonKeyErrorCode:    errCodeServerError,
+				jsonKeyErrorMessage: msgHealthCheckDisabledByKnob,
+			},
+		})
 		return
 	}
 	// fakeAccountCredits is an arbitrary non-zero balance for the test account.

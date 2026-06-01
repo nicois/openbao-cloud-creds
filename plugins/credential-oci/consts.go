@@ -17,6 +17,13 @@ const (
 	fieldSlotCount = "slot_count"
 	fieldUserOCID  = "user_ocid"
 	fieldRotation  = "rotation_period"
+	// fieldMinterID names the minter targeted by the rotate endpoint.
+	fieldMinterID = "minter_id"
+	// fieldMinterRetireGrace is the config field/response key for the retirement
+	// grace; present for a uniform config surface across all clouds. OCI uses
+	// phased slot rotation and never marks a minter retired, so no sweep ever
+	// consumes it.
+	fieldMinterRetireGrace = "minter_retire_grace"
 )
 
 // descRoleName is the shared field description for the role-name parameter.

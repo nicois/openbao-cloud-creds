@@ -251,7 +251,7 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	for id, ms := range states {
-		if ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: b.buildSTSClient(ms.minter)}, nil
 		}
 	}
@@ -278,6 +278,30 @@ func (b *backend) buildSTSClient(m cloudconfig.Minter) STSClient {
 		return b.stsClientFn(accessKeyID, secretAccessKey, region, b.stsEndpoint)
 	}
 	return newRealSTSClient(accessKeyID, secretAccessKey, region, b.stsEndpoint)
+}
+
+// buildIAMMinterClient creates an IAM key-management client from a minter's
+// access_key_id:secret_access_key token, honoring the injected
+// iamMinterClientFn factory when set (tests inject a fake). Callers MUST hold
+// b.mu (read or write); it reads b.region without locking of its own. This is
+// the KEY-MANAGEMENT client used by rotation, NOT the STS issuance client.
+func (b *backend) buildIAMMinterClient(m cloudconfig.Minter) IAMMinterClient {
+	parts := strings.SplitN(m.Token, ":", 2)
+	accessKeyID := parts[0]
+	secretAccessKey := ""
+	if len(parts) > 1 {
+		secretAccessKey = parts[1]
+	}
+
+	region := b.region
+	if region == "" {
+		region = defaultRegion
+	}
+
+	if b.iamMinterClientFn != nil {
+		return b.iamMinterClientFn(accessKeyID, secretAccessKey, region)
+	}
+	return newRealIAMMinterClient(accessKeyID, secretAccessKey, region)
 }
 
 func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {

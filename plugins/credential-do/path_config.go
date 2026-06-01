@@ -19,6 +19,12 @@ const (
 	// matching cloudconfig.MinMinterGap.
 	defaultMinterExpiryWarnSeconds = 604800 // 7d
 
+	// defaultMinterRetireGraceSeconds is the default retirement grace (7d, =
+	// cloudconfig.MinMinterGap). DO never marks a minter retired (no
+	// self-rotation), so the sweep that would consume this never runs; the field
+	// exists only to keep the config surface uniform across all clouds.
+	defaultMinterRetireGraceSeconds = 604800 // 7d
+
 	// reconcilerBootstrapDelay holds off the first reconcile pass after a
 	// (re)start so leases issued just before restart aren't seen as orphans.
 	reconcilerBootstrapDelay = 24 * time.Hour
@@ -38,7 +44,7 @@ const (
 func (b *backend) configPaths() []*framework.Path {
 	return []*framework.Path{
 		{
-			Pattern: "config",
+			Pattern: pathConfigKey,
 			Fields: map[string]*framework.FieldSchema{
 				"flush_interval": {
 					Type:        framework.TypeDurationSecond,
@@ -55,7 +61,12 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     defaultMinterExpiryWarnSeconds,
 					Description: "Warn in logs when an expiring minter is within this many seconds of expiry",
 				},
-				"do_api_url": {
+				fieldMinterRetireGrace: {
+					Type:        framework.TypeDurationSecond,
+					Default:     defaultMinterRetireGraceSeconds,
+					Description: "Seconds after a minter is retired before its upstream credential is deleted by the retired-sweep (unused on DO: no self-rotation)",
+				},
+				fieldDOAPIURLKey: {
 					Type:        framework.TypeString,
 					Default:     "https://api.digitalocean.com",
 					Description: "DigitalOcean API base URL (for testing)",
@@ -73,6 +84,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 	minterExpiryWarn := time.Duration(d.Get("minter_expiry_warn").(int)) * time.Second
+	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
@@ -81,9 +93,10 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		BootstrapDelay:    reconcilerBootstrapDelay,
 		MaxDeletesPerPass: maxDeletesPerPass,
 		MinterExpiryWarn:  minterExpiryWarn,
+		MinterRetireGrace: minterRetireGrace,
 	}
 
-	entry, err := logical.StorageEntryJSON("config", cfg)
+	entry, err := logical.StorageEntryJSON(pathConfigKey, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +104,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return nil, err
 	}
 
-	apiURL := d.Get("do_api_url").(string)
+	apiURL := d.Get(fieldDOAPIURLKey).(string)
 
 	// Persist operational config separately so a reloaded backend (failover/
 	// restart) can rehydrate it before any config write happens. KI-001.
@@ -118,7 +131,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 // loadConfig rehydrates operational config from storage into the backend, so a
 // reloaded backend (failover/restart) matches one that just had config written. KI-001.
 func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error {
-	entry, err := storage.Get(ctx, "config")
+	entry, err := storage.Get(ctx, pathConfigKey)
 	if err != nil || entry == nil {
 		return err
 	}
@@ -147,7 +160,7 @@ func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error
 }
 
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	entry, err := req.Storage.Get(ctx, "config")
+	entry, err := req.Storage.Get(ctx, pathConfigKey)
 	if err != nil {
 		return nil, err
 	}
@@ -162,10 +175,11 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			fieldCloud:           cfg.Cloud,
-			"flush_interval":     int(cfg.FlushInterval.Seconds()),
-			"reconcile_cadence":  int(cfg.ReconcileCadence.Seconds()),
-			"minter_expiry_warn": int(cfg.MinterExpiryWarn.Seconds()),
+			fieldCloud:             cfg.Cloud,
+			"flush_interval":       int(cfg.FlushInterval.Seconds()),
+			"reconcile_cadence":    int(cfg.ReconcileCadence.Seconds()),
+			"minter_expiry_warn":   int(cfg.MinterExpiryWarn.Seconds()),
+			fieldMinterRetireGrace: int(cfg.MinterRetireGrace.Seconds()),
 		},
 	}, nil
 }

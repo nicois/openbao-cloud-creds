@@ -14,7 +14,24 @@ const (
 	fieldTenantID    = "tenant_id"
 	fieldClientID    = "client_id"
 	fieldAppObjectID = "app_object_id"
+
+	// fieldRotationParams is the per-minter rotation metadata map key (carries
+	// app_object_id and, after rotation, the upstream key_id used by the
+	// retired-sweep to removePassword the old secret).
+	fieldRotationParams = "rotation_params"
+	// fieldKeyID is the rotation_params entry holding a minter's upstream Graph
+	// password keyId (set on rotation successors; absent on operator-provided
+	// originals).
+	fieldKeyID = "key_id"
+	// fieldMinterID is the rotate-endpoint field naming the minter to rotate.
+	fieldMinterID = "minter_id"
+	// fieldMinterRetireGrace is the config field/response key for the retirement
+	// grace (seconds before a retired minter's upstream credential is swept).
+	fieldMinterRetireGrace = "minter_retire_grace"
 )
+
+// pathConfig is the bare config endpoint path (operational + cloud settings).
+const pathConfig = "config"
 
 // metricNamespace is the leading segment of every metric key this plugin emits.
 const metricNamespace = "cloud_creds"

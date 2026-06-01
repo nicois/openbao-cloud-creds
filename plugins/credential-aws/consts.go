@@ -17,7 +17,24 @@ const (
 	fieldMinterSet  = "minter_set"
 	fieldCloud      = "cloud"
 	fieldIAMRoleARN = "iam_role_arn"
+
+	// fieldMinterID is the rotate-endpoint field naming the minter to rotate.
+	fieldMinterID = "minter_id"
+	// fieldMinterRetireGrace is the config field/response key for the retirement
+	// grace (seconds before a retired minter's upstream access key is swept).
+	fieldMinterRetireGrace = "minter_retire_grace"
+	// fieldRotationParams is the per-minter rotation metadata map key (after
+	// rotation it carries the successor's upstream access_key_id used by the
+	// retired-sweep to delete it).
+	fieldRotationParams = "rotation_params"
+	// fieldAccessKeyID is the rotation_params entry holding a minter's upstream
+	// IAM access key id (set on rotation successors; absent on operator-provided
+	// originals).
+	fieldAccessKeyID = "access_key_id"
 )
+
+// pathConfig is the bare config endpoint path (operational + cloud settings).
+const pathConfig = "config"
 
 // metricNamespace is the leading segment of every metric key this plugin emits.
 const metricNamespace = "cloud_creds"

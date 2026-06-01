@@ -7,11 +7,28 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 )
 
 // httpTimeout bounds every UpCloud API call the minter client makes.
 const httpTimeout = 30 * time.Second
+
+const (
+	// defaultMinterSecretLifetime is how long a rotation successor token is valid
+	// upstream when the original minter expires (NeverExpires=false). UpCloud
+	// caps token expires_in at 8760h (365d), so a successor lasts the full year
+	// before the next operator-driven rotation. Expressed as an UpCloud
+	// expires_in duration string via minterExpiresIn.
+	defaultMinterSecretLifetime = 365 * 24 * time.Hour
+
+	// successorTokenNamePrefix is the token-name prefix for a rotation successor
+	// (the owner-tag prefix the reconciler recognises, plus the successor minter
+	// id).
+	successorTokenNamePrefix = "cloud-creds-minter-"
+)
 
 type upcloudClient struct {
 	baseURL    string
@@ -51,10 +68,17 @@ func newUpCloudClient(baseURL, username, password string) *upcloudClient {
 }
 
 func (c *upcloudClient) CreateToken(ctx context.Context, name, expiresIn string) (*tokenResponse, int, error) {
+	return c.postToken(ctx, name, expiresIn, false)
+}
+
+// postToken POSTs a new UpCloud API token. canCreateTokens marks the new token
+// itself mint-capable (used for rotation successors, which must be able to mint
+// further credentials).
+func (c *upcloudClient) postToken(ctx context.Context, name, expiresIn string, canCreateTokens bool) (*tokenResponse, int, error) {
 	body, _ := json.Marshal(createTokenRequest{
 		Name:            name,
 		ExpiresIn:       expiresIn,
-		CanCreateTokens: false,
+		CanCreateTokens: canCreateTokens,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/1.3/account/tokens", bytes.NewReader(body))
 	if err != nil {
@@ -142,4 +166,50 @@ func (c *upcloudClient) DeleteToken(ctx context.Context, tokenID string) (int, e
 		return resp.StatusCode, fmt.Errorf("UpCloud API delete returned %d", resp.StatusCode)
 	}
 	return resp.StatusCode, nil
+}
+
+// rotationSuffix returns a short, monotonic-ish suffix for a successor minter
+// ID so successive rotations of the same minter never collide.
+func rotationSuffix() string {
+	return strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+// minterExpiresIn formats a successor's upstream token lifetime as an UpCloud
+// expires_in duration string (e.g. "8760h0m0s").
+func minterExpiresIn(d time.Duration) string {
+	return d.String()
+}
+
+// RotateMinter mints a successor UpCloud API token that is itself mint-capable
+// (can_create_tokens=true), so the successor can mint further credentials like
+// the original minter. The successor records its OWN upstream token id in
+// RotationParams[token_id] so a later retired-sweep can DeleteToken it. It
+// inherits old.NeverExpires; if the original expires, the successor is given a
+// defaultMinterSecretLifetime-bounded expiry.
+func (c *upcloudClient) RotateMinter(ctx context.Context, old cloudconfig.Minter) (cloudconfig.Minter, error) {
+	name := successorTokenNamePrefix + old.ID
+	expiresIn := ""
+	endDate := time.Now().Add(defaultMinterSecretLifetime)
+	if !old.NeverExpires {
+		expiresIn = minterExpiresIn(defaultMinterSecretLifetime)
+	}
+
+	tok, status, err := c.postToken(ctx, name, expiresIn, true)
+	if err != nil {
+		return cloudconfig.Minter{}, fmt.Errorf("create successor token failed (status %d): %w", status, err)
+	}
+
+	successor := cloudconfig.Minter{
+		ID:           old.ID + "-rot-" + rotationSuffix(),
+		Token:        tok.Token,
+		CreatedAt:    time.Now(),
+		NeverExpires: old.NeverExpires,
+		RotationParams: map[string]string{
+			fieldTokenID: tok.ID,
+		},
+	}
+	if !old.NeverExpires {
+		successor.ExpiresAt = endDate
+	}
+	return successor, nil
 }

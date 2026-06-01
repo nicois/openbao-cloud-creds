@@ -19,6 +19,13 @@ const (
 	// matching cloudconfig.MinMinterGap.
 	defaultMinterExpiryWarnSeconds = 604800 // 7d
 
+	// defaultMinterRetireGraceSeconds is the default grace (7d, = cloudconfig.MinMinterGap)
+	// between marking a minter retired and the retired-sweep deleting its upstream
+	// credential. The grace must exceed the worst-case interval before every raft
+	// node reloads the set, so no node's in-memory snapshot still selects a minter
+	// whose upstream secret has been deleted.
+	defaultMinterRetireGraceSeconds = 604800 // 7d
+
 	// reconcilerBootstrapDelay holds off the first reconcile pass after a
 	// (re)start so leases issued just before restart aren't seen as orphans.
 	reconcilerBootstrapDelay = 24 * time.Hour
@@ -38,7 +45,7 @@ const (
 func (b *backend) configPaths() []*framework.Path {
 	return []*framework.Path{
 		{
-			Pattern: "config",
+			Pattern: pathConfig,
 			Fields: map[string]*framework.FieldSchema{
 				fieldTenantID: {
 					Type:        framework.TypeString,
@@ -58,6 +65,11 @@ func (b *backend) configPaths() []*framework.Path {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultMinterExpiryWarnSeconds,
 					Description: "Warn in logs when an expiring minter is within this many seconds of expiry",
+				},
+				fieldMinterRetireGrace: {
+					Type:        framework.TypeDurationSecond,
+					Default:     defaultMinterRetireGraceSeconds,
+					Description: "Seconds after a minter is retired (by rotation) before its upstream credential is deleted by the retired-sweep",
 				},
 				"graph_endpoint": {
 					Type:        framework.TypeString,
@@ -87,6 +99,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 	minterExpiryWarn := time.Duration(d.Get("minter_expiry_warn").(int)) * time.Second
+	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
@@ -95,9 +108,10 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		BootstrapDelay:    reconcilerBootstrapDelay,
 		MaxDeletesPerPass: maxDeletesPerPass,
 		MinterExpiryWarn:  minterExpiryWarn,
+		MinterRetireGrace: minterRetireGrace,
 	}
 
-	entry, err := logical.StorageEntryJSON("config", cfg)
+	entry, err := logical.StorageEntryJSON(pathConfig, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +148,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 // loadConfig rehydrates operational config from storage into the backend, so a
 // reloaded backend (failover/restart) matches one that just had config written. KI-001.
 func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error {
-	entry, err := storage.Get(ctx, "config")
+	entry, err := storage.Get(ctx, pathConfig)
 	if err != nil || entry == nil {
 		return err
 	}
@@ -169,7 +183,7 @@ func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error
 }
 
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	entry, err := req.Storage.Get(ctx, "config")
+	entry, err := req.Storage.Get(ctx, pathConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -184,10 +198,11 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			fieldCloud:           cfg.Cloud,
-			"flush_interval":     int(cfg.FlushInterval.Seconds()),
-			"reconcile_cadence":  int(cfg.ReconcileCadence.Seconds()),
-			"minter_expiry_warn": int(cfg.MinterExpiryWarn.Seconds()),
+			fieldCloud:             cfg.Cloud,
+			"flush_interval":       int(cfg.FlushInterval.Seconds()),
+			"reconcile_cadence":    int(cfg.ReconcileCadence.Seconds()),
+			"minter_expiry_warn":   int(cfg.MinterExpiryWarn.Seconds()),
+			fieldMinterRetireGrace: int(cfg.MinterRetireGrace.Seconds()),
 		},
 	}, nil
 }

@@ -17,6 +17,7 @@ type PluginConfig struct {
 	BootstrapDelay    time.Duration `json:"bootstrap_delay"`
 	MaxDeletesPerPass int           `json:"max_deletes_per_pass"`
 	MinterExpiryWarn  time.Duration `json:"minter_expiry_warn"`
+	MinterRetireGrace time.Duration `json:"minter_retire_grace"`
 }
 
 func DefaultConfig(cloud string) *PluginConfig {
@@ -27,5 +28,6 @@ func DefaultConfig(cloud string) *PluginConfig {
 		BootstrapDelay:    defaultBootstrapDelay,
 		MaxDeletesPerPass: defaultMaxDeletesPerPass,
 		MinterExpiryWarn:  MinMinterGap,
+		MinterRetireGrace: MinMinterGap,
 	}
 }

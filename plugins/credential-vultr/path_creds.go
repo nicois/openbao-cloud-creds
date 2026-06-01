@@ -193,7 +193,7 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 	}
 	apiURL := b.vultrAPIURL()
 	for id, ms := range states {
-		if ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: newVultrClient(apiURL, ms.minter.Token)}, nil
 		}
 	}
@@ -254,7 +254,7 @@ func (b *backend) anyHealthyMinter() (*vultrClient, error) {
 	apiURL := b.vultrAPIURL()
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return newVultrClient(apiURL, ms.minter.Token), nil
 			}
 		}
@@ -271,7 +271,7 @@ func (b *backend) anyHealthyMinterInSet(setName string) (*vultrClient, error) {
 	apiURL := b.vultrAPIURL()
 	if states, ok := b.minterSets[setName]; ok {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				return newVultrClient(apiURL, ms.minter.Token), nil
 			}
 		}

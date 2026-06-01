@@ -16,6 +16,16 @@ func SetSTSClientFactory(b logical.Backend, fn STSClientFactory) {
 	awsBackend.stsClientFn = fn
 }
 
+// SetIAMMinterClientFactory injects a custom IAM minter-client factory into the
+// backend. Used by tests to inject a fake key-management client (mirrors
+// SetSTSClientFactory).
+func SetIAMMinterClientFactory(b logical.Backend, fn IAMMinterClientFactory) {
+	awsBackend := b.(*backend)
+	awsBackend.mu.Lock()
+	defer awsBackend.mu.Unlock()
+	awsBackend.iamMinterClientFn = fn
+}
+
 // AssumeRoleFunc is the signature for a fake AssumeRole implementation.
 type AssumeRoleFunc func(ctx context.Context, params *sts.AssumeRoleInput) (*sts.AssumeRoleOutput, error)
 

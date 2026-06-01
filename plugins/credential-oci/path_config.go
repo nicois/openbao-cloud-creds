@@ -20,6 +20,12 @@ const (
 	// matching cloudconfig.MinMinterGap.
 	defaultMinterExpiryWarnSeconds = 604800 // 7d
 
+	// defaultMinterRetireGraceSeconds is the default retirement grace (7d, =
+	// cloudconfig.MinMinterGap). OCI uses phased slot rotation and never marks a
+	// minter retired, so the sweep that would consume this never runs; the field
+	// exists only to keep the config surface uniform across all clouds.
+	defaultMinterRetireGraceSeconds = 604800 // 7d
+
 	// reconcilerBootstrapDelay holds off the first reconcile pass after a
 	// (re)start so leases issued just before restart aren't seen as orphans.
 	reconcilerBootstrapDelay = 24 * time.Hour
@@ -53,6 +59,11 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     defaultMinterExpiryWarnSeconds,
 					Description: "Warn in logs when an expiring minter is within this many seconds of expiry",
 				},
+				fieldMinterRetireGrace: {
+					Type:        framework.TypeDurationSecond,
+					Default:     defaultMinterRetireGraceSeconds,
+					Description: "Seconds after a minter is retired before its upstream credential is deleted by the retired-sweep (unused on OCI: phased rotation, no minter self-rotation)",
+				},
 				"rotation_check_interval": {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRotationCheckIntervalSeconds,
@@ -71,6 +82,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 	minterExpiryWarn := time.Duration(d.Get("minter_expiry_warn").(int)) * time.Second
+	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
@@ -79,6 +91,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		BootstrapDelay:    reconcilerBootstrapDelay,
 		MaxDeletesPerPass: maxDeletesPerPass,
 		MinterExpiryWarn:  minterExpiryWarn,
+		MinterRetireGrace: minterRetireGrace,
 	}
 
 	entry, err := logical.StorageEntryJSON("config", cfg)
@@ -163,6 +176,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 			"flush_interval":          int(cfg.FlushInterval.Seconds()),
 			"reconcile_cadence":       int(cfg.ReconcileCadence.Seconds()),
 			"minter_expiry_warn":      int(cfg.MinterExpiryWarn.Seconds()),
+			fieldMinterRetireGrace:    int(cfg.MinterRetireGrace.Seconds()),
 			"rotation_check_interval": rotationCheckInterval,
 		},
 	}, nil

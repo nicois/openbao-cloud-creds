@@ -191,7 +191,7 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	for id, ms := range states {
-		if ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: b.buildTokenClient(ms.minter)}, nil
 		}
 	}

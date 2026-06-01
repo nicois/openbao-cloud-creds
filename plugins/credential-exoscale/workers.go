@@ -102,6 +102,12 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		DryRun:            false,
 	}
 
-	_, err = reconciler.New(cfg, lister, registry).Run(ctx, time.Now())
-	return err
+	if _, err = reconciler.New(cfg, lister, registry).Run(ctx, time.Now()); err != nil {
+		return err
+	}
+
+	// Reclaim upstream keys of minters retired past the grace. Runs on the
+	// reconcile cadence but is keyed off RetiredAt, separate from the orphan
+	// reconciler above.
+	return b.sweepRetiredMinters(ctx, storage, time.Now())
 }

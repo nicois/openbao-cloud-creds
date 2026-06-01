@@ -111,3 +111,27 @@ exclusion and `revive`'s disabled `unused-parameter`/`unused-receiver` for the
 SDK-mandated handler signatures. Test files are excluded from the
 complexity/literal linters (test code legitimately repeats literals and is
 structurally loose). See `docs/superpowers/specs/2026-05-31-golangci-config-upgrade-design.md`.
+
+## Why minter rotation retires with a grace period instead of deleting immediately
+
+Minter sets are loaded into memory only at `Factory` construction and on a
+minter-set write — there is no periodic reload. On a raft cluster the rotate
+request is served by exactly one node; the other nodes keep the old minter in
+their in-memory snapshot until they next reload (failover, restart, or a
+subsequent minter-set write). If rotation deleted the old upstream credential
+the moment it minted and swapped in the successor, every other node would still
+be trying to mint with a credential that no longer exists upstream — issuance
+would wedge cluster-wide (the KI-001 class of "the surviving node holds stale
+config" failure).
+
+Decision: rotation is grace-separated. `RotateMinter` mints the successor,
+validates the prospective set, health-checks the successor, swaps it in, and
+marks the old minter retired by stamping `RetiredAt` — but does **not** delete
+the old upstream credential. A separate retired-sweep deletes the upstream
+credential only after `minter_retire_grace` has elapsed (default 7d, which must
+exceed the worst-case node-reload interval). The retired minter is excluded from
+new-issuance selection (`selectMinter` skips it) and from set validation
+immediately, so it stops being a live issuance path at once, but it stays
+upstream-alive for the grace window so stale-snapshot nodes can keep minting
+until they reload. The sweep is keyed off `RetiredAt`, deliberately separate
+from the conservative owner-tag orphan reconciler.

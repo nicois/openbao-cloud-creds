@@ -36,6 +36,19 @@ type backend struct {
 	baseCtx     context.Context
 	baseCancel  context.CancelFunc
 	iamClientFn IAMClientFactory
+	// saKeyClientFn builds the service-account KEY-MANAGEMENT client used for
+	// minter self-rotation (keys.create/keys.delete on the minter's SA). Mirrors
+	// iamClientFn: tests inject a fake; when nil the real REST client is used.
+	// This is the KEY-MANAGEMENT client, distinct from the impersonation
+	// issuance client (iamClientFn / IAMCredentialsClient).
+	saKeyClientFn SAKeyClientFactory
+	// rotateSweepMu serializes minter rotation (the rotate endpoint) against the
+	// retired-sweep, so a rotation's read-modify-write of a set never interleaves
+	// with the sweep's. Held WITHOUT b.mu across the whole orchestration / sweep
+	// body; b.mu is taken only inside the small helpers (loadMinterSet,
+	// selectMinter, …) — never across a rotateSweepMu critical section — so no
+	// AB-BA deadlock with b.mu exists.
+	rotateSweepMu sync.Mutex
 }
 
 type minterState struct {
