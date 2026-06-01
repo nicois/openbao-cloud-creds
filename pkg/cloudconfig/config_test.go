@@ -69,3 +69,9 @@ func TestDefaultConfig_MinterExpiryWarnDefaultsToMinMinterGap(t *testing.T) {
 		t.Fatalf("MinterExpiryWarn = %v, want MinMinterGap (%v)", cfg.MinterExpiryWarn, cloudconfig.MinMinterGap)
 	}
 }
+
+func TestDefaultConfig_MinterRetireGraceDefaultsToMinMinterGap(t *testing.T) {
+	if got := cloudconfig.DefaultConfig("do").MinterRetireGrace; got != cloudconfig.MinMinterGap {
+		t.Fatalf("MinterRetireGrace = %v, want MinMinterGap", got)
+	}
+}

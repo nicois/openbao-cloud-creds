@@ -16,6 +16,10 @@ type Minter struct {
 	ExpiresSource string    `json:"expires_at_source,omitempty"`
 	NeverExpires  bool      `json:"never_expires,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
+
+	Retired        bool              `json:"retired,omitempty"`
+	RetiredAt      time.Time         `json:"retired_at,omitempty"`
+	RotationParams map[string]string `json:"rotation_params,omitempty"`
 }
 
 // MinterSet is a named, independently-validated group of minter credentials.
@@ -39,15 +43,30 @@ func ValidateSetName(name string) error {
 	return nil
 }
 
+// ActiveMinters returns the non-retired minters. Retirement is a soft state set
+// by rotation; retired minters stay in the set (and upstream-alive) during the
+// grace window but are excluded from validation and new-issuance selection.
+func ActiveMinters(minters []Minter) []Minter {
+	active := make([]Minter, 0, len(minters))
+	for i := range minters {
+		if !minters[i].Retired {
+			active = append(active, minters[i])
+		}
+	}
+	return active
+}
+
 func ValidateMinterSet(minters []Minter) error {
-	if len(minters) == 0 {
+	active := ActiveMinters(minters)
+	if len(active) == 0 {
 		return fmt.Errorf("minter set must not be empty")
 	}
 
 	hasNeverExpires := false
 	var expiring []Minter
 
-	for _, m := range minters {
+	for i := range active {
+		m := active[i]
 		switch {
 		case m.NeverExpires:
 			hasNeverExpires = true
