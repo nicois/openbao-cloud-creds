@@ -250,7 +250,7 @@ func (s *UpCloudServer) getAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]interface{}{
 			jsonKeyError: map[string]interface{}{
 				jsonKeyErrorCode:    errCodeServerError,
-				jsonKeyErrorMessage: "health check disabled by test knob",
+				jsonKeyErrorMessage: msgHealthCheckDisabledByKnob,
 			},
 		})
 		return

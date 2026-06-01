@@ -27,6 +27,11 @@ const (
 // 5xx / disabled-by-knob responses.
 const errCodeServerError = "SERVER_ERROR"
 
+// msgHealthCheckDisabledByKnob is the body message the fakes stamp on a health
+// check failed by a SetFailHealth* test knob (shared across cloud fakes so the
+// literal lives in one place).
+const msgHealthCheckDisabledByKnob = "health check disabled by test knob"
+
 // fakeCreatedAt is the deterministic creation timestamp the fakes stamp on
 // entities minted through their create paths (RFC3339). Tests that need a
 // specific age use the AddRaw*WithCreatedAt helpers to override it.

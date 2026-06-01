@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 )
 
 type exoscaleClient struct {
@@ -136,4 +140,46 @@ func (c *exoscaleClient) DeleteAPIKey(ctx context.Context, keyID string) (int, e
 		return resp.StatusCode, fmt.Errorf("exoscale API delete returned %d", resp.StatusCode)
 	}
 	return resp.StatusCode, nil
+}
+
+// rotationSuffix returns a short, monotonic-ish suffix for a successor minter
+// ID so successive rotations of the same minter never collide.
+func rotationSuffix() string {
+	return strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+// RotateMinter mints a successor Exoscale IAM API key bound to the SAME
+// key-management IAM role as old (from old.RotationParams[role_id]), so the
+// successor inherits old's key-creation rights and can itself mint and rotate.
+// The successor records its OWN upstream key-id in RotationParams[key_id] so a
+// later retired-sweep can DeleteAPIKey it, and carries role_id forward. It
+// inherits old.NeverExpires; if the original expires, the successor is given a
+// defaultMinterSecretLifetime-bounded local expiry. The minter's Token is the
+// key secret (single Bearer value), matching newClientForMinter / path_creds.
+func (c *exoscaleClient) RotateMinter(ctx context.Context, old cloudconfig.Minter) (cloudconfig.Minter, error) {
+	roleID := old.RotationParams[fieldRoleID]
+	if roleID == "" {
+		return cloudconfig.Minter{}, fmt.Errorf("minter %s missing rotation_params.%s", old.ID, fieldRoleID)
+	}
+
+	name := successorKeyNamePrefix + old.ID
+	keyResp, status, err := c.CreateAPIKey(ctx, name, roleID)
+	if err != nil {
+		return cloudconfig.Minter{}, fmt.Errorf("create successor api-key failed (status %d): %w", status, err)
+	}
+
+	successor := cloudconfig.Minter{
+		ID:           old.ID + "-rot-" + rotationSuffix(),
+		Token:        keyResp.Key,
+		CreatedAt:    time.Now(),
+		NeverExpires: old.NeverExpires,
+		RotationParams: map[string]string{
+			fieldRoleID: roleID,
+			fieldKeyID:  keyResp.KeyID,
+		},
+	}
+	if !old.NeverExpires {
+		successor.ExpiresAt = time.Now().Add(defaultMinterSecretLifetime)
+	}
+	return successor, nil
 }

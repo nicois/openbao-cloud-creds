@@ -478,7 +478,7 @@ func (s *AkamaiServer) getSelf(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]interface{}{
 			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/server-error",
 			jsonKeyTitle:  "Server Error",
-			jsonKeyDetail: "health check disabled by test knob",
+			jsonKeyDetail: msgHealthCheckDisabledByKnob,
 		})
 		return
 	}
