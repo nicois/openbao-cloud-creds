@@ -99,7 +99,7 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 		return nil, err
 	}
 	b.loadMinterSet(set)
-	go b.startWorkers(context.Background(), req.Storage)
+	go b.startWorkers(b.baseCtx, req.Storage)
 	return nil, nil
 }
 
