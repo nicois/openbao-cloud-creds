@@ -28,6 +28,9 @@ const (
 	defaultRoleTTLSeconds          = 900    // role default lease TTL
 	defaultRoleMaxTTLSeconds       = 3600   // role maximum lease TTL
 	defaultStaleOlderThanSeconds   = 604800 // metrics/stale default window
+	// defaultMinterExpiryWarnSeconds is the default near-expiry warn threshold (7d),
+	// matching cloudconfig.MinMinterGap.
+	defaultMinterExpiryWarnSeconds = 604800 // 7d
 )
 
 // Operational timing constants.
