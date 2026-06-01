@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
@@ -194,5 +195,29 @@ func TestAkamaiFake_Unauthorized(t *testing.T) {
 
 	if resp.StatusCode != 401 {
 		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+// TestAkamaiFake_RejectsBadSignature proves the fake validates the
+// EG1-HMAC-SHA256 signature: a request signed with a registered client_token
+// but a wrong signature is rejected with 401. This is the guard that catches
+// body-hash and canonical-request signing bugs.
+func TestAkamaiFake_RejectsBadSignature(t *testing.T) {
+	srv := fakes.NewAkamaiServer()
+	defer srv.Close()
+	srv.RegisterCredential("ct-test", "cs-test")
+
+	req, _ := http.NewRequest(http.MethodPost,
+		srv.URL+"/identity-management/v3/api-clients?createCredential=true",
+		strings.NewReader(`{"clientName":"x"}`))
+	req.Header.Set("Authorization",
+		"EG1-HMAC-SHA256 client_token=ct-test;access_token=at;timestamp=20260101T00:00:00+0000;nonce=n;signature=WRONG")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for bad signature, got %d", resp.StatusCode)
 	}
 }

@@ -1,14 +1,23 @@
 package fakes
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 )
+
+// akamaiMaxBodyHashBytes mirrors the plugin's EdgeGrid cap on the number of
+// body bytes folded into the content hash.
+const akamaiMaxBodyHashBytes = 131072
 
 const (
 	jsonKeyClientID    = "clientId"
@@ -31,16 +40,35 @@ type AkamaiServer struct {
 	// Authorization header of the most recent createClient call, so tests can
 	// assert which minter's triple actually signed the request.
 	lastClientToken string
+	// expectedSecrets maps client_token -> client_secret, for signature
+	// validation. Tokens with no registered secret skip validation.
+	expectedSecrets map[string]string
 }
 
 func NewAkamaiServer() *AkamaiServer {
 	s := &AkamaiServer{
-		clients: make(map[string]map[string]interface{}),
+		clients:         make(map[string]map[string]interface{}),
+		expectedSecrets: make(map[string]string),
+	}
+	for ct, cs := range fakeStandardCredentials {
+		s.expectedSecrets[ct] = cs
 	}
 	s.nextID.Store(fakeStartID)
 	s.nextCredID.Store(fakeStartCredID)
 	s.Server = httptest.NewServer(s.handler())
 	return s
+}
+
+// fakeStandardCredentials are the minter triples (client_token -> client_secret)
+// used across the akamai plugin's test suite. Registering them by default makes
+// every test exercise real EG1-HMAC-SHA256 signature validation end-to-end
+// without each call site having to wire RegisterCredential. Tokens not listed
+// here are still accepted (validation is skipped) for back-compat.
+var fakeStandardCredentials = map[string]string{
+	"ct-test":     "cs-test",
+	"ct-other":    "cs-other",
+	"ct-reseeded": "cs-reseeded",
+	"ct-a":        "cs-a",
 }
 
 // ProvisionedCount returns the number of API clients currently held by the fake.
@@ -94,6 +122,17 @@ func (s *AkamaiServer) SetNextStatus(code int) {
 	s.nextStatus = code
 }
 
+// RegisterCredential tells the fake the client_secret to expect for a given
+// client_token so it can validate the EG1-HMAC-SHA256 signature on requests
+// signed with that token. Tests register the same triple they configure as the
+// plugin's minter. Tokens with no registered secret skip validation
+// (back-compat for tests that don't exercise signing).
+func (s *AkamaiServer) RegisterCredential(clientToken, clientSecret string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expectedSecrets[clientToken] = clientSecret
+}
+
 func (s *AkamaiServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /identity-management/v3/api-clients/self", s.getSelf)
@@ -133,25 +172,115 @@ func (s *AkamaiServer) LastSigningClientToken() string {
 // Authorization header of the form
 // "EG1-HMAC-SHA256 client_token=...;access_token=...;...".
 func parseClientToken(auth string) string {
+	return edgeGridAuthField(auth, "client_token")
+}
+
+// edgeGridAuthField extracts a single semicolon-delimited field value (e.g.
+// "client_token", "signature") from an EdgeGrid Authorization header.
+func edgeGridAuthField(auth, key string) string {
+	prefix := key + "="
 	for _, part := range strings.Split(auth, ";") {
 		part = strings.TrimSpace(part)
 		part = strings.TrimPrefix(part, "EG1-HMAC-SHA256 ")
-		if strings.HasPrefix(part, "client_token=") {
-			return strings.TrimPrefix(part, "client_token=")
+		if strings.HasPrefix(part, prefix) {
+			return strings.TrimPrefix(part, prefix)
 		}
 	}
 	return ""
 }
 
+// edgeGridAuthData returns the authData prefix of an EdgeGrid Authorization
+// header: everything up to and including the last ';' that precedes the
+// "signature=" field. The plugin signs over this exact substring concatenated
+// with the canonical request, so taking it verbatim from the header avoids any
+// re-formatting drift in field order/separators.
+func edgeGridAuthData(auth string) string {
+	idx := strings.Index(auth, "signature=")
+	if idx < 0 {
+		return ""
+	}
+	return auth[:idx]
+}
+
+// akamaiHMACSHA256 computes HMAC-SHA256, matching the plugin's signing primitive.
+func akamaiHMACSHA256(key, data []byte) []byte {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write(data)
+	return mac.Sum(nil)
+}
+
+// validateEdgeGridSignature recomputes the EG1-HMAC-SHA256 signature from the
+// received request using the registered client_secret and compares it to the
+// presented signature. It returns true when the signature matches (or when no
+// secret is registered for the token, in which case validation is skipped). It
+// restores r.Body so the downstream handler can re-read it.
+func (s *AkamaiServer) validateEdgeGridSignature(r *http.Request, auth string) bool {
+	clientToken := parseClientToken(auth)
+
+	s.mu.Lock()
+	secret, registered := s.expectedSecrets[clientToken]
+	s.mu.Unlock()
+	if !registered {
+		return true // back-compat: tokens with no registered secret skip validation
+	}
+
+	timestamp := edgeGridAuthField(auth, "timestamp")
+	presented := edgeGridAuthField(auth, "signature")
+	authData := edgeGridAuthData(auth)
+
+	// Read and restore the body for the downstream handler.
+	body, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+
+	bodyHash := ""
+	if len(body) > 0 && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+		hashInput := body
+		if len(hashInput) > akamaiMaxBodyHashBytes {
+			hashInput = hashInput[:akamaiMaxBodyHashBytes]
+		}
+		sum := sha256.Sum256(hashInput)
+		bodyHash = base64.StdEncoding.EncodeToString(sum[:])
+	}
+
+	scheme := "https"
+	if r.URL.Scheme != "" {
+		scheme = r.URL.Scheme
+	}
+	// Behind httptest the request's scheme is empty and the transport speaks
+	// plain HTTP, matching the plugin which reads req.URL.Scheme ("http").
+	if scheme == "https" {
+		scheme = "http"
+	}
+
+	// Canonical request: method\tscheme\thost\tpath+query\theaders\tbody_hash\t
+	canonicalRequest := fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t",
+		r.Method, scheme, r.Host, r.URL.RequestURI(), "", bodyHash)
+
+	signingKey := akamaiHMACSHA256([]byte(secret), []byte(timestamp))
+	expected := base64.StdEncoding.EncodeToString(
+		akamaiHMACSHA256(signingKey, []byte(authData+canonicalRequest)),
+	)
+
+	return hmac.Equal([]byte(expected), []byte(presented))
+}
+
+func (s *AkamaiServer) writeUnauthorized(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusUnauthorized)
+	writeJSON(w, map[string]interface{}{
+		jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/unauthorized",
+		jsonKeyTitle:  "Unauthorized",
+		jsonKeyDetail: "Missing or invalid EdgeGrid authorization",
+	})
+}
+
 func (s *AkamaiServer) checkEdgeGridAuth(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "EG1-HMAC-SHA256") {
-		w.WriteHeader(http.StatusUnauthorized)
-		writeJSON(w, map[string]interface{}{
-			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/unauthorized",
-			jsonKeyTitle:  "Unauthorized",
-			jsonKeyDetail: "Missing or invalid EdgeGrid authorization",
-		})
+		s.writeUnauthorized(w)
+		return false
+	}
+	if !s.validateEdgeGridSignature(r, auth) {
+		s.writeUnauthorized(w)
 		return false
 	}
 	s.mu.Lock()
