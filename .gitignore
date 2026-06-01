@@ -24,3 +24,6 @@ go.sum.bak
 
 # OS
 .DS_Store
+
+# Superpowers worktrees / local agent scratch
+.claude/
