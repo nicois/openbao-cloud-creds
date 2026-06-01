@@ -31,7 +31,8 @@ This was the pre-build investigation. Every cloud except DO Spaces is now implem
 - **Scoping:** Token scope strings (`read`, `write`). Account-wide, not per-resource.
 - **Revocation:** Hard delete via `DELETE /v2/tokens/{id}`
 - **Safety boundary:** Name prefix `cloud-creds-<role>-<lease_id>`
-- **Minter:** Long-lived PAT with token-creation privileges
+- **Minter:** Long-lived PAT with token-creation privileges (an account-level capability, NOT a settable token scope).
+- **Minter self-rotation:** **Not feasible** (verified 2026-06-01 against current DO docs). DO's scope catalog has no `token:*` / token-management scope, so a token created via `POST /v2/tokens` cannot be granted the privilege to create further tokens — self-rotation would break after one cycle. The `minter-sets/<set>/rotate` endpoint therefore rejects on DO ("rotate out-of-band"). Operators rotate the DO minter PAT manually; the `cloud_creds_minter_age_seconds` gauge + near-expiry warn-log surface staleness.
 - **DO Spaces keys:** No public API for create/delete. Only via web UI. Deferred.
 
 ### UpCloud
