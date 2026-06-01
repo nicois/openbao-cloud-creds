@@ -81,6 +81,20 @@ func (b *backend) stopWorkersLocked() {
 	}
 }
 
+// stopWorkers drains the worker manager under the lifecycle mutex and cancels
+// the backend base context, so worker goroutines cannot outlive the backend.
+// Safe to call from framework.Backend.Clean (backend unmount/reload). Lock
+// order matches startWorkers: workerLifecycleMu, then (inside
+// stopWorkersLocked) b.mu — no AB-BA path exists.
+func (b *backend) stopWorkers() {
+	b.workerLifecycleMu.Lock()
+	defer b.workerLifecycleMu.Unlock()
+	b.stopWorkersLocked()
+	if b.baseCancel != nil {
+		b.baseCancel()
+	}
+}
+
 // rotationWorker checks all roles for slots whose next_rotation_at has passed,
 // and rotates them.
 func (b *backend) rotationWorker(ctx context.Context, storage logical.Storage) error {
