@@ -17,8 +17,8 @@ func (b *backend) minterSetPaths() []*framework.Path {
 		{
 			Pattern: "minter-sets/" + framework.GenericNameRegex("name"),
 			Fields: map[string]*framework.FieldSchema{
-				fieldName: {Type: framework.TypeString, Description: "Name of the minter set"},
-				"minters": {Type: framework.TypeSlice, Description: "Minter credentials in this set"},
+				fieldName:       {Type: framework.TypeString, Description: "Name of the minter set"},
+				fieldMintersKey: {Type: framework.TypeSlice, Description: "Minter credentials in this set"},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathMinterSetWrite},
@@ -37,7 +37,7 @@ func (b *backend) minterSetPaths() []*framework.Path {
 
 // parseMinters converts the raw "minters" field into cloudconfig.Minters.
 func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
-	raw := d.Get("minters")
+	raw := d.Get(fieldMintersKey)
 	if raw == nil {
 		return nil, fmt.Errorf("minters is required")
 	}
@@ -110,8 +110,8 @@ func (b *backend) pathMinterSetRead(ctx context.Context, req *logical.Request, d
 		return nil, err
 	}
 	ids := make([]string, 0, len(set.Minters))
-	for _, m := range set.Minters {
-		ids = append(ids, m.ID)
+	for i := range set.Minters {
+		ids = append(ids, set.Minters[i].ID)
 	}
 	return &logical.Response{Data: map[string]interface{}{
 		"name": set.Name, "minter_count": len(set.Minters), "minter_ids": ids,
@@ -141,7 +141,8 @@ func (b *backend) loadMinterSet(set *cloudconfig.MinterSet) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	states := make(map[string]*minterState, len(set.Minters))
-	for _, m := range set.Minters {
+	for i := range set.Minters {
+		m := set.Minters[i]
 		states[m.ID] = &minterState{
 			set:    set.Name,
 			minter: m,

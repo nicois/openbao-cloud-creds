@@ -15,9 +15,6 @@ import (
 // Local keys for the request paths/fields this test repeats, so the package-wide
 // goconst count for these literals stays below threshold.
 const (
-	pathConfigKey      = "config"
-	fieldDOAPIURLKey   = "do_api_url"
-	fieldMintersKey    = "minters"
 	pathMinterSetWrite = "minter-sets/default"
 )
 

@@ -14,5 +14,13 @@ const (
 	fieldCloud     = "cloud"
 )
 
+// Path and field keys reused across schemas, request handlers, and tests.
+// Constified so the linter (goconst) has a single source of truth.
+const (
+	pathConfigKey    = "config"
+	fieldDOAPIURLKey = "do_api_url"
+	fieldMintersKey  = "minters"
+)
+
 // metricNamespace is the leading segment of every metric key this plugin emits.
 const metricNamespace = "cloud_creds"

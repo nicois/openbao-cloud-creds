@@ -38,7 +38,7 @@ const (
 func (b *backend) configPaths() []*framework.Path {
 	return []*framework.Path{
 		{
-			Pattern: "config",
+			Pattern: pathConfigKey,
 			Fields: map[string]*framework.FieldSchema{
 				"flush_interval": {
 					Type:        framework.TypeDurationSecond,
@@ -55,7 +55,7 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     defaultMinterExpiryWarnSeconds,
 					Description: "Warn in logs when an expiring minter is within this many seconds of expiry",
 				},
-				"do_api_url": {
+				fieldDOAPIURLKey: {
 					Type:        framework.TypeString,
 					Default:     "https://api.digitalocean.com",
 					Description: "DigitalOcean API base URL (for testing)",
@@ -83,7 +83,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		MinterExpiryWarn:  minterExpiryWarn,
 	}
 
-	entry, err := logical.StorageEntryJSON("config", cfg)
+	entry, err := logical.StorageEntryJSON(pathConfigKey, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return nil, err
 	}
 
-	apiURL := d.Get("do_api_url").(string)
+	apiURL := d.Get(fieldDOAPIURLKey).(string)
 
 	// Persist operational config separately so a reloaded backend (failover/
 	// restart) can rehydrate it before any config write happens. KI-001.
@@ -118,7 +118,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 // loadConfig rehydrates operational config from storage into the backend, so a
 // reloaded backend (failover/restart) matches one that just had config written. KI-001.
 func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error {
-	entry, err := storage.Get(ctx, "config")
+	entry, err := storage.Get(ctx, pathConfigKey)
 	if err != nil || entry == nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error
 }
 
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	entry, err := req.Storage.Get(ctx, "config")
+	entry, err := req.Storage.Get(ctx, pathConfigKey)
 	if err != nil {
 		return nil, err
 	}
