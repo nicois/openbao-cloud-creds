@@ -15,6 +15,10 @@ const (
 	defaultFlushIntervalSeconds    = 900   // 15m
 	defaultReconcileCadenceSeconds = 21600 // 6h
 
+	// defaultMinterExpiryWarnSeconds is the default near-expiry warn threshold (7d),
+	// matching cloudconfig.MinMinterGap.
+	defaultMinterExpiryWarnSeconds = 604800 // 7d
+
 	// reconcilerBootstrapDelay holds off the first reconcile pass after a
 	// (re)start so leases issued just before restart aren't seen as orphans.
 	reconcilerBootstrapDelay = 24 * time.Hour
@@ -50,6 +54,11 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     defaultReconcileCadenceSeconds,
 					Description: "Reconciliation cadence in seconds",
 				},
+				"minter_expiry_warn": {
+					Type:        framework.TypeDurationSecond,
+					Default:     defaultMinterExpiryWarnSeconds,
+					Description: "Warn in logs when an expiring minter is within this many seconds of expiry",
+				},
 				"upcloud_api_url": {
 					Type:        framework.TypeString,
 					Default:     "https://api.upcloud.com",
@@ -72,6 +81,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
+	minterExpiryWarn := time.Duration(d.Get("minter_expiry_warn").(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
@@ -79,6 +89,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		ReconcileCadence:  reconcileCadence,
 		BootstrapDelay:    reconcilerBootstrapDelay,
 		MaxDeletesPerPass: maxDeletesPerPass,
+		MinterExpiryWarn:  minterExpiryWarn,
 	}
 
 	entry, err := logical.StorageEntryJSON("config", cfg)
@@ -167,9 +178,10 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			fieldCloud:          cfg.Cloud,
-			"flush_interval":    int(cfg.FlushInterval.Seconds()),
-			"reconcile_cadence": int(cfg.ReconcileCadence.Seconds()),
+			fieldCloud:           cfg.Cloud,
+			"flush_interval":     int(cfg.FlushInterval.Seconds()),
+			"reconcile_cadence":  int(cfg.ReconcileCadence.Seconds()),
+			"minter_expiry_warn": int(cfg.MinterExpiryWarn.Seconds()),
 		},
 	}, nil
 }
