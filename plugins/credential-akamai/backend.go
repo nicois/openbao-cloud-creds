@@ -71,8 +71,11 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		return nil, err
 	}
 
-	store := metrics.NewInMemoryStore()
-	b.accessTracker = metrics.NewAccessTracker("local", store)
+	var store metrics.MetricsStore = metrics.NewInMemoryStore()
+	if conf.StorageView != nil {
+		store = metrics.NewStorageBackedStore(conf.StorageView)
+	}
+	b.accessTracker = metrics.NewAccessTracker(metrics.ResolveNodeID(), store)
 
 	if conf.StorageView != nil {
 		_ = b.loadConfig(ctx, conf.StorageView)
