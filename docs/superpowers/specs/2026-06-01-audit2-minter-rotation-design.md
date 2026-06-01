@@ -87,9 +87,13 @@ Endpoint exists on all 10 plugins for a uniform API surface, but on OVH/Vultr/AW
 4. The 6 feasible plugins' retired-sweep deletes the upstream old credential + drops it from the set only after `RetiredAt + grace`; before the grace it stays upstream-alive (cross-node safe). The orphan reconciler's owner-tag deletion is unchanged.
 5. Whole workspace build / `go test -race` / `make lint` / `make smoke-test` green; all 20 modules 0 lint; no new `//nolint`.
 
-## Out of scope (→ Effort 4c or never)
+## Sequencing rationale (why build before real-cloud testing)
+
+Building rotation now — rather than waiting for real-cloud test infrastructure — is deliberate: deferring it would force the rotation logic to be designed, reviewed, and merged later *and then* re-validated, repeating work. With the subsystem in place, the future real-cloud pass (audit #7, using **disposable accounts**) validates a finished feature in one go. That future pass should also add **record/replay instrumentation** so real-cloud API interactions can be captured once and replayed deterministically in e2e tests — turning the one-time disposable-account runs into durable regression fixtures. That instrumentation is out of scope for 4b (it belongs with the #7 real-cloud effort) but is the intended companion to it.
+
+## Out of scope (→ Effort 4c, the #7 real-cloud effort, or never)
 
 - **Automatic/scheduled rotation** (a worker that rotates within N days of expiry) — deferred to a possible 4c; 4b is operator-initiated only.
 - Rotation for OVH/Vultr (API-impossible), AWS/OCI (quota-tight) — they stay operator-managed out-of-band; the 4a observability surfaces staleness.
-- Real-cloud integration tests (audit #7, deferred).
+- Real-cloud integration tests with disposable accounts + **record/replay instrumentation** for deterministic e2e replay (audit #7) — the intended next validation pass for this subsystem; deferred, not abandoned.
 - Changing the `MinMinterGap` validation constant or the response envelope.
