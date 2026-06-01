@@ -2,6 +2,7 @@ package credenvelope
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -54,4 +55,23 @@ func ErrorResponse(code ErrorCode, msg string, args ...interface{}) *logical.Res
 		msg = fmt.Sprintf(msg, args...)
 	}
 	return logical.ErrorResponse("%s: %s", string(code), msg)
+}
+
+// ClassifyUpstream maps an upstream HTTP status to the stable error_code a
+// client sees, so callers can distinguish retryable (quota/timeout) from fatal
+// (auth/not-found). Unknown and 5xx statuses map to ErrInternal. No new code is
+// introduced — adding an error_code is a spec change (see techrfc).
+func ClassifyUpstream(httpStatus int) ErrorCode {
+	switch httpStatus {
+	case http.StatusTooManyRequests:
+		return ErrUpstreamQuotaExceeded
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		return ErrUpstreamTimeout
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return ErrUpstreamAuthFailed
+	case http.StatusNotFound:
+		return ErrEntityUnavailable
+	default:
+		return ErrInternal
+	}
 }
