@@ -83,7 +83,7 @@ func (s *ExoscaleServer) checkInjectedError(w http.ResponseWriter) bool {
 		w.WriteHeader(status)
 		writeJSON(w, map[string]interface{}{
 			jsonKeyError: map[string]interface{}{
-				jsonKeyCode:    "SERVER_ERROR",
+				jsonKeyCode:    errCodeServerError,
 				jsonKeyMessage: fmt.Sprintf("injected %d", status),
 			},
 		})

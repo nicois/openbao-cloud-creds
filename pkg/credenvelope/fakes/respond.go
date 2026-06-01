@@ -19,7 +19,13 @@ const (
 	jsonKeyName             = "name"
 	jsonKeyAccount          = "account"
 	jsonKeyCreatedAt        = "created_at"
+	jsonKeyErrorCode        = "error_code"
+	jsonKeyErrorMessage     = "error_message"
 )
+
+// errCodeServerError is the body error_code value the fakes stamp on injected
+// 5xx / disabled-by-knob responses.
+const errCodeServerError = "SERVER_ERROR"
 
 // fakeCreatedAt is the deterministic creation timestamp the fakes stamp on
 // entities minted through their create paths (RFC3339). Tests that need a

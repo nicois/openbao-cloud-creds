@@ -24,13 +24,20 @@ type backend struct {
 	// by one goroutine while another is still Start()ing it. Multiple writes
 	// (config + each minter set) each fire startWorkers, so overlap is common.
 	workerLifecycleMu sync.Mutex
-	config            *cloudconfig.PluginConfig
-	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
-	apiURL            string
-	username          string
-	accessTracker     *metrics.AccessTracker
-	workerMgr         *worker.Manager
-	workerCancel      context.CancelFunc
+	// rotateSweepMu serializes minter rotation (the rotate endpoint) against the
+	// retired-sweep, so a rotation's read-modify-write of a set never interleaves
+	// with the sweep's. Held WITHOUT b.mu across the whole orchestration / sweep
+	// body; b.mu is taken only inside the small helpers (loadMinterSet,
+	// selectMinter, …) — never across a rotateSweepMu critical section — so no
+	// AB-BA deadlock with b.mu exists.
+	rotateSweepMu sync.Mutex
+	config        *cloudconfig.PluginConfig
+	minterSets    map[string]map[string]*minterState // setName -> minterID -> state
+	apiURL        string
+	username      string
+	accessTracker *metrics.AccessTracker
+	workerMgr     *worker.Manager
+	workerCancel  context.CancelFunc
 	// baseCtx is the parent context for all worker goroutines; baseCancel is
 	// fired from Clean (backend teardown) so leaked workers cannot outlive the
 	// backend. Worker launch sites use baseCtx rather than context.Background().
