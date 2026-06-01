@@ -124,7 +124,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	b.tokenEndpoint = tokenEndpoint
 	b.mu.Unlock()
 
-	go b.startWorkers(context.Background(), req.Storage)
+	go b.startWorkers(b.baseCtx, req.Storage)
 
 	return nil, nil
 }
