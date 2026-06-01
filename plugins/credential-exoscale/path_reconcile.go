@@ -50,7 +50,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	lister := &exoscaleCloudLister{client: client}
-	registry := &leaseRegistry{storage: req.Storage, ctx: ctx}
+	registry := &leaseRegistry{storage: req.Storage}
 
 	cfg := reconciler.Config{
 		MaxDeletesPerPass: maxDeletesPerPass,

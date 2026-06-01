@@ -87,7 +87,7 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 	}
 
 	lister := &upcloudCloudLister{client: client}
-	registry := &leaseRegistry{storage: storage, ctx: ctx}
+	registry := &leaseRegistry{storage: storage}
 
 	b.mu.RLock()
 	maxDeletes := maxDeletesPerPass

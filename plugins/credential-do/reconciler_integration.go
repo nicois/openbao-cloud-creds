@@ -44,18 +44,16 @@ func (l *doCloudLister) DeleteEntity(ctx context.Context, id string) error {
 
 type leaseRegistry struct {
 	storage logical.Storage
-	ctx     context.Context
 }
 
-func (r *leaseRegistry) IsKnown(id string) bool {
-	entries, err := r.storage.List(r.ctx, "active-tokens/")
+func (r *leaseRegistry) KnownIDs(ctx context.Context) (map[string]struct{}, error) {
+	entries, err := r.storage.List(ctx, "active-tokens/")
 	if err != nil {
-		return false
+		return nil, err
 	}
+	known := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
-		if entry == id {
-			return true
-		}
+		known[entry] = struct{}{}
 	}
-	return false
+	return known, nil
 }
