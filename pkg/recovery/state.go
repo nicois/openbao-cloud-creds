@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"net/http"
 	"sync"
 	"time"
 )
@@ -13,6 +14,10 @@ const (
 	AuthFailing      State = "auth_failing"
 	Missing          State = "missing"
 )
+
+// RateLimitCooldown is how long a minter is skipped by selectors after the
+// upstream returns 429, so a rate-limited minter is not immediately re-hammered.
+const RateLimitCooldown = 5 * time.Second
 
 type Config struct {
 	AuthFailThreshold   time.Duration
@@ -27,6 +32,7 @@ type StateMachine struct {
 	lastErrorAt         time.Time
 	lastSuccessAt       time.Time
 	enteredAuthFailed   time.Time
+	cooldownUntil       time.Time
 	consecutiveFailures int
 }
 
@@ -55,6 +61,7 @@ func (sm *StateMachine) RecordSuccess(at time.Time) {
 	sm.consecutiveFailures = 0
 	sm.lastSuccessAt = at
 	sm.firstAuthErrorAt = time.Time{}
+	sm.cooldownUntil = time.Time{}
 	sm.state = Healthy
 }
 
@@ -69,6 +76,9 @@ func (sm *StateMachine) RecordError(httpStatus int, at time.Time) {
 	defer sm.mu.Unlock()
 	sm.consecutiveFailures++
 	sm.lastErrorAt = at
+	if httpStatus == http.StatusTooManyRequests {
+		sm.cooldownUntil = at.Add(RateLimitCooldown)
+	}
 
 	switch sm.state {
 	case Healthy:
@@ -97,6 +107,18 @@ func (sm *StateMachine) RecordError(httpStatus int, at time.Time) {
 		// Already known-missing; an upstream error does not change that.
 		// State only leaves Missing via a successful RecordSuccess.
 	}
+}
+
+// Selectable reports whether a minter in this state may be chosen to mint a
+// credential at the given time. False while a 429 cool-down is active and for
+// states that must not serve (AuthFailing, Missing).
+func (sm *StateMachine) Selectable(now time.Time) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if now.Before(sm.cooldownUntil) {
+		return false
+	}
+	return sm.state == Healthy || sm.state == TransientFailing
 }
 
 func (sm *StateMachine) RecordMissing() {

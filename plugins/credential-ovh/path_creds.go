@@ -11,7 +11,6 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
-	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -49,8 +48,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return errResp, err
 	}
 
+	now := time.Now()
+
 	// Select a healthy minter from the role's bound set
-	sel, err := b.selectMinter(role.MinterSet)
+	sel, err := b.selectMinter(role.MinterSet, now)
 	if err != nil {
 		// selectMinter fails when the set is unloaded or every minter in it is
 		// failing — both surface to the client as an upstream auth failure. The
@@ -61,13 +62,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
-	now := time.Now()
 	accessToken, expiresIn, err := client.MintToken(ctx)
 	if err != nil {
-		b.recordMinterError(setName, minterID, classifyOVHError(err), now)
-		// We can't reliably classify the OAuth2 token-minting failure at this
-		// layer, so ErrInternal is the honest, stable code to return.
-		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "upstream error: %v", err), nil
+		status := classifyOVHError(err)
+		b.recordMinterError(setName, minterID, status, now)
+		return b.issuanceError(status, err), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
@@ -183,7 +182,7 @@ type selectedMinter struct {
 	client   TokenClient
 }
 
-func (b *backend) selectMinter(setName string) (selectedMinter, error) {
+func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -192,7 +191,7 @@ func (b *backend) selectMinter(setName string) (selectedMinter, error) {
 		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	for id, ms := range states {
-		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+		if ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: b.buildTokenClient(ms.minter)}, nil
 		}
 	}
@@ -230,6 +229,15 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 			ms.sm.RecordError(httpStatus, at)
 		}
 	}
+}
+
+// issuanceError logs the raw upstream failure (operator-only) and returns a
+// classified, body-free error response for the client (audit2 #4,#5).
+func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
+	b.Logger().Warn("upstream credential issuance failed",
+		"cloud", cloudName, "status", httpStatus, "error", err)
+	return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
+		"upstream credential issuance failed")
 }
 
 // classifyOVHError maps OVH OAuth2 errors to HTTP status codes for the state machine.

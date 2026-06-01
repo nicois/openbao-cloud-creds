@@ -2,9 +2,11 @@ package credentialdo_test
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -139,7 +141,6 @@ func TestMinterSetIsolation(t *testing.T) {
 		t.Fatalf("role2 used wrong minter: set=%v id=%v", meta["minter_set"], meta["minter_id"])
 	}
 }
-
 func TestCredsRevoke(t *testing.T) {
 	srv := fakes.NewDOServer()
 	defer srv.Close()
@@ -205,5 +206,30 @@ func TestCredsIssue_RoleNotFound(t *testing.T) {
 	}
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected error response for missing role")
+	}
+}
+
+func TestCredsIssue_ClassifiesQuotaError(t *testing.T) {
+	srv := fakes.NewDOServer()
+	defer srv.Close()
+	b, storage := setupConfiguredBackend(t, srv.URL)
+	srv.SetNextStatus(http.StatusTooManyRequests) // next create returns 429
+
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.ReadOperation, Path: "creds/test-role", Storage: storage,
+	})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("expected error response, got %v", resp)
+	}
+	msg := resp.Error().Error()
+	if !strings.HasPrefix(msg, string(credenvelope.ErrUpstreamQuotaExceeded)+":") {
+		t.Fatalf("expected upstream_quota_exceeded code, got %q", msg)
+	}
+	// #5: the raw upstream body must NOT leak to the client.
+	if strings.Contains(msg, "server_error") {
+		t.Fatalf("client message leaked upstream detail: %q", msg)
 	}
 }
