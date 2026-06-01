@@ -8,9 +8,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 )
 
 const (
@@ -20,6 +23,11 @@ const (
 	// tokenRefreshBuffer refreshes the cached Graph token this long before it
 	// actually expires, so an in-flight request never races the expiry.
 	tokenRefreshBuffer = 5 * time.Minute
+
+	// minterSecretLifetime is how long a rotation successor's client secret is
+	// valid upstream. Minters are long-lived; a 2-year secret avoids needing to
+	// rotate again before the next operator-driven rotation.
+	minterSecretLifetime = 2 * 365 * 24 * time.Hour
 )
 
 type azureClient struct {
@@ -240,4 +248,47 @@ func (c *azureClient) CheckHealth(ctx context.Context, appObjectID string) (int,
 		return status, err
 	}
 	return status, nil
+}
+
+// rotationSuffix returns a short, monotonic-ish suffix for a successor minter
+// ID so successive rotations of the same minter never collide.
+func rotationSuffix() string {
+	return strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+// RotateMinter mints a successor SP client secret on the SAME app registration
+// as old (so the successor authenticates as the same service principal and
+// inherits old's addPassword rights). The app object ID comes from
+// old.RotationParams["app_object_id"]. The successor records its OWN upstream
+// keyId in RotationParams["key_id"] so a later retired-sweep can removePassword
+// it; old retains whatever key_id it had (used to remove old upstream once it is
+// retired past the grace).
+func (c *azureClient) RotateMinter(ctx context.Context, old cloudconfig.Minter) (cloudconfig.Minter, error) {
+	appObjectID := old.RotationParams[fieldAppObjectID]
+	if appObjectID == "" {
+		return cloudconfig.Minter{}, fmt.Errorf("minter %s missing rotation_params.%s", old.ID, fieldAppObjectID)
+	}
+
+	displayName := "cloud-creds-minter-" + old.ID
+	endDate := time.Now().Add(minterSecretLifetime)
+	pw, status, err := c.AddPassword(ctx, appObjectID, displayName, endDate)
+	if err != nil {
+		return cloudconfig.Minter{}, fmt.Errorf("addPassword failed (status %d): %w", status, err)
+	}
+
+	clientID := strings.SplitN(old.Token, ":", 2)[0]
+	successor := cloudconfig.Minter{
+		ID:           old.ID + "-rot-" + rotationSuffix(),
+		Token:        clientID + ":" + pw.SecretText,
+		CreatedAt:    time.Now(),
+		NeverExpires: old.NeverExpires,
+		RotationParams: map[string]string{
+			fieldAppObjectID: appObjectID,
+			fieldKeyID:       pw.KeyID,
+		},
+	}
+	if !old.NeverExpires {
+		successor.ExpiresAt = endDate
+	}
+	return successor, nil
 }

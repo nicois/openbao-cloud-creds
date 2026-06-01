@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -25,6 +26,16 @@ func (b *backend) minterSetPaths() []*framework.Path {
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathMinterSetWrite},
 				logical.ReadOperation:   &framework.PathOperation{Callback: b.pathMinterSetRead},
 				logical.DeleteOperation: &framework.PathOperation{Callback: b.pathMinterSetDelete},
+			},
+		},
+		{
+			Pattern: "minter-sets/" + framework.GenericNameRegex("name") + "/rotate",
+			Fields: map[string]*framework.FieldSchema{
+				fieldName:     {Type: framework.TypeString, Description: "Name of the minter set"},
+				fieldMinterID: {Type: framework.TypeString, Description: "ID of the minter in the set to rotate"},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathMinterSetRotate},
 			},
 		},
 		{
@@ -72,6 +83,13 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 			}
 			minter.ExpiresAt = t
 		}
+		if rp, ok := mMap[fieldRotationParams].(map[string]interface{}); ok {
+			params := make(map[string]string, len(rp))
+			for k, v := range rp {
+				params[k] = fmt.Sprintf("%v", v)
+			}
+			minter.RotationParams = params
+		}
 		minters = append(minters, minter)
 	}
 	return minters, nil
@@ -100,6 +118,174 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 	b.loadMinterSet(set)
 	go b.startWorkers(b.baseCtx, req.Storage)
 	return nil, nil
+}
+
+// readSet loads a persisted minter set from storage, or nil if absent.
+func (b *backend) readSet(ctx context.Context, storage logical.Storage, name string) (*cloudconfig.MinterSet, error) {
+	entry, err := storage.Get(ctx, "minter-sets/"+name)
+	if err != nil {
+		return nil, err
+	}
+	if entry == nil {
+		return nil, nil
+	}
+	var set cloudconfig.MinterSet
+	if err := json.Unmarshal(entry.Value, &set); err != nil {
+		return nil, err
+	}
+	return &set, nil
+}
+
+// persistSet writes the set to storage and refreshes the in-memory snapshot.
+func (b *backend) persistSet(ctx context.Context, storage logical.Storage, set *cloudconfig.MinterSet) error {
+	entry, err := logical.StorageEntryJSON("minter-sets/"+set.Name, set)
+	if err != nil {
+		return err
+	}
+	if err := storage.Put(ctx, entry); err != nil {
+		return err
+	}
+	b.loadMinterSet(set)
+	return nil
+}
+
+// pathMinterSetRotate rotates one minter in a set: it mints a successor on the
+// same Azure app registration, health-checks it, then (atomically, under
+// rotateSweepMu) appends the successor active and marks the original retired.
+// The original's upstream secret stays alive until the retired-sweep deletes it
+// after minter_retire_grace — so no other raft node, whose in-memory snapshot
+// may still hold the original as selectable, ever loses its minter mid-flight.
+func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	name := d.Get(fieldName).(string)
+	minterID := d.Get(fieldMinterID).(string)
+	if minterID == "" {
+		return logical.ErrorResponse("minter_id is required"), nil
+	}
+
+	b.rotateSweepMu.Lock()
+	defer b.rotateSweepMu.Unlock()
+
+	set, err := b.readSet(ctx, req.Storage, name)
+	if err != nil {
+		return nil, err
+	}
+	if set == nil {
+		return logical.ErrorResponse("minter set %q does not exist", name), nil
+	}
+
+	oldIdx := -1
+	for i := range set.Minters {
+		if set.Minters[i].ID == minterID {
+			oldIdx = i
+			break
+		}
+	}
+	if oldIdx == -1 {
+		return logical.ErrorResponse("minter %q not found in set %q", minterID, name), nil
+	}
+	old := set.Minters[oldIdx]
+	if old.Retired {
+		return logical.ErrorResponse("minter %q is already retired", minterID), nil
+	}
+
+	// 1. Mint the successor first (so we can include it in the prospective set),
+	//    using a healthy active client: prefer the minter being rotated if it is
+	//    itself selectable, else any other active minter in the set.
+	client, err := b.rotationClient(name, minterID, time.Now())
+	if err != nil {
+		return logical.ErrorResponse("no healthy minter to perform rotation: %v", err), nil
+	}
+	successor, err := client.RotateMinter(ctx, old)
+	if err != nil {
+		return logical.ErrorResponse("rotation failed: %v", err), nil
+	}
+
+	// 2. Validate the prospective post-rotation set (old retired, successor
+	//    appended) BEFORE committing. If it would not validate, undo the mint and
+	//    reject with no state change.
+	prospective := make([]cloudconfig.Minter, 0, len(set.Minters)+1)
+	for i := range set.Minters {
+		m := set.Minters[i]
+		if i == oldIdx {
+			m.Retired = true
+			m.RetiredAt = time.Now()
+		}
+		prospective = append(prospective, m)
+	}
+	prospective = append(prospective, successor)
+	if verr := cloudconfig.ValidateMinterSet(prospective); verr != nil {
+		b.cleanupSuccessor(ctx, client, successor)
+		return logical.ErrorResponse("rotation would invalidate the minter set: %v", verr), nil
+	}
+
+	// 3. Health-check the successor via a client built from ITS token. If it
+	//    fails, clean up the just-minted secret and reject with no state change.
+	successorClient := b.newClientForMinter(successor)
+	if _, herr := successorClient.CheckHealth(ctx, successor.RotationParams[fieldAppObjectID]); herr != nil {
+		b.cleanupSuccessor(ctx, client, successor)
+		return logical.ErrorResponse("successor minter failed health check: %v", herr), nil
+	}
+
+	// 4. Commit: persist the prospective set and refresh the in-memory snapshot.
+	retiredAt := prospective[oldIdx].RetiredAt
+	set.Minters = prospective
+	if err := b.persistSet(ctx, req.Storage, set); err != nil {
+		// Persist failed after minting the successor: best-effort clean up so we
+		// don't leak an upstream secret no set references.
+		b.cleanupSuccessor(ctx, client, successor)
+		return nil, err
+	}
+
+	emitMinterRotated(name)
+	b.Logger().Info("minter rotated",
+		"cloud", cloudName, "minter_set", name,
+		"retired_minter_id", minterID, "successor_id", successor.ID)
+
+	return &logical.Response{Data: map[string]interface{}{
+		"successor_id":      successor.ID,
+		"retired_minter_id": minterID,
+		"retired_at":        retiredAt,
+	}}, nil
+}
+
+// rotationClient returns a client to mint the successor: the minter being
+// rotated if it is itself selectable, otherwise any other healthy active minter
+// in the set (so a wedged minter can still be rotated out by a sibling).
+func (b *backend) rotationClient(setName, minterID string, now time.Time) (*azureClient, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	states, ok := b.minterSets[setName]
+	if !ok {
+		return nil, fmt.Errorf("minter set %q not loaded", setName)
+	}
+	if ms, ok := states[minterID]; ok && !ms.minter.Retired && ms.sm.Selectable(now) {
+		return b.newClientForMinter(ms.minter), nil
+	}
+	for id, ms := range states {
+		if id == minterID {
+			continue
+		}
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
+			return b.newClientForMinter(ms.minter), nil
+		}
+	}
+	return nil, fmt.Errorf("no healthy active minter in set %q", setName)
+}
+
+// cleanupSuccessor best-effort removes a just-minted successor secret upstream
+// when the rotation is aborted (validation or health-check failure). Uses the
+// minting client (same app registration). Failures are logged, not returned —
+// the rotation is already being rejected.
+func (b *backend) cleanupSuccessor(ctx context.Context, client *azureClient, successor cloudconfig.Minter) {
+	keyID := successor.RotationParams[fieldKeyID]
+	appObjectID := successor.RotationParams[fieldAppObjectID]
+	if keyID == "" || appObjectID == "" {
+		return
+	}
+	if status, err := client.RemovePassword(ctx, appObjectID, keyID); err != nil && status != http.StatusNotFound {
+		b.Logger().Warn("failed to clean up aborted-rotation successor secret",
+			"cloud", cloudName, "key_id", keyID, "status", status, "error", err)
+	}
 }
 
 func (b *backend) pathMinterSetRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {

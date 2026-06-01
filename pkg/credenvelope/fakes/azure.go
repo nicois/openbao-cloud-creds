@@ -24,6 +24,7 @@ type AzureServer struct {
 	passwords         map[string]map[string]interface{} // keyId -> password credential
 	nextID            atomic.Int64
 	nextStatus        int
+	failGetApp        bool
 	tokenRequestCount atomic.Int64
 	validClientID     string
 	validClientSecret string
@@ -50,6 +51,16 @@ func (s *AzureServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nextStatus = code
+}
+
+// SetFailGetApplication makes every GetApplication request return 500 until
+// reset. Test-only: lets a test fail a minter's CheckHealth (which calls
+// GetApplication) deterministically, e.g. to exercise the rotate
+// successor-health-check-failed path.
+func (s *AzureServer) SetFailGetApplication(fail bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failGetApp = fail
 }
 
 func (s *AzureServer) TokenRequestCount() int64 {
@@ -302,6 +313,20 @@ func (s *AzureServer) getApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.checkInjectedError(w) {
+		return
+	}
+
+	s.mu.Lock()
+	failGetApp := s.failGetApp
+	s.mu.Unlock()
+	if failGetApp {
+		w.WriteHeader(http.StatusInternalServerError)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    "ServerError",
+				jsonKeyMessage: "get application disabled by test knob",
+			},
+		})
 		return
 	}
 
