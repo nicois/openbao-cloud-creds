@@ -27,6 +27,16 @@ func (b *backend) minterSetPaths() []*framework.Path {
 			},
 		},
 		{
+			Pattern: "minter-sets/" + framework.GenericNameRegex("name") + "/rotate",
+			Fields: map[string]*framework.FieldSchema{
+				fieldName:     {Type: framework.TypeString, Description: "Name of the minter set"},
+				fieldMinterID: {Type: framework.TypeString, Description: "ID of the minter in the set to rotate"},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathMinterSetRotate},
+			},
+		},
+		{
 			Pattern: "minter-sets/?$",
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ListOperation: &framework.PathOperation{Callback: b.pathMinterSetList},
@@ -72,6 +82,13 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 				return nil, fmt.Errorf("invalid expires_at for minter %s: %v", minter.ID, err)
 			}
 			minter.ExpiresAt = t
+		}
+		if rp, ok := mMap[fieldRotationParams].(map[string]interface{}); ok {
+			params := make(map[string]string, len(rp))
+			for k, v := range rp {
+				params[k] = fmt.Sprintf("%v", v)
+			}
+			minter.RotationParams = params
 		}
 		minters = append(minters, minter)
 	}
@@ -183,6 +200,35 @@ func (b *backend) loadAllMinterSets(ctx context.Context, storage logical.Storage
 		}
 		b.loadMinterSet(&set)
 	}
+	return nil
+}
+
+// readSet loads a persisted minter set from storage, or nil if absent.
+func (b *backend) readSet(ctx context.Context, storage logical.Storage, name string) (*cloudconfig.MinterSet, error) {
+	entry, err := storage.Get(ctx, "minter-sets/"+name)
+	if err != nil {
+		return nil, err
+	}
+	if entry == nil {
+		return nil, nil
+	}
+	var set cloudconfig.MinterSet
+	if err := json.Unmarshal(entry.Value, &set); err != nil {
+		return nil, err
+	}
+	return &set, nil
+}
+
+// persistSet writes the set to storage and refreshes the in-memory snapshot.
+func (b *backend) persistSet(ctx context.Context, storage logical.Storage, set *cloudconfig.MinterSet) error {
+	entry, err := logical.StorageEntryJSON("minter-sets/"+set.Name, set)
+	if err != nil {
+		return err
+	}
+	if err := storage.Put(ctx, entry); err != nil {
+		return err
+	}
+	b.loadMinterSet(set)
 	return nil
 }
 

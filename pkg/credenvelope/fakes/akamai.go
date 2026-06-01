@@ -19,6 +19,15 @@ import (
 // body bytes folded into the content hash.
 const akamaiMaxBodyHashBytes = 131072
 
+// fakeIdentityManagementAPIID is the per-account apiId the fake returns for the
+// Identity-Management API in the allowed-apis lookup. The plugin resolves this
+// at rotation time rather than hard-coding it.
+const fakeIdentityManagementAPIID = 4200
+
+// fakeIdentityManagementAPIName is the apiName the fake reports for the
+// Identity-Management API; it must match the name the plugin matches on.
+const fakeIdentityManagementAPIName = "Identity Management: API Clients"
+
 const (
 	jsonKeyClientID    = "clientId"
 	jsonKeyClientName  = "clientName"
@@ -43,12 +52,22 @@ type AkamaiServer struct {
 	// expectedSecrets maps client_token -> client_secret, for signature
 	// validation. Tokens with no registered secret skip validation.
 	expectedSecrets map[string]string
+	// failHealthPrefix, when non-empty, makes GET /api-clients/self return 500
+	// for any request whose signing client_token starts with the prefix. Lets a
+	// rotation test fail only the successor's health check (the fake mints
+	// successor tokens with the "akab-ct-" prefix) while the minting client
+	// stays healthy.
+	failHealthPrefix string
+	// identityManagementAPIID is the per-account apiId returned by the
+	// allowed-apis lookup for the Identity-Management API.
+	identityManagementAPIID int
 }
 
 func NewAkamaiServer() *AkamaiServer {
 	s := &AkamaiServer{
-		clients:         make(map[string]map[string]interface{}),
-		expectedSecrets: make(map[string]string),
+		clients:                 make(map[string]map[string]interface{}),
+		expectedSecrets:         make(map[string]string),
+		identityManagementAPIID: fakeIdentityManagementAPIID,
 	}
 	for ct, cs := range fakeStandardCredentials {
 		s.expectedSecrets[ct] = cs
@@ -122,6 +141,18 @@ func (s *AkamaiServer) SetNextStatus(code int) {
 	s.nextStatus = code
 }
 
+// SetFailHealthForTokenPrefix makes GET /api-clients/self return 500 for any
+// request whose signing client_token starts with prefix (empty disables).
+// Test-only: the rotate successor health-check builds a client AS the successor
+// token, which the fake mints with the "akab-ct-" prefix, so failing that
+// prefix exercises the successor-health-check-failed path while the minting
+// client (a token with a different prefix) stays healthy.
+func (s *AkamaiServer) SetFailHealthForTokenPrefix(prefix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failHealthPrefix = prefix
+}
+
 // RegisterCredential tells the fake the client_secret to expect for a given
 // client_token so it can validate the EG1-HMAC-SHA256 signature on requests
 // signed with that token. Tests register the same triple they configure as the
@@ -135,6 +166,7 @@ func (s *AkamaiServer) RegisterCredential(clientToken, clientSecret string) {
 
 func (s *AkamaiServer) handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /identity-management/v3/users/{username}/allowed-apis", s.allowedAPIs)
 	mux.HandleFunc("GET /identity-management/v3/api-clients/self", s.getSelf)
 	mux.HandleFunc("GET /identity-management/v3/api-clients", s.listClients)
 	mux.HandleFunc("POST /identity-management/v3/api-clients", s.createClient)
@@ -404,11 +436,50 @@ func (s *AkamaiServer) listClients(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, clients)
 }
 
+// allowedAPIs returns the per-user allowed-apis list. The rotation flow reads
+// this to resolve the per-account Identity-Management apiId before granting the
+// successor READ-WRITE on it.
+func (s *AkamaiServer) allowedAPIs(w http.ResponseWriter, r *http.Request) {
+	if !s.checkEdgeGridAuth(w, r) {
+		return
+	}
+	if s.checkInjectedError(w) {
+		return
+	}
+
+	s.mu.Lock()
+	apiID := s.identityManagementAPIID
+	s.mu.Unlock()
+
+	w.WriteHeader(http.StatusOK)
+	writeJSON(w, []map[string]interface{}{
+		{
+			"apiId":        apiID,
+			"apiName":      fakeIdentityManagementAPIName,
+			"accessLevels": []string{"READ-ONLY", "READ-WRITE"},
+		},
+	})
+}
+
 func (s *AkamaiServer) getSelf(w http.ResponseWriter, r *http.Request) {
 	if !s.checkEdgeGridAuth(w, r) {
 		return
 	}
 	if s.checkInjectedError(w) {
+		return
+	}
+
+	s.mu.Lock()
+	failPrefix := s.failHealthPrefix
+	token := s.lastClientToken
+	s.mu.Unlock()
+	if failPrefix != "" && strings.HasPrefix(token, failPrefix) {
+		w.WriteHeader(http.StatusInternalServerError)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/server-error",
+			jsonKeyTitle:  "Server Error",
+			jsonKeyDetail: "health check disabled by test knob",
+		})
 		return
 	}
 

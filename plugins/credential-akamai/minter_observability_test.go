@@ -18,7 +18,6 @@ const (
 	pathConfigKey      = "config"
 	fieldMintersKey    = "minters"
 	pathMinterSetWrite = "minter-sets/default"
-	fieldAPIURL        = "akamai_api_url"
 	fieldExpiresAt     = "expires_at"
 )
 

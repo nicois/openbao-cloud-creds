@@ -170,20 +170,20 @@ func leaseShortID(id string) string {
 func roleAccess(role *akamaiRole) (apiAccess, groupAccess interface{}) {
 	if role.APIAccess != "" {
 		if err := json.Unmarshal([]byte(role.APIAccess), &apiAccess); err != nil {
-			apiAccess = map[string]interface{}{"apis": []interface{}{}}
+			apiAccess = map[string]interface{}{jsonKeyAPIs: []interface{}{}}
 		}
 	} else {
-		apiAccess = map[string]interface{}{"apis": []interface{}{}}
+		apiAccess = map[string]interface{}{jsonKeyAPIs: []interface{}{}}
 	}
 
 	if role.GroupID > 0 {
 		groupAccess = map[string]interface{}{
-			"groups": []interface{}{
+			jsonKeyGroups: []interface{}{
 				map[string]interface{}{"groupId": role.GroupID},
 			},
 		}
 	} else {
-		groupAccess = map[string]interface{}{"groups": []interface{}{}}
+		groupAccess = map[string]interface{}{jsonKeyGroups: []interface{}{}}
 	}
 	return apiAccess, groupAccess
 }

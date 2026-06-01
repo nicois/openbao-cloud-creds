@@ -17,6 +17,15 @@ func emitLeaseIssued(role string)       { emit.LeaseIssued(role) }
 func emitLeaseRevokeFailed(role string) { emit.LeaseRevokeFailed(role) }
 func emitOrphansFound(count int)        { emit.OrphansFound(count) }
 
+// emitMinterRotated counts a successful operator-initiated minter rotation,
+// labelled by the minter set it occurred in.
+func emitMinterRotated(set string) {
+	emit.Counter("minter_rotated_total", []metrics.Label{
+		emit.CloudLabel(),
+		{Name: fieldMinterSet, Value: set},
+	})
+}
+
 // emitMinterMetrics stays here: it reaches into b.minterSets / state machines.
 func (b *backend) emitMinterMetrics() {
 	b.mu.RLock()
