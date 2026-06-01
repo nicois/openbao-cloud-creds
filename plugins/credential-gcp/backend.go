@@ -30,7 +30,12 @@ type backend struct {
 	accessTracker     *metrics.AccessTracker
 	workerMgr         *worker.Manager
 	workerCancel      context.CancelFunc
-	iamClientFn       IAMClientFactory
+	// baseCtx is the parent context for all worker goroutines; baseCancel is
+	// fired from Clean (backend teardown) so leaked workers cannot outlive the
+	// backend. Worker launch sites use baseCtx rather than context.Background().
+	baseCtx     context.Context
+	baseCancel  context.CancelFunc
+	iamClientFn IAMClientFactory
 }
 
 type minterState struct {
@@ -46,10 +51,12 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 	b := &backend{
 		minterSets: make(map[string]map[string]*minterState),
 	}
+	b.baseCtx, b.baseCancel = context.WithCancel(context.Background())
 
 	b.Backend = &framework.Backend{
 		BackendType: logical.TypeLogical,
 		Help:        backendHelp,
+		Clean:       func(_ context.Context) { b.stopWorkers() },
 		Paths: framework.PathAppend(
 			b.configPaths(),
 			b.minterSetPaths(),
