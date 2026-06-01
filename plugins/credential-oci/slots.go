@@ -240,7 +240,7 @@ func (b *backend) selectMinterForSet(setName string) (minterID string, client OC
 	}
 	var token string
 	for id, ms := range states {
-		if ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.Selectable(now) {
 			minterID = id
 			token = ms.minter.Token
 			break
@@ -281,7 +281,7 @@ func (b *backend) anyHealthyMinter() OCIIAMClient {
 	found := false
 	for _, states := range b.minterSets {
 		for _, ms := range states {
-			if ms.sm.Selectable(now) {
+			if !ms.minter.Retired && ms.sm.Selectable(now) {
 				token = ms.minter.Token
 				found = true
 				break
