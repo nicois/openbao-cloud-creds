@@ -62,3 +62,10 @@ func TestMinterSetInvalid_Empty(t *testing.T) {
 		t.Fatal("expected error for empty minter set")
 	}
 }
+
+func TestDefaultConfig_MinterExpiryWarnDefaultsToMinMinterGap(t *testing.T) {
+	cfg := cloudconfig.DefaultConfig("do")
+	if cfg.MinterExpiryWarn != cloudconfig.MinMinterGap {
+		t.Fatalf("MinterExpiryWarn = %v, want MinMinterGap (%v)", cfg.MinterExpiryWarn, cloudconfig.MinMinterGap)
+	}
+}
