@@ -11,7 +11,6 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
-	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -49,8 +48,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return errResp, err
 	}
 
+	now := time.Now()
+
 	// Select a healthy minter from the role's bound set
-	sel, err := b.selectMinter(role.MinterSet)
+	sel, err := b.selectMinter(role.MinterSet, now)
 	if err != nil {
 		// selectMinter fails when the set is unloaded or every minter in it is
 		// failing — both surface to the client as an upstream auth failure. The
@@ -61,7 +62,6 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
-	now := time.Now()
 	accessToken, expiresIn, err := client.MintToken(ctx)
 	if err != nil {
 		status := classifyOVHError(err)
@@ -182,7 +182,7 @@ type selectedMinter struct {
 	client   TokenClient
 }
 
-func (b *backend) selectMinter(setName string) (selectedMinter, error) {
+func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -191,7 +191,7 @@ func (b *backend) selectMinter(setName string) (selectedMinter, error) {
 		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
 	}
 	for id, ms := range states {
-		if ms.sm.State() == recovery.Healthy || ms.sm.State() == recovery.TransientFailing {
+		if ms.sm.Selectable(now) {
 			return selectedMinter{setID: setName, minterID: id, client: b.buildTokenClient(ms.minter)}, nil
 		}
 	}
