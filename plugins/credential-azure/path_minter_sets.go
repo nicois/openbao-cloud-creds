@@ -149,12 +149,32 @@ func (b *backend) persistSet(ctx context.Context, storage logical.Storage, set *
 	return nil
 }
 
-// pathMinterSetRotate rotates one minter in a set: it mints a successor on the
-// same Azure app registration, health-checks it, then (atomically, under
-// rotateSweepMu) appends the successor active and marks the original retired.
+// pathMinterSetRotate rotates one minter in a set: it first validates the
+// prospective post-rotation set against a synthetic successor (no cloud call),
+// and only if that passes mints the real successor on the same Azure app
+// registration, health-checks it, then (atomically, under rotateSweepMu)
+// appends the successor active and marks the original retired.
 // The original's upstream secret stays alive until the retired-sweep deletes it
 // after minter_retire_grace — so no other raft node, whose in-memory snapshot
 // may still hold the original as selectable, ever loses its minter mid-flight.
+// withRotatedSuccessor returns a fresh slice equal to minters but with the
+// minter at oldIdx marked retired (RetiredAt=retiredAt) and the given successor
+// appended active. Index iteration avoids copying Minter by value in a range
+// loop. Used for both the synthetic-successor pre-mint validation and the
+// real-successor commit, so the two views are constructed identically.
+func withRotatedSuccessor(minters []cloudconfig.Minter, oldIdx int, retiredAt time.Time, successor cloudconfig.Minter) []cloudconfig.Minter {
+	out := make([]cloudconfig.Minter, 0, len(minters)+1)
+	for i := range minters {
+		m := minters[i]
+		if i == oldIdx {
+			m.Retired = true
+			m.RetiredAt = retiredAt
+		}
+		out = append(out, m)
+	}
+	return append(out, successor)
+}
+
 func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
 	minterID := d.Get(fieldMinterID).(string)
@@ -188,9 +208,28 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 		return logical.ErrorResponse("minter %q is already retired", minterID), nil
 	}
 
-	// 1. Mint the successor first (so we can include it in the prospective set),
-	//    using a healthy active client: prefer the minter being rotated if it is
-	//    itself selectable, else any other active minter in the set.
+	// 1. Validate the prospective post-rotation set FIRST, using a SYNTHETIC
+	//    successor — no cloud call yet. ValidateMinterSet only inspects
+	//    NeverExpires/ExpiresAt/Retired, so a synthetic stand-in with the same
+	//    expiry the real successor will have (minterSecretLifetime, matching
+	//    RotateMinter) is exact. Validating before minting means a rotation that
+	//    would break the set never consumes an upstream credential slot — load-
+	//    bearing where the cloud caps secrets per app (audit2 #9).
+	retiredAt := time.Now()
+	synthetic := cloudconfig.Minter{
+		ID:           old.ID + "-rot-pending",
+		NeverExpires: old.NeverExpires,
+	}
+	if !old.NeverExpires {
+		synthetic.ExpiresAt = time.Now().Add(minterSecretLifetime)
+	}
+	if verr := cloudconfig.ValidateMinterSet(withRotatedSuccessor(set.Minters, oldIdx, retiredAt, synthetic)); verr != nil {
+		return logical.ErrorResponse("rotation would invalidate the minter set: %v", verr), nil
+	}
+
+	// 2. Validation passed: NOW mint the real successor on the same Azure app
+	//    registration, using a healthy active client (prefer the minter being
+	//    rotated if it is itself selectable, else any other active minter).
 	client, err := b.rotationClient(name, minterID, time.Now())
 	if err != nil {
 		return logical.ErrorResponse("no healthy minter to perform rotation: %v", err), nil
@@ -198,24 +237,6 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 	successor, err := client.RotateMinter(ctx, old)
 	if err != nil {
 		return logical.ErrorResponse("rotation failed: %v", err), nil
-	}
-
-	// 2. Validate the prospective post-rotation set (old retired, successor
-	//    appended) BEFORE committing. If it would not validate, undo the mint and
-	//    reject with no state change.
-	prospective := make([]cloudconfig.Minter, 0, len(set.Minters)+1)
-	for i := range set.Minters {
-		m := set.Minters[i]
-		if i == oldIdx {
-			m.Retired = true
-			m.RetiredAt = time.Now()
-		}
-		prospective = append(prospective, m)
-	}
-	prospective = append(prospective, successor)
-	if verr := cloudconfig.ValidateMinterSet(prospective); verr != nil {
-		b.cleanupSuccessor(ctx, client, successor)
-		return logical.ErrorResponse("rotation would invalidate the minter set: %v", verr), nil
 	}
 
 	// 3. Health-check the successor via a client built from ITS token. If it
@@ -226,9 +247,9 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 		return logical.ErrorResponse("successor minter failed health check: %v", herr), nil
 	}
 
-	// 4. Commit: persist the prospective set and refresh the in-memory snapshot.
-	retiredAt := prospective[oldIdx].RetiredAt
-	set.Minters = prospective
+	// 4. Commit: append the real successor active, mark the old retired, then
+	//    persist the set and refresh the in-memory snapshot.
+	set.Minters = withRotatedSuccessor(set.Minters, oldIdx, retiredAt, successor)
 	if err := b.persistSet(ctx, req.Storage, set); err != nil {
 		// Persist failed after minting the successor: best-effort clean up so we
 		// don't leak an upstream secret no set references.

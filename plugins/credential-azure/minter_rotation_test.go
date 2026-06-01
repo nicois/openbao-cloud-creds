@@ -156,10 +156,11 @@ func TestMinterRotation_HappyPath(t *testing.T) {
 }
 
 // TestMinterRotation_RejectedBreaksValidation: a set of two expiring minters
-// is valid (their expiries are far apart), but rotating minter-2 mints a
+// is valid (their expiries are far apart), but rotating minter-2 would yield a
 // successor expiring ~2y out (minterSecretLifetime), landing within 7d of
-// minter-1's ~2y expiry — so the prospective set fails the >=7d-gap rule. The
-// rotate must be rejected with no state change.
+// minter-1's ~2y expiry — so the prospective set fails the >=7d-gap rule.
+// Validation runs against a synthetic successor BEFORE any cloud call, so the
+// rotate is rejected with no state change AND without ever calling addPassword.
 func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 	// minter-1 expires 3 days BEFORE the 2y successor lands; minter-2 expires in
 	// 40d (far from minter-1, so the original set validates).
@@ -197,10 +198,11 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 			t.Fatalf("no minter should be retired after a rejected rotation: %+v", set.Minters[i])
 		}
 	}
-	// The successor is minted before the validation check, then cleaned up on
-	// rejection, so the upstream password count returns to baseline.
+	// Validation runs BEFORE any cloud call, so a rejected rotation must never
+	// reach addPassword at all: the upstream password count stays exactly at
+	// baseline (stronger than "cleaned up back to baseline" — no mint happened).
 	if srv.PasswordCount() != beforePasswords {
-		t.Fatalf("successor should have been cleaned up on rejection; password count %d -> %d", beforePasswords, srv.PasswordCount())
+		t.Fatalf("rejected rotation must not call addPassword at all; password count %d -> %d", beforePasswords, srv.PasswordCount())
 	}
 }
 
