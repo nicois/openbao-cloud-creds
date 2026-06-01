@@ -64,9 +64,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	tokenResp, httpStatus, err := client.CreateToken(ctx, tokenName, scopes)
 	if err != nil {
 		b.recordMinterError(setName, minterID, httpStatus, now)
-		// We can't reliably classify the upstream failure (status/quota/timeout)
-		// at this layer, so ErrInternal is the honest, stable code to return.
-		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "upstream error: %v", err), nil
+		b.Logger().Warn("upstream credential issuance failed",
+			"cloud", cloudName, "status", httpStatus, "error", err)
+		return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
+			"upstream credential issuance failed"), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
@@ -153,7 +154,10 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	if err != nil && httpStatus != http.StatusNotFound {
 		b.recordMinterError(minterSet, minterID, httpStatus, now)
 		emitLeaseRevokeFailed(roleName)
-		return nil, fmt.Errorf("revoke failed: %v", err)
+		b.Logger().Warn("upstream credential revocation failed",
+			"cloud", cloudName, "status", httpStatus, "error", err)
+		return nil, fmt.Errorf("%s: upstream credential revocation failed",
+			credenvelope.ErrLeaseRevokeFailed)
 	}
 	// 404 = already deleted upstream; treat as success.
 	b.recordMinterSuccess(minterSet, minterID, now)
