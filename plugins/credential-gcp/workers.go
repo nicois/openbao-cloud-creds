@@ -95,5 +95,9 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		return err
 	}
 	emitOrphansFound(len(res.Expired))
-	return nil
+
+	// Reclaim upstream SA keys of minters retired past the grace. Runs on the
+	// reconcile cadence but is keyed off RetiredAt, separate from the
+	// tracking-entry prune above.
+	return b.sweepRetiredMinters(ctx, storage, time.Now())
 }

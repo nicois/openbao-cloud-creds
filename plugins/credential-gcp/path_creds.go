@@ -205,6 +205,18 @@ func (b *backend) buildIAMClient(m cloudconfig.Minter) IAMCredentialsClient {
 	return newRealIAMClient(m.Token)
 }
 
+// buildSAKeyClient creates a service-account key-management client from a
+// minter's SA JSON (its Token), honoring the injected saKeyClientFn factory when
+// set (tests inject a fake). Callers MUST hold b.mu (read or write); it performs
+// no locking of its own. This is the KEY-MANAGEMENT client used by rotation, NOT
+// the impersonation issuance client.
+func (b *backend) buildSAKeyClient(m cloudconfig.Minter) SAKeyClient {
+	if b.saKeyClientFn != nil {
+		return b.saKeyClientFn(m.Token)
+	}
+	return newRealSAKeyClient(m.Token)
+}
+
 func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

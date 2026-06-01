@@ -13,7 +13,7 @@ import (
 func (b *backend) configPaths() []*framework.Path {
 	return []*framework.Path{
 		{
-			Pattern: "config",
+			Pattern: pathConfig,
 			Fields: map[string]*framework.FieldSchema{
 				"project": {
 					Type:        framework.TypeString,
@@ -35,6 +35,11 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     defaultMinterExpiryWarnSeconds,
 					Description: "Warn in logs when an expiring minter is within this many seconds of expiry",
 				},
+				fieldMinterRetireGrace: {
+					Type:        framework.TypeDurationSecond,
+					Default:     defaultMinterRetireGraceSeconds,
+					Description: "Seconds after a minter is retired (by rotation) before its upstream SA key is deleted by the retired-sweep",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathConfigWrite},
@@ -48,6 +53,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 	minterExpiryWarn := time.Duration(d.Get("minter_expiry_warn").(int)) * time.Second
+	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
@@ -56,9 +62,10 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		BootstrapDelay:    reconcilerBootstrapDelay,
 		MaxDeletesPerPass: maxDeletesPerPass,
 		MinterExpiryWarn:  minterExpiryWarn,
+		MinterRetireGrace: minterRetireGrace,
 	}
 
-	entry, err := logical.StorageEntryJSON("config", cfg)
+	entry, err := logical.StorageEntryJSON(pathConfig, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +86,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 }
 
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
-	entry, err := req.Storage.Get(ctx, "config")
+	entry, err := req.Storage.Get(ctx, pathConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -94,11 +101,12 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			fieldCloud:           cfg.Cloud,
-			"project":            b.getProject(),
-			"flush_interval":     int(cfg.FlushInterval.Seconds()),
-			"reconcile_cadence":  int(cfg.ReconcileCadence.Seconds()),
-			"minter_expiry_warn": int(cfg.MinterExpiryWarn.Seconds()),
+			fieldCloud:             cfg.Cloud,
+			"project":              b.getProject(),
+			"flush_interval":       int(cfg.FlushInterval.Seconds()),
+			"reconcile_cadence":    int(cfg.ReconcileCadence.Seconds()),
+			"minter_expiry_warn":   int(cfg.MinterExpiryWarn.Seconds()),
+			fieldMinterRetireGrace: int(cfg.MinterRetireGrace.Seconds()),
 		},
 	}, nil
 }
