@@ -81,13 +81,17 @@ func newAzureClient(tenantID, clientID, clientSecret, graphEndpoint, loginEndpoi
 	}
 }
 
-func (c *azureClient) getToken(ctx context.Context) (string, error) {
+// getToken returns a Graph access token plus the upstream HTTP status of the
+// token request (0 if no request was made / transport error). The status lets
+// callers classify a token-acquisition failure (e.g. 429 quota) instead of
+// collapsing it to an internal error (audit2 #4).
+func (c *azureClient) getToken(ctx context.Context) (token string, httpStatus int, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// Return cached token if still valid (with 5-minute buffer)
 	if c.cachedToken != "" && time.Now().Add(tokenRefreshBuffer).Before(c.tokenExpiry) {
-		return c.cachedToken, nil
+		return c.cachedToken, http.StatusOK, nil
 	}
 
 	tokenURL := fmt.Sprintf("%s/%s/oauth2/v2.0/token", c.loginEndpoint, c.tenantID)
@@ -100,19 +104,19 @@ func (c *azureClient) getToken(ctx context.Context) (string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", resp.StatusCode, fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var tokenResp struct {
@@ -120,19 +124,19 @@ func (c *azureClient) getToken(ctx context.Context) (string, error) {
 		ExpiresIn   int    `json:"expires_in"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return "", fmt.Errorf("failed to decode token response: %w", err)
+		return "", resp.StatusCode, fmt.Errorf("failed to decode token response: %w", err)
 	}
 
 	c.cachedToken = tokenResp.AccessToken
 	c.tokenExpiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 
-	return c.cachedToken, nil
+	return c.cachedToken, resp.StatusCode, nil
 }
 
 func (c *azureClient) AddPassword(ctx context.Context, appObjectID, displayName string, endDateTime time.Time) (*addPasswordResponse, int, error) {
-	token, err := c.getToken(ctx)
+	token, tokenStatus, err := c.getToken(ctx)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get access token: %w", err)
+		return nil, tokenStatus, fmt.Errorf("failed to get access token: %w", err)
 	}
 
 	reqBody := addPasswordRequest{
@@ -170,9 +174,9 @@ func (c *azureClient) AddPassword(ctx context.Context, appObjectID, displayName 
 }
 
 func (c *azureClient) RemovePassword(ctx context.Context, appObjectID, keyID string) (int, error) {
-	token, err := c.getToken(ctx)
+	token, tokenStatus, err := c.getToken(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get access token: %w", err)
+		return tokenStatus, fmt.Errorf("failed to get access token: %w", err)
 	}
 
 	reqBody := removePasswordRequest{KeyID: keyID}
@@ -200,9 +204,9 @@ func (c *azureClient) RemovePassword(ctx context.Context, appObjectID, keyID str
 }
 
 func (c *azureClient) GetApplication(ctx context.Context, appObjectID string) (*applicationResponse, int, error) {
-	token, err := c.getToken(ctx)
+	token, tokenStatus, err := c.getToken(ctx)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get access token: %w", err)
+		return nil, tokenStatus, fmt.Errorf("failed to get access token: %w", err)
 	}
 
 	apiURL := fmt.Sprintf("%s/v1.0/applications/%s", c.graphEndpoint, appObjectID)

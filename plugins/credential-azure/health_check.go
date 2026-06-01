@@ -32,8 +32,8 @@ func (b *backend) healthCheckWorker(ctx context.Context) error {
 	for _, p := range probes {
 		// We have no per-set app_object_id here, so health is a token-only
 		// probe: can this minter authenticate to Graph at all?
-		if _, err := p.client.getToken(ctx); err != nil {
-			p.sm.RecordError(0, now)
+		if _, tokenStatus, err := p.client.getToken(ctx); err != nil {
+			p.sm.RecordError(tokenStatus, now)
 		} else {
 			p.sm.RecordSuccess(now)
 		}
