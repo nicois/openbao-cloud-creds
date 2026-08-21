@@ -234,3 +234,22 @@ func HealthStatus(code ErrorCode) int {
 		return http.StatusServiceUnavailable
 	}
 }
+
+// ResponseFor turns an error into an error response, using the code the error
+// already carries when it is a *PluginError and ErrInternal otherwise.
+//
+// It exists because the alternative was writing the code twice: 31 call sites
+// embedded "upstream_auth_failed: " in an error string and then passed that string
+// to ErrorResponse(ErrUpstreamAuthFailed, ...), so the client received the prefix
+// twice and the code had two sources of truth that could disagree. Producers now
+// attach the code to the error; this is the one place that unwraps it.
+func ResponseFor(err error) *logical.Response {
+	if err == nil {
+		return ErrorResponse(ErrInternal, "no error")
+	}
+	var pluginErr *PluginError
+	if errors.As(err, &pluginErr) {
+		return ErrorResponse(pluginErr.Code, "%s", pluginErr.Message)
+	}
+	return ErrorResponse(ErrInternal, "%s", err.Error())
+}

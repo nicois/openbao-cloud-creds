@@ -3,7 +3,10 @@ package credentialoci
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 )
 
 // AuthTokenInfo represents metadata about an existing OCI auth token.
@@ -46,19 +49,23 @@ func newSigningOCIClient(token, region string) *signingOCIClient {
 }
 
 func (c *signingOCIClient) CreateAuthToken(_ context.Context, _, _ string) (tokenValue, tokenID string, err error) {
-	return "", "", fmt.Errorf("upstream_auth_failed: OCI request signing not implemented in this build")
+	return "", "", credenvelope.NewError(credenvelope.ErrUnsupported, http.StatusNotImplemented,
+		"OCI request signing not implemented in this build")
 }
 
 func (c *signingOCIClient) DeleteAuthToken(_ context.Context, _, _ string) error {
-	return fmt.Errorf("upstream_auth_failed: OCI request signing not implemented in this build")
+	return credenvelope.NewError(credenvelope.ErrUnsupported, http.StatusNotImplemented,
+		"OCI request signing not implemented in this build")
 }
 
 func (c *signingOCIClient) ListAuthTokens(_ context.Context, _ string) ([]AuthTokenInfo, error) {
-	return nil, fmt.Errorf("upstream_auth_failed: OCI request signing not implemented in this build")
+	return nil, credenvelope.NewError(credenvelope.ErrUnsupported, http.StatusNotImplemented,
+		"OCI request signing not implemented in this build")
 }
 
 func (c *signingOCIClient) GetUser(_ context.Context, _ string) error {
-	return fmt.Errorf("upstream_auth_failed: OCI request signing not implemented in this build")
+	return credenvelope.NewError(credenvelope.ErrUnsupported, http.StatusNotImplemented,
+		"OCI request signing not implemented in this build")
 }
 
 // fakeOCIClient is an in-memory implementation of OCIIAMClient for testing.

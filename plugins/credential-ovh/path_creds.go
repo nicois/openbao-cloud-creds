@@ -11,6 +11,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -189,14 +190,15 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 
 	states, ok := b.minterSets[setName]
 	if !ok {
-		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+		return selectedMinter{}, credenvelope.NewError(credenvelope.ErrConfigInvalid,
+			http.StatusBadRequest, fmt.Sprintf("minter set %q is not loaded", setName))
 	}
 	for id, ms := range states {
-		if !ms.minter.Retired && ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.TryAcquire(now) {
 			return selectedMinter{setID: setName, minterID: id, client: b.buildTokenClient(ms.minter)}, nil
 		}
 	}
-	return selectedMinter{}, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+	return selectedMinter{}, recovery.UnavailableError(setName, machinesOf(states), now)
 }
 
 // buildTokenClient creates a token client from a minter. The token field stores

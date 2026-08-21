@@ -167,3 +167,16 @@ func (b *backend) SetClientFactory(factory func(token string) OCIIAMClient) {
 	defer b.mu.Unlock()
 	b.clientFactory = factory
 }
+
+// machinesOf collects a set's recovery state machines so the shared diagnosis can
+// say WHY the set could serve nobody — a rate-limit cooldown that will clear in
+// seconds, or credentials that will not.
+func machinesOf(states map[string]*minterState) []*recovery.StateMachine {
+	machines := make([]*recovery.StateMachine, 0, len(states))
+	for _, ms := range states {
+		if !ms.minter.Retired {
+			machines = append(machines, ms.sm)
+		}
+	}
+	return machines
+}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -50,7 +51,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Select a healthy minter from the role's bound set
 	sel, err := b.selectMinter(role.MinterSet, now)
 	if err != nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", err.Error()), nil
+		return credenvelope.ResponseFor(err), nil
 	}
 
 	clientName := fmt.Sprintf("cloud-creds-%s-%s", roleName, leaseShortID(req.ID))
@@ -289,10 +290,11 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 
 	states, ok := b.minterSets[setName]
 	if !ok {
-		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+		return selectedMinter{}, credenvelope.NewError(credenvelope.ErrConfigInvalid,
+			http.StatusBadRequest, fmt.Sprintf("minter set %q is not loaded", setName))
 	}
 	for id, ms := range states {
-		if !ms.minter.Retired && ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.TryAcquire(now) {
 			c, err := b.clientFor(ms)
 			if err != nil {
 				continue
@@ -300,7 +302,7 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 			return selectedMinter{setID: setName, minterID: id, client: c}, nil
 		}
 	}
-	return selectedMinter{}, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+	return selectedMinter{}, recovery.UnavailableError(setName, machinesOf(states), now)
 }
 
 // anyHealthyMinter returns a client for any healthy minter across all sets.
@@ -321,7 +323,8 @@ func (b *backend) anyHealthyMinter() (*akamaiClient, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("upstream_auth_failed: no healthy minter available")
+	return nil, credenvelope.NewError(credenvelope.ErrUpstreamAuthFailed, http.StatusBadGateway,
+		"no healthy minter available")
 }
 
 // anyHealthyMinterInSet returns a client for any healthy minter in the given

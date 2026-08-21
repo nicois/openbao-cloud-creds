@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -236,7 +239,8 @@ func (b *backend) selectMinterForSet(setName string) (minterID string, client OC
 	states, ok := b.minterSets[setName]
 	if !ok {
 		b.mu.RUnlock()
-		return "", nil, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+		return "", nil, credenvelope.NewError(credenvelope.ErrConfigInvalid,
+			http.StatusBadRequest, fmt.Sprintf("minter set %q is not loaded", setName))
 	}
 	var token string
 	for id, ms := range states {
@@ -246,9 +250,12 @@ func (b *backend) selectMinterForSet(setName string) (minterID string, client OC
 			break
 		}
 	}
+	// Gathered under the lock: the diagnosis needs the same state machines the
+	// loop just consulted, and the map must not be read after unlocking.
+	machines := machinesOf(states)
 	b.mu.RUnlock()
 	if minterID == "" {
-		return "", nil, fmt.Errorf("upstream_auth_failed: all minters in set %q failing", setName)
+		return "", nil, recovery.UnavailableError(setName, machines, now)
 	}
 	return minterID, b.newOCIClient(token), nil
 }

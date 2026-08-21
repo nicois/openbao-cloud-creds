@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -59,9 +60,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Select a healthy minter from the role's bound set
 	sel, err := b.selectMinter(role.MinterSet, now)
 	if err != nil {
-		// selectMinter fails when the set is unloaded or every minter in it is
-		// failing — both surface to the client as an upstream auth failure.
-		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "%s", err.Error()), nil
+		// The error carries its own code: an unloaded set is config_invalid, a
+		// rate-limited set is upstream_quota_exceeded (with the remaining wait),
+		// and only genuinely failing credentials are upstream_auth_failed.
+		return credenvelope.ResponseFor(err), nil
 	}
 	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
@@ -197,15 +199,16 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 
 	states, ok := b.minterSets[setName]
 	if !ok {
-		return selectedMinter{}, fmt.Errorf("upstream_auth_failed: minter set %q not loaded", setName)
+		return selectedMinter{}, credenvelope.NewError(credenvelope.ErrConfigInvalid,
+			http.StatusBadRequest, fmt.Sprintf("minter set %q is not loaded", setName))
 	}
 	apiURL := b.vultrAPIURL()
 	for id, ms := range states {
-		if !ms.minter.Retired && ms.sm.Selectable(now) {
+		if !ms.minter.Retired && ms.sm.TryAcquire(now) {
 			return selectedMinter{setID: setName, minterID: id, client: newVultrClient(apiURL, ms.minter.Token)}, nil
 		}
 	}
-	return selectedMinter{}, fmt.Errorf("upstream_auth_failed: all minters in set %q are failing", setName)
+	return selectedMinter{}, recovery.UnavailableError(setName, machinesOf(states), now)
 }
 
 // loadRole fetches and validates a role for issuance. It returns either the
@@ -279,7 +282,8 @@ func (b *backend) anyHealthyMinter() (*vultrClient, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("upstream_auth_failed: no healthy minter available")
+	return nil, credenvelope.NewError(credenvelope.ErrUpstreamAuthFailed, http.StatusBadGateway,
+		"no healthy minter available")
 }
 
 // anyHealthyMinterInSet returns a client for any healthy minter in the given

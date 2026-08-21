@@ -17,10 +17,6 @@ const (
 	Missing          State = "missing"
 )
 
-// RateLimitCooldown is how long a minter is skipped by selectors after the
-// upstream returns 429, so a rate-limited minter is not immediately re-hammered.
-const RateLimitCooldown = 5 * time.Second
-
 type Config struct {
 	AuthFailThreshold   time.Duration
 	HealthCheckInterval time.Duration
@@ -36,6 +32,13 @@ type StateMachine struct {
 	enteredAuthFailed   time.Time
 	cooldownUntil       time.Time
 	consecutiveFailures int
+
+	// rateLimitStrikes counts CONSECUTIVE 429s, reset by any success. It drives
+	// the exponential backoff and marks the half-open window: strikes > 0 with an
+	// expired cooldown means "one probe allowed".
+	rateLimitStrikes int
+	// probeUntil holds the half-open claim, so exactly one caller probes.
+	probeUntil time.Time
 }
 
 func NewStateMachine(cfg Config) *StateMachine {
@@ -64,6 +67,10 @@ func (sm *StateMachine) RecordSuccess(at time.Time) {
 	sm.lastSuccessAt = at
 	sm.firstAuthErrorAt = time.Time{}
 	sm.cooldownUntil = time.Time{}
+	// A success closes the breaker: strikes reset so the next 429 starts the
+	// backoff from the bottom, and the half-open claim is released.
+	sm.rateLimitStrikes = 0
+	sm.probeUntil = time.Time{}
 	sm.state = Healthy
 }
 
@@ -84,11 +91,39 @@ func (sm *StateMachine) ConsecutiveFailures() int {
 // error as well as the status: a client-side timeout has no status by
 // construction, and without the error it is indistinguishable from a plugin bug.
 func (sm *StateMachine) RecordUpstream(httpStatus int, err error, at time.Time) {
-	code := credenvelope.Classify(httpStatus, err)
+	sm.Record(Outcome{Status: httpStatus, Err: err}, at)
+}
+
+// Record records one upstream attempt. This is the entry point every caller
+// should use: it drops failures that say nothing about this minter's credential,
+// and it is where a rate limit becomes a cooldown honouring what the cloud asked
+// for (see ratelimit.go).
+func (sm *StateMachine) Record(o Outcome, at time.Time) {
+	code := credenvelope.Classify(o.Status, o.Err)
 	if !credenvelope.IndictsMinter(code) {
 		return
 	}
+	if code == credenvelope.ErrUpstreamQuotaExceeded {
+		sm.recordRateLimited(o.RetryAfter, at)
+		return
+	}
 	sm.RecordError(credenvelope.HealthStatus(code), at)
+}
+
+// recordRateLimited opens (or re-opens, longer) the cooldown window.
+func (sm *StateMachine) recordRateLimited(retryAfter time.Duration, at time.Time) {
+	sm.mu.Lock()
+	sm.rateLimitStrikes++
+	sm.cooldownUntil = at.Add(cooldownFor(sm.rateLimitStrikes, retryAfter))
+	// A refused probe is finished with; release the claim so the next window's
+	// probe is not blocked by this one's grace.
+	sm.probeUntil = time.Time{}
+	sm.mu.Unlock()
+
+	// The generic bookkeeping (consecutive failures, state transition) still
+	// applies, but must not overwrite the cooldown just computed — so 429 is
+	// passed as a status the state machine no longer special-cases.
+	sm.RecordError(http.StatusServiceUnavailable, at)
 }
 
 // RecordError records a failure against this minter unconditionally. Prefer
@@ -100,7 +135,10 @@ func (sm *StateMachine) RecordError(httpStatus int, at time.Time) {
 	sm.consecutiveFailures++
 	sm.lastErrorAt = at
 	if httpStatus == http.StatusTooManyRequests {
-		sm.cooldownUntil = at.Add(RateLimitCooldown)
+		// Kept for direct RecordError callers that have not been migrated to
+		// Record: without a cloud hint or a strike count this is the first-strike
+		// window, which is what the old behaviour was.
+		sm.cooldownUntil = at.Add(cooldownFor(1, 0))
 	}
 
 	switch sm.state {
@@ -135,13 +173,16 @@ func (sm *StateMachine) RecordError(httpStatus int, at time.Time) {
 // Selectable reports whether a minter in this state may be chosen to mint a
 // credential at the given time. False while a 429 cool-down is active and for
 // states that must not serve (AuthFailing, Missing).
+// Selectable reports whether a minter MAY be used, without claiming anything. It
+// is for revoke, rotation and the reconciler — operations that must not be held
+// behind a half-open probe. Issuance uses TryAcquire.
 func (sm *StateMachine) Selectable(now time.Time) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	if now.Before(sm.cooldownUntil) {
 		return false
 	}
-	return sm.state == Healthy || sm.state == TransientFailing
+	return sm.serviceable(now)
 }
 
 func (sm *StateMachine) RecordMissing() {
