@@ -2,6 +2,7 @@ package credentialgcp_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -189,18 +190,22 @@ func TestCredsRenew_Denied(t *testing.T) {
 	}
 
 	// Renew should fail — GCP access tokens are not renewable
+	if resp.Secret.Renewable {
+		t.Error("lease advertises renewable=true: OpenBao REVOKES a lease whose " +
+			"renewal fails, so a renew attempt would destroy the credential the " +
+			"client was trying to keep (docs/ttl-semantics.md)")
+	}
+
 	renewReq := &logical.Request{
 		Operation: logical.RenewOperation,
 		Path:      "creds/test-role",
 		Storage:   storage,
 		Secret:    resp.Secret,
 	}
-	resp, err = b.HandleRequest(context.Background(), renewReq)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || !resp.IsError() {
-		t.Fatal("expected error response for renew attempt")
+	// Renewal is refused by the framework itself — the secret declares no Renew
+	// callback — so no plugin code runs and no lease is put at risk.
+	if _, err := b.HandleRequest(context.Background(), renewReq); !errors.Is(err, logical.ErrUnsupportedOperation) {
+		t.Fatalf("renew: got err=%v, want ErrUnsupportedOperation", err)
 	}
 }
 

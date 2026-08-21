@@ -33,6 +33,10 @@ const (
 	// CategoryPerturbation mutates the minter set mid-lease and revokes.
 	// Catches KI-002.
 	CategoryPerturbation Category = "perturbation"
+	// CategoryLease covers the contract between the response envelope and the
+	// lease core creates from the same handler: renewability, TTL, expiry, and
+	// the RPC-survivability of internal_data. Catches KI-008.
+	CategoryLease Category = "lease"
 	// CategoryRevoke covers revoke behaviour under repetition.
 	CategoryRevoke Category = "revoke"
 	// CategoryCapability covers the configuration-time capability probe: a

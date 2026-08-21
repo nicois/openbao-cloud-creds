@@ -87,13 +87,16 @@ The long-lived minter credentials are the highest-value secrets at rest, so the 
 go build github.com/nicois/openbao-cloud-creds/...   # build all (Go workspace)
 go test github.com/nicois/openbao-cloud-creds/...     # unit + fake-backed integration tests
 make test-conformance                                  # every shared test category × every plugin, plus the coverage matrix
+make test-e2e                                          # plugin binaries in a live OpenBao, driven over HTTP through the lease lifecycle
 make smoke-test                                        # register every plugin in a live OpenBao dev server
 make lint                                              # golangci-lint v2 across all modules
 ```
 
-`make smoke-test` and the `cloud_real` build tag (`go test -tags=cloud_real ...`) require, respectively, an OpenBao binary on PATH and real cloud credentials.
+`make test-e2e` and `make smoke-test` need an OpenBao binary on PATH (no cloud credentials — the cloud fakes stand in for the upstreams). The `cloud_real` build tag is documented but currently carried by **no file**; see [`docs/free-account-viability.md`](docs/free-account-viability.md) for the plan and what it would cost per cloud.
 
-**Testing is conformance-first.** With ten near-identical plugins, a missing test looks exactly like a passing one, so every invariant that is about a plugin's own behaviour rather than a cloud's wire format is written once in `pkg/plugintest` and applied to all ten from a single table in the test-only [`conformance/`](conformance/) module: `reload`, `perturbation`, `revoke`, `capability`, `reconciler-safety`. A plugin missing from that table fails the build; a category that genuinely does not apply to a cloud must be *declared* with a reason (`Harness.Skips`) and is printed by `make test-conformance` as one reviewable line, rather than hidden in a `t.Skip`. Per-cloud vocabulary — mint shapes, deny knobs, unexported internals — stays in each plugin's own tests. Rationale in [`docs/decisions.md`](docs/decisions.md); the rules for contributors and agents are in [`AGENTS.md`](AGENTS.md).
+**Testing is conformance-first.** With ten near-identical plugins, a missing test looks exactly like a passing one, so every invariant that is about a plugin's own behaviour rather than a cloud's wire format is written once in `pkg/plugintest` and applied to all ten from a single table in the test-only [`conformance/`](conformance/) module: `reload`, `lease`, `perturbation`, `revoke`, `capability`, `reconciler-safety`. A plugin missing from that table fails the build; a category that genuinely does not apply to a cloud must be *declared* with a reason (`Harness.Skips`) and is printed by `make test-conformance` as one reviewable line, rather than hidden in a `t.Skip`. Per-cloud vocabulary — mint shapes, deny knobs, unexported internals — stays in each plugin's own tests.
+
+Above that sits [`e2e/`](e2e/): each plugin built as a binary, registered in a live `bao server -dev` and driven over HTTP through config → minter set → role → issue → lease lookup → renew → revoke → `plugin reload` → re-issue. It exists for what an in-process test cannot see — the plugin's JSON-serialized RPC boundary and OpenBao core's own expiration manager — and it earned its place immediately, finding two live defects (background workers never starting on a reloaded backend, and six plugins advertising renewable leases whose renewal failure made core *revoke* the credential). Rationale in [`docs/decisions.md`](docs/decisions.md); what each layer does and does not prove in [`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md); the rules for contributors and agents in [`AGENTS.md`](AGENTS.md).
 
 ## Documents
 
@@ -106,6 +109,8 @@ make lint                                              # golangci-lint v2 across
 - [`docs/ttl-semantics.md`](docs/ttl-semantics.md) — what a lease TTL means per cloud; enforced role-TTL bounds
 - [`docs/minter-capability-verification.md`](docs/minter-capability-verification.md) — why health ≠ capability, what each cloud's probe mints and costs, and what it deliberately doesn't cover
 - [`docs/known-issues.md`](docs/known-issues.md) — known issues and operational caveats (KI-001…)
+- [`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md) — what each test layer proves, and what testing the plugins in isolation from OpenBao does not cover
+- [`docs/free-account-viability.md`](docs/free-account-viability.md) — whether each cloud can be exercised for real on a free account, and the CI design for validating the fakes against recordings
 - [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md) — object-storage viability analysis (out of scope)
 
 ## License

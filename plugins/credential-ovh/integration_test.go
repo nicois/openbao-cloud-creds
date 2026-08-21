@@ -2,6 +2,7 @@ package credentialovh_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -58,18 +59,22 @@ func TestFullLifecycle(t *testing.T) {
 	}
 
 	// 2. Renew should be denied (OVH tokens are not renewable)
+	if issueResp.Secret.Renewable {
+		t.Error("lease advertises renewable=true: OpenBao REVOKES a lease whose " +
+			"renewal fails, so a renew attempt would destroy the credential the " +
+			"client was trying to keep (docs/ttl-semantics.md)")
+	}
+
 	renewReq := &logical.Request{
 		Operation: logical.RenewOperation,
 		Path:      "creds/test-role",
 		Storage:   storage,
 		Secret:    issueResp.Secret,
 	}
-	renewResp, err := b.HandleRequest(context.Background(), renewReq)
-	if err != nil {
-		t.Fatalf("renew failed: %v", err)
-	}
-	if renewResp == nil || !renewResp.IsError() {
-		t.Fatal("expected renew to be denied for OVH tokens")
+	// Renewal is refused by the framework itself — the secret declares no Renew
+	// callback — so no plugin code runs and no lease is put at risk.
+	if _, err := b.HandleRequest(context.Background(), renewReq); !errors.Is(err, logical.ErrUnsupportedOperation) {
+		t.Fatalf("renew: got err=%v, want ErrUnsupportedOperation", err)
 	}
 
 	// 3. Revoke lease (no-op, just removes tracking)

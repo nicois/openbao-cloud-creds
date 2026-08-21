@@ -36,7 +36,13 @@ func (b *backend) secretOVH() *framework.Secret {
 	return &framework.Secret{
 		Type:   "ovh_access_token",
 		Revoke: b.pathCredsRevoke,
-		Renew:  b.pathCredsRenew,
+		// No Renew callback, deliberately: framework.Secret.Renewable() is (Renew
+		// != nil) and that is the flag the LEASE carries, so a callback that only
+		// ever returns an error would still advertise renewable=true — and OpenBao
+		// REVOKES a lease whose renewal fails, destroying the credential the
+		// client was trying to keep. An OVH token is a fixed 1h with no extend and
+		// no revoke call, so the lease is non-renewable and core refuses renewal
+		// before the plugin is reached (docs/ttl-semantics.md).
 	}
 }
 
@@ -145,11 +151,6 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, _ *
 	}
 	// OVH access tokens cannot be revoked — they expire at the time OVH set.
 	return nil, nil
-}
-
-// pathCredsRenew returns an error — OVH access tokens cannot be renewed.
-func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
-	return logical.ErrorResponse("ovh access tokens cannot be renewed; issue a new credential instead"), nil
 }
 
 // loadRole fetches and validates a role for issuance. It returns either the

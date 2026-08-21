@@ -13,6 +13,8 @@ OpenBao plugins that issue short-lived, role-scoped cloud credentials with a uni
 - [`docs/do-api-verification-2026-08-21.md`](docs/do-api-verification-2026-08-21.md) — re-verification of the DO assumptions behind the reference plugin: `/v2/tokens` is undocumented, scopes are fine-grained, Spaces keys are now API-issuable.
 - [`docs/minter-capability-verification.md`](docs/minter-capability-verification.md) — authoritative for the capability probe: why health ≠ capability, the three probe points, the per-cloud probe/cost table, why OCI is not probed, and what was deliberately excluded.
 - [`docs/ttl-semantics.md`](docs/ttl-semantics.md) — authoritative per-cloud TTL matrix: what a lease TTL means on each cloud, which bounds are enforced at role write, and where a credential can outlive its lease.
+- [`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md) — authoritative for what each test layer proves: which gaps `e2e/` closes, which remain (G1–G9), and where each is tracked.
+- [`docs/free-account-viability.md`](docs/free-account-viability.md) — per-cloud free/trial account viability for a real-cloud pass (what privilege each minter needs, cost, confidence), plus the CI-secrets + record/replay design for validating the fakes. Akamai is the one cloud that cannot be obtained free.
 
 For the *envelope/error contract*, the techrfc wins. For *what is built and which strategy each cloud uses*, this file and `docs/cloud-credential-research.md` win — the techrfc's implementation-status claims are outdated.
 
@@ -70,14 +72,12 @@ Go workspace (`go.work`) with per-module `go.mod`; use the full module path, not
 go build github.com/nicois/openbao-cloud-creds/...
 go test -race github.com/nicois/openbao-cloud-creds/...
 make test-conformance  # the cloud × category matrix + the shared suites over all ten plugins
-make lint          # golangci-lint v2 (pinned v2.12.2) across every module — config in .golangci.yml
+make test-e2e      # plugin binaries in a live OpenBao, driven over HTTP through the lease lifecycle (needs `bao`)
+make lint          # golangci-lint v2 (pinned v2.12.2) across every module — config in .golangci.yml; plus a --build-tags=e2e pass over TAGGED_LINT_DIRS (a tagged module is invisible to plain lint)
 make smoke-test    # build each plugin + register/enable in a live OpenBao dev server (needs `bao` on PATH)
 ```
 
-For a real-cloud integration test (calls actual cloud APIs, requires a dedicated test account):
-```bash
-go test -tags=cloud_real ./plugins/credential-do/...
-```
+The documented real-cloud test (`go test -tags=cloud_real ./plugins/credential-do/...`) currently runs **zero tests — no file carries that build tag**. Don't cite it as coverage. The plan (per-cloud free-account viability, CI secret/environment layout, and record-replay so real interactions become fixtures the fakes are checked against) is `docs/free-account-viability.md`; nine of ten clouds are exercisable for ~free, Akamai is not.
 
 ## Conventions
 
@@ -89,7 +89,10 @@ go test -tags=cloud_real ./plugins/credential-do/...
 - Owner-tag scheme always uses prefix `cloud-creds-<role>-` or label `owner=cloud-creds`
 - Every error response includes a stable `error_code` (Go constants in `pkg/credenvelope/errors.go`); adding one is a spec change
 - Clients pin to `metadata.api_version` in the response envelope (currently `"2"`)
-- **Testing is conformance-first — read `AGENTS.md` before writing a test.** Every cloud-agnostic invariant lives once in `pkg/plugintest` as a suite over `plugintest.Harness`, and runs against all ten plugins from the `conformance/` module's single `registry` table. Five categories: `reload` (KI-001 class: config set in `pathConfigWrite` but not reloaded in `Factory`), `perturbation` + `revoke` (KI-002 class revoke-wedging), `capability` (probe rejects an incapable minter at write time), `reconciler-safety` (owner-tag invariant, `dry_run` deletes nothing). A new plugin is not complete until it is in that table — `TestEveryPluginIsRegistered` fails otherwise. A category that genuinely does not apply to a cloud is declared in `Harness.Skips` with a reason and printed by `TestConformanceMatrix`; **never** `t.Skip` a category inline. `Harness.Inject` is re-applied on reload, so AWS/GCP/OCI no longer skip the reload category (that residual gap is closed). Per-cloud vocabulary — mint shapes, deny knobs, unexported-symbol tests — stays in the plugin's own `*_test.go` and the fakes. Background: `docs/superpowers/specs/2026-05-30-resilience-test-taxonomy-design.md`.
+- **Testing is conformance-first — read `AGENTS.md` before writing a test.** Every cloud-agnostic invariant lives once in `pkg/plugintest` as a suite over `plugintest.Harness`, and runs against all ten plugins from the `conformance/` module's single `registry` table. Six categories: `reload` (KI-001 class: config set in `pathConfigWrite` but not reloaded in `Factory`; also drives `InitializeFunc` twice — KI-007), `lease` (envelope↔lease agreement on renewability and TTL, `internal_data` JSON survival — KI-008; no cloud may opt out), `perturbation` + `revoke` (KI-002 class revoke-wedging), `capability` (probe rejects an incapable minter at write time), `reconciler-safety` (owner-tag invariant, `dry_run` deletes nothing). A new plugin is not complete until it is in that table — `TestEveryPluginIsRegistered` fails otherwise. A category that genuinely does not apply to a cloud is declared in `Harness.Skips` with a reason and printed by `TestConformanceMatrix`; **never** `t.Skip` a category inline. `Harness.Inject` is re-applied on reload, so AWS/GCP/OCI no longer skip the reload category (that residual gap is closed). Per-cloud vocabulary — mint shapes, deny knobs, unexported-symbol tests — stays in the plugin's own `*_test.go` and the fakes. Background: `docs/superpowers/specs/2026-05-30-resilience-test-taxonomy-design.md`.
+- **Above conformance sits `e2e/`** (build tag `e2e`, own module): each plugin built as a binary, registered in a live `bao server -dev`, driven over HTTP through config → minter set → role → issue → lease lookup → renew → revoke → `plugin reload` → re-issue, with the cloud fake in the test process. It covers what in-process tests structurally cannot — the JSON-serialized plugin RPC boundary and OpenBao core (mount table, expiration manager, core-assigned `req.ID`) — and found KI-007/KI-008 within an hour of existing. 7 of 10 clouds; AWS/GCP/OCI are declared gaps in its registry (client injection, not an HTTP endpoint; OCI signing is a stub). **When e2e finds a bug, the regression guard ships in `pkg/plugintest`, not in `e2e/`** — that's how the `lease` category came to exist. Layer-by-layer coverage and the open gaps: `docs/openbao-integration-gaps.md`.
+- **Workers start in `InitializeFunc`, never in `Factory`** (`b.initialize` loads config + minter sets then calls `startWorkers`). `Factory` also runs for config-less constructions that must not touch the network; `Initialize` is the hook core calls after mount setup, unseal and plugin reload. It must stay idempotent.
+- **A non-renewable secret registers no `Renew` callback at all.** `framework.Secret.Renewable()` is `(Renew != nil)`, and OpenBao **revokes a lease whose renewal fails** — so a callback that only returns an error still advertises `renewable=true` and destroys the client's credential. Never "fix" that by assigning `resp.Secret.Renewable = false` (two sources of truth that can drift); remove the callback. Renewable: DO, Exoscale, Vultr, Akamai only.
 
 ## Minter sets
 

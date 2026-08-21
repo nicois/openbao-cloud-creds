@@ -31,7 +31,13 @@ func (b *backend) secretOCI() *framework.Secret {
 	return &framework.Secret{
 		Type:   "oci_auth_token",
 		Revoke: b.pathCredsRevoke,
-		Renew:  b.pathCredsRenew,
+		// No Renew callback, deliberately: framework.Secret.Renewable() is (Renew
+		// != nil) and that is the flag the LEASE carries, so a callback that only
+		// ever returns an error would still advertise renewable=true — and OpenBao
+		// REVOKES a lease whose renewal fails, destroying the credential the
+		// client was trying to keep. A slot's credential lives until that slot's
+		// next scheduled rotation, so the lease is non-renewable and core refuses
+		// renewal before the plugin is reached (docs/ttl-semantics.md).
 	}
 }
 
@@ -125,9 +131,4 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	// Soft revoke: just forget the lease. The token remains valid until rotation.
 	// This is documented behavior — the auth token lives until its slot's next rotation.
 	return nil, nil
-}
-
-// pathCredsRenew denies renewal — phased rotation credentials are not renewable.
-func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	return logical.ErrorResponse("oci credentials are not renewable; re-read from creds/ endpoint after rotation"), nil
 }

@@ -70,6 +70,15 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		BackendType: logical.TypeLogical,
 		Help:        backendHelp,
 		Clean:       func(_ context.Context) { b.stopWorkers() },
+		// InitializeFunc is the hook core calls on a backend it has just built
+		// (mount setup, unseal, plugin reload) — the only place background workers
+		// can be started for a backend nobody is about to write config to. Factory
+		// must not start them: a config-less construction (a test, a CLI probe)
+		// would begin network work with no minters. The config and minter-set write
+		// paths also start them, but those do not run on failover, so before this
+		// hook existed a rehydrated node had no health checks, no metrics flush and
+		// no reconciler until an operator rewrote config (KI-007).
+		InitializeFunc: b.initialize,
 		Paths: framework.PathAppend(
 			b.configPaths(),
 			b.minterSetPaths(),
@@ -94,8 +103,28 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 	b.accessTracker = metrics.NewAccessTracker(metrics.ResolveNodeID(), store)
 
 	if conf.StorageView != nil {
+		_ = b.loadConfig(ctx, conf.StorageView)
 		_ = b.loadAllMinterSets(ctx, conf.StorageView)
 	}
 
 	return b, nil
+}
+
+// initialize rehydrates persisted state and starts the background workers. It
+// runs on the active node after mount setup and after every unseal or plugin
+// reload; see the InitializeFunc comment in Factory for why Factory cannot do
+// this. Load failures are logged rather than returned: a malformed stored entry
+// must not make the mount unusable, matching Factory's best-effort load.
+func (b *backend) initialize(ctx context.Context, req *logical.InitializationRequest) error {
+	if req == nil || req.Storage == nil {
+		return nil
+	}
+	if err := b.loadConfig(ctx, req.Storage); err != nil {
+		b.Logger().Warn("initialize: failed to load stored config", "error", err)
+	}
+	if err := b.loadAllMinterSets(ctx, req.Storage); err != nil {
+		b.Logger().Warn("initialize: failed to load stored minter sets", "error", err)
+	}
+	go b.startWorkers(b.baseCtx, req.Storage)
+	return nil
 }

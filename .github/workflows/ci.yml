@@ -36,16 +36,11 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.12.2/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
+      # Delegated to the Makefile deliberately: this step used to carry its own
+      # copy of the module list and had already drifted (no conformance module,
+      # and the tag-gated e2e module is invisible without --build-tags).
       - name: Lint
-        run: |
-          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/localexpiry pkg/worker pkg/plugintest pkg/telemetry pkg/metricspath \
-                     plugins/credential-akamai plugins/credential-aws plugins/credential-azure \
-                     plugins/credential-do plugins/credential-exoscale plugins/credential-gcp \
-                     plugins/credential-oci plugins/credential-ovh plugins/credential-upcloud \
-                     plugins/credential-vultr; do
-            echo "=== Linting $dir ==="
-            (cd "$dir" && golangci-lint run ./...)
-          done
+        run: make lint
 
   govulncheck:
     runs-on: ubuntu-latest
@@ -91,3 +86,9 @@ jobs:
 
       - name: Registration smoke test
         run: ./scripts/registration-smoke-test.sh
+
+      # The e2e layer needs the same `bao` binary and no cloud credentials (each
+      # cloud's fake HTTP server stands in for the upstream), so it belongs in
+      # this job rather than a third one.
+      - name: End-to-end (plugins driven through a live OpenBao)
+        run: make test-e2e

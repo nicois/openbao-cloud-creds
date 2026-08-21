@@ -3,9 +3,14 @@
 Issues found during live testing and subsequent audits, each with a precise root
 cause and the fix. KI-001/KI-002 came out of the original multi-cloud spike's
 resilience assessment (against a live raft cluster, UpCloud) and are **RESOLVED**
-(fix + red-baseline regression tests); KI-005 is resolved likewise. KI-003,
-KI-004 and KI-006 are accepted, documented risks. Resolved entries are kept for the rationale
-and history.
+(fix + red-baseline regression tests); KI-005, KI-007 and KI-008 are resolved
+likewise. KI-003, KI-004 and KI-006 are accepted, documented risks. Resolved
+entries are kept for the rationale and history.
+
+KI-007 and KI-008 were both found by the new `e2e/` layer (plugin binaries driven
+through a live OpenBao — see [`openbao-integration-gaps.md`](openbao-integration-gaps.md)),
+which is the point of that layer: neither was visible to any in-process test, and
+KI-008 was visible only because *core* acted on the lease.
 
 ---
 
@@ -22,6 +27,20 @@ ten plugins). Originally the injected-client plugins (AWS/GCP/OCI) could not
 exercise reload through their fakes and skipped it; **that residual gap is closed
 as of 2026-08-21** — `Harness.Inject` re-applies the fake client to every backend
 instance, including the reload, so all ten now run the category.
+
+**Second correction (2026-08-21):** the fix itself was also incomplete. The three
+injected-client plugins (**AWS, GCP, OCI**) had no `loadConfig` at all — `b.config`
+plus `b.region` / `b.project` were assigned only in `pathConfigWrite`, and their
+`Factory` called `loadAllMinterSets` and nothing else. The `reload` category
+passed anyway because the injected fake ignores region/project and a `nil`
+`b.config` is silently defaulted by nil-receiver methods
+(`pkg/cloudconfig/config.go`). All three now have a `loadConfig`, called from both
+`Factory` and the new `InitializeFunc` (KI-007); AWS persists
+`region`/`sts_endpoint` and GCP persists `project` in a side `config_meta` entry
+(the DO pattern), because `cloudconfig.PluginConfig` has no field for them, and
+OCI rehydrates its region so the signing client does not silently fall back to the
+default region after every failover. Found while auditing for the e2e layer and
+recorded as G3 in [`openbao-integration-gaps.md`](openbao-integration-gaps.md).
 
 **Severity:** High — breaks issuance on every plugin reload / raft failover until
 `config` is re-written.
@@ -282,3 +301,100 @@ incapable OCI minter is therefore still discovered at slot-provisioning time
 distinct `minter_insufficient_privilege` code was deliberately not added (it is a
 spec change to the error-code model, and probes front-load the diagnosis) — see
 [`decisions.md`](decisions.md).
+
+---
+
+## KI-007 — background workers never start on a rehydrated backend (all ten plugins) — [RESOLVED 2026-08-21]
+
+**Resolved:** every plugin's `Factory` now sets
+`InitializeFunc: b.initialize`, and `initialize` loads config + minter sets from
+`req.Storage` and then starts the workers. Core calls `InitializeFunc` on a
+backend it has just built — after mount setup, an unseal, or a plugin reload —
+which is exactly the set of moments the workers were being missed. Regression: the
+`reload` conformance category's `InitializeRehydratesAndIssues` subtest, which
+drives `Initialize` twice (an unseal after a reload does that) and then issues.
+
+**Severity:** High — silent. Nothing fails; the plugin serves credentials
+perfectly while every background guarantee is quietly absent.
+
+**Symptom:** after a plugin reload, mount remount or raft leader failover, no
+health checks run (so the minter recovery state machine never re-probes a
+recovered minter, and never withdraws a failing one), no metrics are flushed, the
+owner-tag reconciler never sweeps orphans, minter age/expiry warnings stop, the
+retired-sweep never deletes a rotated-out minter's upstream credential, and on OCI
+the rotation worker stops rotating slots — until an operator happens to re-write
+`config` or a minter set.
+
+**Root cause:** `startWorkers` was called from `pathConfigWrite` and
+`pathMinterSetWrite` only. Every `backend.go` mentioned it in a comment; none
+invoked it. A fresh backend instance therefore had no workers, and there was no
+hook that would ever start them. Invisible to every in-process test because the
+test setup always writes config, which starts the workers as a side effect.
+
+**Why `InitializeFunc` and not `Factory`:** `Factory` also runs for constructions
+that have no business making network calls (a config-less test backend, tooling),
+and CLAUDE.md's rule against a config-less backend reaching the real cloud API
+applies. `Initialize` runs on the active node with storage available, so
+`initialize` can rehydrate first and `startWorkers` still early-returns when
+`b.config == nil`. Rationale in [`decisions.md`](decisions.md).
+
+**Residual gap:** the conformance subtest asserts the hook exists, is idempotent,
+does not error, and leaves the backend able to issue. It does **not** assert worker
+*liveness* (that a health check actually ran), which would need either a
+clock-injection seam or a poll with a timeout in every plugin's harness. Recorded
+as the residual on G2 in [`openbao-integration-gaps.md`](openbao-integration-gaps.md).
+
+---
+
+## KI-008 — lease advertised `renewable: true` while renewal always failed, and OpenBao revokes a lease whose renewal fails (6 plugins) — [RESOLVED 2026-08-21]
+
+**Resolved:** the six plugins whose credential expiry is fixed at mint (**AWS,
+GCP, OVH, Azure, UpCloud, OCI**) no longer register a `Renew` callback at all, so
+the lease correctly advertises `renewable: false` and core refuses renewal before
+any plugin code runs. Regression: the new `lease` conformance category
+(`pkg/plugintest/lease.go`), which asserts the envelope and the lease agree on
+both renewability and TTL, on all ten plugins.
+
+**Severity:** High — a client following the plugin's own advertisement destroys
+the credential it was trying to keep.
+
+**Symptom (observed in the e2e layer, in core's own log):** issuing against
+UpCloud/Azure/OVH returned a lease with `renewable: true`; `bao lease renew`
+against it failed, and the expiration manager then **revoked the lease** — hard-
+revoking the upstream credential on the clouds that hard-revoke. The client had
+done nothing wrong: it read `renewable: true` and renewed.
+
+**Root cause:** two compounding facts.
+
+1. `framework.Secret.Renewable()` is defined as `s.Renew != nil`, and that is the
+   flag copied onto the `logical.Secret`'s lease options. KI-005 had made the
+   renew *callbacks* refuse (return an error) — which correctly stopped a lease
+   outliving its credential — but the callbacks were still registered, so the
+   lease kept saying `renewable: true`. Refusing inside the callback is invisible
+   to the flag.
+2. OpenBao's expiration manager treats a failed renewal as grounds to revoke the
+   lease, not as a no-op. So the "safe" refusal was strictly worse than either
+   honest option.
+
+Invisible in-process: unit tests called the renew handler directly and asserted it
+errored — which it did. Only a real expiration manager turns that error into a
+revocation, which is why this needed the e2e layer to surface.
+
+**Fix detail:** removing the callback (rather than keeping it and setting
+`resp.Secret.Renewable = false`) is deliberate: the callback's absence is the
+single source of truth the framework reads, and it cannot drift from a separately
+assigned field. Each plugin carries a comment at the empty `framework.Secret`
+saying why, naming that cloud's reason (STS `DurationSeconds`, GCP `lifetime`, the
+fixed OVH hour, Azure `endDateTime`, UpCloud `expires_in`, an OCI slot's next
+scheduled rotation). DO, Exoscale, Vultr and Akamai keep their callbacks and stay
+genuinely renewable — renewal there just defers a revoke
+([`ttl-semantics.md`](ttl-semantics.md)).
+
+**Found alongside (same fix batch):** the `lease` category immediately caught a
+second, quieter divergence on **AWS and GCP** — the lease was built from the
+role's TTL while the envelope published the expiry the cloud actually returned, so
+a 900s lease named an 899s credential. Sub-second truncation and the mint round
+trip mean the lease could outlive the credential (OBC-002). Both now derive
+`resp.Secret.TTL` from the upstream expiry, with a one-second floor (a zero TTL
+means "use the mount default" to core, which is never what a near-expiry
+credential wants).

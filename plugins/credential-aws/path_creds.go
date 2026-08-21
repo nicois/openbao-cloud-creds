@@ -38,7 +38,14 @@ func (b *backend) secretAWS() *framework.Secret {
 	return &framework.Secret{
 		Type:   "aws_sts_credentials",
 		Revoke: b.pathCredsRevoke,
-		Renew:  b.pathCredsRenew,
+		// No Renew callback, deliberately: framework.Secret.Renewable() is (Renew
+		// != nil) and that is the flag the LEASE carries, so a callback that only
+		// ever returns an error would still advertise renewable=true — and OpenBao
+		// REVOKES a lease whose renewal fails, destroying the credential the
+		// client was trying to keep. An STS credential expires at the
+		// DurationSeconds fixed at mint and there is no extend call, so the lease
+		// is non-renewable and core refuses renewal before the plugin is reached
+		// (docs/ttl-semantics.md).
 	}
 }
 
@@ -182,10 +189,31 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		fieldMinterSet:  args.sel.setID,
 		"minter_id":     args.sel.minterID,
 	})
-	resp.Secret.TTL = args.role.DefaultTTL
+	// The lease is derived from the expiry AWS actually returned — the same one
+	// the envelope publishes — not from the role's TTL. STS may grant slightly
+	// less than DurationSeconds requested, and the round trip itself consumes
+	// wall-clock, so a lease built from the role TTL can outlive the credential
+	// it names (techrfc OBC-002).
+	resp.Secret.TTL = leaseTTL(ttlSeconds)
 	resp.Secret.MaxTTL = args.role.MaxTTL
 
 	return resp
+}
+
+// minLeaseTTL is the floor for a lease derived from an upstream expiry: a zero
+// TTL means "use the mount default" to core, which is never what a near-expiry
+// credential wants.
+const minLeaseTTL = time.Second
+
+// leaseTTL converts the credential's remaining lifetime in seconds into the
+// lease duration. A non-positive value would make core fall back to the mount's
+// default lease, which could far outlive an already-expiring credential, so it
+// is floored at minLeaseTTL instead.
+func leaseTTL(remainingSeconds int) time.Duration {
+	if remainingSeconds < 1 {
+		return minLeaseTTL
+	}
+	return time.Duration(remainingSeconds) * time.Second
 }
 
 // loadRole fetches and validates a role for issuance. It returns either the
@@ -226,11 +254,6 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, _ *
 	// STS credentials cannot be revoked — they expire at the time AWS set.
 	// This is strictly better from a security perspective (no revocation gap).
 	return nil, nil
-}
-
-// pathCredsRenew returns an error — STS credentials cannot be renewed.
-func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
-	return logical.ErrorResponse("aws STS credentials cannot be renewed; issue a new credential instead"), nil
 }
 
 // selectedMinter bundles the result of selectMinter: the set and minter that

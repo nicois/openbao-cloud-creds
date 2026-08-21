@@ -47,12 +47,12 @@ func (b *backend) configPaths() []*framework.Path {
 		{
 			Pattern: pathConfig,
 			Fields: map[string]*framework.FieldSchema{
-				"region": {
+				fieldRegion: {
 					Type:        framework.TypeString,
 					Default:     defaultRegion,
 					Description: "AWS region for STS calls",
 				},
-				"sts_endpoint": {
+				fieldSTSEndpoint: {
 					Type:        framework.TypeString,
 					Default:     "",
 					Description: "Override STS endpoint (for testing)",
@@ -118,19 +118,72 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return nil, err
 	}
 
+	region := d.Get(fieldRegion).(string)
+	stsEndpoint := d.Get(fieldSTSEndpoint).(string)
+
+	// Persist the cloud-specific settings separately: cloudconfig.PluginConfig
+	// has no field for them, and without this a reloaded backend (failover /
+	// plugin reload) silently reverts to the default region and loses the STS
+	// endpoint override. KI-001.
+	metaEntry, err := logical.StorageEntryJSON(configMetaKey, map[string]string{
+		fieldRegion:      region,
+		fieldSTSEndpoint: stsEndpoint,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := req.Storage.Put(ctx, metaEntry); err != nil {
+		return nil, err
+	}
+
 	b.mu.Lock()
 	b.config = cfg
-	if region, ok := d.GetOk("region"); ok {
-		b.region = region.(string)
+	if region != "" {
+		b.region = region
 	}
-	if endpoint, ok := d.GetOk("sts_endpoint"); ok {
-		b.stsEndpoint = endpoint.(string)
+	if stsEndpoint != "" {
+		b.stsEndpoint = stsEndpoint
 	}
 	b.mu.Unlock()
 
 	go b.startWorkers(b.baseCtx, req.Storage)
 
 	return nil, nil
+}
+
+// loadConfig rehydrates operational and cloud-specific config from storage into
+// the backend, so a reloaded backend (failover/restart) matches one that just had
+// config written. KI-001.
+func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error {
+	entry, err := storage.Get(ctx, pathConfig)
+	if err != nil || entry == nil {
+		return err
+	}
+	var cfg cloudconfig.PluginConfig
+	if err := json.Unmarshal(entry.Value, &cfg); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	b.config = &cfg
+	b.mu.Unlock()
+
+	metaEntry, err := storage.Get(ctx, configMetaKey)
+	if err != nil || metaEntry == nil {
+		return err
+	}
+	var meta map[string]string
+	if err := json.Unmarshal(metaEntry.Value, &meta); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	if meta[fieldRegion] != "" {
+		b.region = meta[fieldRegion]
+	}
+	if meta[fieldSTSEndpoint] != "" {
+		b.stsEndpoint = meta[fieldSTSEndpoint]
+	}
+	b.mu.Unlock()
+	return nil
 }
 
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
@@ -150,7 +203,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 	return &logical.Response{
 		Data: map[string]interface{}{
 			fieldCloud:             cfg.Cloud,
-			"region":               b.getRegion(),
+			fieldRegion:            b.getRegion(),
 			"flush_interval":       int(cfg.FlushInterval.Seconds()),
 			"reconcile_cadence":    int(cfg.ReconcileCadence.Seconds()),
 			"minter_expiry_warn":   int(cfg.MinterExpiryWarn.Seconds()),

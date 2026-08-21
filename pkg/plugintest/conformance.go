@@ -43,6 +43,13 @@ var suites = []suite{
 		},
 	},
 	{
+		name: CategoryLease,
+		run:  RunLeaseContractSuite,
+		// No extra wiring: every assertion is drawn from the issuance response
+		// itself, so no cloud can opt out by lacking a field.
+		requires: func(_ Harness) []string { return nil },
+	},
+	{
 		name:     CategoryRevoke,
 		run:      RunRevokeResilienceSuite,
 		requires: func(_ Harness) []string { return nil },

@@ -35,7 +35,13 @@ func (b *backend) secretAzure() *framework.Secret {
 	return &framework.Secret{
 		Type:   "azure_client_secret",
 		Revoke: b.pathCredsRevoke,
-		Renew:  b.pathCredsRenew,
+		// No Renew callback, deliberately: framework.Secret.Renewable() is (Renew
+		// != nil) and that is the flag the LEASE carries, so a callback that only
+		// ever returns an error would still advertise renewable=true — and OpenBao
+		// REVOKES a lease whose renewal fails, destroying the credential the
+		// client was trying to keep. The client secret's endDateTime is fixed at
+		// mint, so the lease is non-renewable and core refuses renewal before the
+		// plugin is reached (docs/ttl-semantics.md).
 	}
 }
 
@@ -235,15 +241,6 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	}
 
 	return nil, nil
-}
-
-// pathCredsRenew refuses renewal. The client secret's endDateTime is fixed when
-// addPassword mints it (mint time + the role's default TTL) and Graph offers no
-// way to extend it, so a renewed lease would outlive the credential it names —
-// the client would hold a live-looking lease around a dead secret. Issue a new
-// credential instead.
-func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	return logical.ErrorResponse("azure client secrets cannot be renewed (endDateTime is fixed at mint); issue a new credential instead"), nil
 }
 
 // selectedMinter bundles the result of selectMinter: the set and minter that

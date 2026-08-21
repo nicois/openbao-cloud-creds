@@ -41,6 +41,15 @@ const (
 // pathConfig is the bare config endpoint path (operational + cloud settings).
 const pathConfig = "config"
 
+// configMetaKey holds the cloud-specific config settings that do not live in
+// cloudconfig.PluginConfig, persisted so a reloaded backend can rehydrate them
+// before any config write happens (KI-001).
+const configMetaKey = "config_meta"
+
+// fieldProject is the config field naming the GCP project, also its key inside
+// configMetaKey.
+const fieldProject = "project"
+
 // metricNamespace is the leading segment of every metric key this plugin emits.
 const metricNamespace = "cloud_creds"
 

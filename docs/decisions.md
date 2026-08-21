@@ -363,3 +363,109 @@ suspecting the harness over accepting a skip.
 
 The philosophy is written up for future sessions in `AGENTS.md`, which is the file
 to read before adding a test, a category, or a plugin.
+
+## Why a non-renewable secret registers *no* `Renew` callback (rather than refusing inside one)
+
+KI-005 stopped six plugins handing back a fresh TTL for a credential whose expiry
+was fixed at mint, by making their `pathCredsRenew` return an error. That was the
+right intent and the wrong mechanism, and the difference cost the client its
+credential.
+
+`framework.Secret.Renewable()` is defined as `s.Renew != nil`, and that value is
+what `Response()` copies onto the lease. A registered callback that always errors
+therefore still advertises `renewable: true`. Worse, OpenBao's expiration manager
+treats a **failed renewal as grounds to revoke the lease** — so a client that read
+the plugin's own advertisement and renewed had its credential hard-revoked on the
+clouds that hard-revoke. Refusing politely inside the callback was strictly worse
+than either honest alternative (KI-008).
+
+Two fixes were available: drop the callback, or keep it and assign
+`resp.Secret.Renewable = false`. Dropping it wins because the callback's absence is
+the *single* source of truth the framework reads — there is no second field to
+drift out of sync, and core refuses the renewal before any plugin code runs, so the
+plugin cannot get it wrong at a later date. Each affected plugin keeps a comment at
+its now-empty `framework.Secret` naming that cloud's reason (STS `DurationSeconds`,
+GCP `lifetime`, OVH's fixed hour, Azure `endDateTime`, UpCloud `expires_in`, an OCI
+slot's next scheduled rotation), because an empty struct literal invites someone to
+"helpfully" add the callback back.
+
+DO, Exoscale, Vultr and Akamai keep their callbacks: their credentials have no
+upstream expiry, so renewal genuinely means "defer the revoke", which works.
+
+The invariant is now fenced for all ten plugins by the `lease` conformance
+category, which asserts the envelope and the lease agree — the two structures are
+built in the same handler from the same inputs and nothing but a test keeps them
+honest.
+
+## Why AWS and GCP derive the lease TTL from the upstream expiry, not the role TTL
+
+Both clouds return the expiry they actually granted (STS may grant less than the
+requested `DurationSeconds`; the mint round trip itself consumes wall-clock). The
+envelope published that real expiry while the lease was built from the role's TTL,
+so a 900s lease could name an 899s credential — a lease outliving its credential,
+which is exactly what techrfc OBC-002 forbids, and a client watching the lease
+would keep using a dead credential for the difference.
+
+The lease is now built from the same number the envelope publishes. A one-second
+floor (`minLeaseTTL`) is applied deliberately: a zero `TTL` means "use the mount
+default" to core, which for a near-expiry credential is the worst possible reading
+of "expired".
+
+This was found by the `lease` category within minutes of it existing, on the two
+clouds whose expiry is echoed back by the API rather than chosen by the plugin —
+which is a good argument for asserting agreement between structures rather than
+asserting each structure separately.
+
+## Why background workers start in `InitializeFunc`, not in `Factory`
+
+`startWorkers` was reachable only from `pathConfigWrite` and `pathMinterSetWrite`,
+so a backend that OpenBao built any other way — a plugin reload, a mount remount,
+an unseal, a raft leader failover — served credentials perfectly while running no
+health checks, flushing no metrics, sweeping no orphans, warning about no expiring
+minters, and (on OCI) rotating no slots. Silent, and indefinite: nothing recovered
+until an operator happened to re-write config (KI-007).
+
+`Factory` looks like the obvious place and is not. It also runs for constructions
+that must not touch the network — a config-less test backend, tooling — and this
+repo has an explicit rule against a config-less backend reaching the real cloud
+API (now that capability probes exist, that rule has teeth). `InitializeFunc` is
+the hook core calls precisely once per backend instance, on the active node, after
+mount setup / unseal / reload, with storage available. So `initialize` rehydrates
+config and minter sets first and then starts the workers, and `startWorkers` still
+early-returns on `b.config == nil` for the case where nothing has been configured
+yet.
+
+It must be idempotent, because an unseal after a reload calls it again; the
+`reload` conformance category drives it twice and then issues, for that reason.
+What is *not* asserted is worker liveness — that a health check actually ran —
+which needs a clock seam or a bounded poll per harness. Recorded as the residual on
+G2 in `docs/openbao-integration-gaps.md` rather than left as an implied guarantee.
+
+## Why there is an `e2e/` layer at all, given a ten-plugin conformance table
+
+The conformance table drives `logical.Backend` in-process. That is the right place
+for almost everything, and `AGENTS.md` says so. But two production facts are
+structurally outside it: the plugin runs as a **separate process** (so `resp.Data`
+and the lease's `internal_data` are JSON on the wire, not the Go values the test
+handed back), and **core** owns the mount table, the expiration manager, plugin
+reload and `req.ID`. An in-process test cannot be wrong about those; it simply
+cannot see them.
+
+The evidence settled it: within an hour of `e2e/` existing it found two live
+defects (KI-007, KI-008), neither of which any in-process test could have caught,
+and KI-008 only because a real expiration manager acted on the lease. Auditing what
+the new layer *could not* reach then found a third (KI-001 still open on
+AWS/GCP/OCI).
+
+The layer is deliberately kept thin and its findings are pushed *down*: when e2e
+finds something, the regression guard ships in `pkg/plugintest` where it runs on
+all ten plugins in milliseconds. e2e is for discovery and for the boundary itself,
+not for fencing. Clouds it cannot reach (AWS/GCP/OCI, which inject clients instead
+of talking to an HTTP endpoint) are declared in its registry the same way
+`Harness.Skips` declares conformance gaps — a gap that prints is a gap someone can
+act on.
+
+Above it sits one more layer, planned but unbuilt: real clouds via CI secrets,
+whose purpose is proving the fakes resemble what they stand in for
+(`docs/free-account-viability.md`). The `cloud_real` build tag is currently carried
+by no file, and that is recorded as a gap rather than described as coverage.

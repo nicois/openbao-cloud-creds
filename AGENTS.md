@@ -20,19 +20,58 @@ plugins/<x>/*_test  only what is true of <x> alone.
 
 `pkg/plugintest` must never import a plugin (that would be an import cycle, since every plugin imports `pkg/plugintest`). The `conformance/` module is where the two meet; it is test-only, so plugin-module isolation still holds.
 
-## The five categories
+## The six categories
 
 `plugintest.AllCategories()` is the list. Each is one shared suite over one `Harness`:
 
 | Category | What it protects |
 |---|---|
-| `reload` | config written by `pathConfigWrite` is re-read by `Factory` (KI-001 class) |
+| `reload` | config written by `pathConfigWrite` is re-read by `Factory`, and `InitializeFunc` rehydrates + starts workers idempotently (KI-001, KI-007) |
+| `lease` | the response envelope and the lease core acts on agree — renewability and TTL — and `internal_data` survives JSON (KI-008) |
 | `perturbation` | a lease survives its minter disappearing mid-life (KI-002 class) |
 | `revoke` | revoke is idempotent; a second revoke is a clean no-op |
 | `capability` | the mint-then-delete probe rejects an incapable minter at *write* time, leaves no residue, respects `verify_minter_capability=false`, and skips disabled roles |
 | `reconciler-safety` | the reconciler never touches an entity outside the owner-tag scheme, and `dry_run` deletes nothing |
 
+`lease` is the one category **no cloud may opt out of**: it needs no cloud-specific
+`Harness` field, so a skip could only ever mean "this plugin lies to its clients".
+Its load-bearing assertion is renewability, because `framework.Secret.Renewable()`
+is `(Renew != nil)` and OpenBao **revokes a lease whose renewal fails** — so a
+`Renew` callback that only ever returns an error still advertises `renewable=true`
+and destroys the credential a client tried to keep. The only way to say "not
+renewable" is to register no callback. Never "fix" a renewability failure by
+assigning `resp.Secret.Renewable = false`; remove the callback.
+
 Adding a category means: a `Run<X>Suite` in `pkg/plugintest`, an entry in the `suites` registry in `conformance.go` naming the `Harness` fields it needs, and then ten harnesses that either wire those fields or declare the gap. That last step is the point — a new category cannot land half-applied.
+
+## The layer above: `e2e/`
+
+`e2e/` (build tag `e2e`, `make test-e2e`) builds each plugin binary, registers it
+in a live `bao server -dev`, and drives it over HTTP: config → minter set → role →
+issue → lease lookup → renew → revoke → `bao plugin reload` → re-issue. The cloud
+fake runs in the *test* process, so upstream state is still directly assertable.
+
+It exists for the things the in-process table structurally cannot see: the plugin
+**process** boundary (everything JSON-round-trips), and OpenBao **core** (mount
+table, expiration manager, plugin lifecycle, core-assigned `req.ID`). Both live
+defects it found — workers never starting on a rehydrated backend, and the
+renewability lie above — were invisible to every in-process test.
+
+Rules of thumb:
+
+- **An invariant that can be expressed in-process belongs in `pkg/plugintest`,
+  not here.** e2e is slow (a server per cloud), needs `bao` on `PATH`, and is the
+  wrong place to fence a regression. When e2e finds something, the fix ships with a
+  conformance assertion — that is how the `lease` category came to exist.
+- Clouds that cannot be reached are **declared in the e2e registry**, same
+  discipline as `Harness.Skips`: AWS/GCP/OCI inject clients rather than talking to
+  an HTTP endpoint, so they have nothing to point at a fake (G8 in
+  [`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md)). The
+  matrix prints the gap rather than covering seven clouds and implying ten.
+- Above e2e sits an unbuilt layer: real clouds via CI secrets, whose purpose is
+  proving the fakes are realistic, planned in
+  [`docs/free-account-viability.md`](docs/free-account-viability.md). The `cloud_real`
+  build tag is currently carried by **no file** — do not cite it as coverage.
 
 ## Non-negotiables
 
@@ -56,9 +95,12 @@ Keep the cloud's own words in the cloud's own files. A harness adapter should re
 ```bash
 go test -race github.com/nicois/openbao-cloud-creds/...   # everything (use full paths; ./... does not cross the workspace)
 make test-conformance                                     # the matrix, then the table under -race
-make lint                                                 # golangci-lint v2 over every module incl. conformance
+make test-e2e                                             # plugin binaries in a live `bao server -dev` (needs `bao` on PATH)
+make lint                                                 # golangci-lint v2 over every module incl. conformance and (tagged) e2e
 ```
 
 Lint applies to `pkg/plugintest` as **non-test** code: `revive function-length [60,0]`, `funlen 80/50`, `revive max-public-structs [5]`, `gocyclo 15`. Long suites get split into named helpers, one per assertion — which reads better anyway. Zero `//nolint` in this repo; keep it that way.
+
+A **build-tagged module is invisible to plain `golangci-lint`**, which is why `make lint` runs a second pass with `--build-tags=e2e` over `TAGGED_LINT_DIRS`. Add any future tagged module to that variable, or its code is unlinted while looking covered. CI calls `make lint` rather than keeping its own module list, because that copy had already drifted.
 
 Do not add dependencies to `conformance/go.mod` to reach a cloud SDK type. Export a test seam from the plugin instead (see `credentialaws.NewSwitchableSTSClient`), so the SDK stays inside the module that already depends on it.

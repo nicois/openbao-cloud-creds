@@ -32,6 +32,10 @@ const (
 // descRoleName is the shared field description for the role-name parameter.
 const descRoleName = "Name of the role"
 
+// pathConfig is the bare config endpoint path, and the storage key the
+// operational config is written under.
+const pathConfig = "config"
+
 // metricNamespace is the leading segment of every metric key this plugin emits.
 const metricNamespace = "cloud_creds"
 

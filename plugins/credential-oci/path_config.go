@@ -10,6 +10,16 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
+// Storage keys for the cloud-specific settings kept outside
+// cloudconfig.PluginConfig, and the default region used when none is stored.
+// loadConfig rehydrates both, so a reloaded backend matches one that just had
+// config written (KI-001).
+const (
+	configRegionKey        = "config/region"
+	configRotationCheckKey = "config/rotation_check_interval"
+	defaultRegion          = "us-ashburn-1"
+)
+
 const (
 	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
 	defaultFlushIntervalSeconds         = 900   // 15m
@@ -37,11 +47,11 @@ const (
 func (b *backend) configPaths() []*framework.Path {
 	return []*framework.Path{
 		{
-			Pattern: "config",
+			Pattern: pathConfig,
 			Fields: map[string]*framework.FieldSchema{
 				"region": {
 					Type:        framework.TypeString,
-					Default:     "us-ashburn-1",
+					Default:     defaultRegion,
 					Description: "OCI region (e.g., us-ashburn-1)",
 				},
 				"flush_interval": {
@@ -102,7 +112,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		VerifyMinterCapability: &verifyCapability,
 	}
 
-	entry, err := logical.StorageEntryJSON("config", cfg)
+	entry, err := logical.StorageEntryJSON(pathConfig, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +122,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	// Store rotation_check_interval separately
 	rotationCheckInterval := time.Duration(d.Get("rotation_check_interval").(int)) * time.Second
-	rEntry, err := logical.StorageEntryJSON("config/rotation_check_interval", rotationCheckInterval)
+	rEntry, err := logical.StorageEntryJSON(configRotationCheckKey, rotationCheckInterval)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +132,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	// Store region
 	region := d.Get("region").(string)
-	regionEntry, err := logical.StorageEntryJSON("config/region", region)
+	regionEntry, err := logical.StorageEntryJSON(configRegionKey, region)
 	if err != nil {
 		return nil, err
 	}
@@ -140,8 +150,41 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	return nil, nil
 }
 
+// loadConfig rehydrates operational config and the region from storage into the
+// backend, so a reloaded backend (failover/restart) matches one that just had
+// config written. Without it the signing client falls back to the default region
+// after every failover, whatever the operator configured. KI-001.
+func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error {
+	entry, err := storage.Get(ctx, pathConfig)
+	if err != nil || entry == nil {
+		return err
+	}
+	var cfg cloudconfig.PluginConfig
+	if err := json.Unmarshal(entry.Value, &cfg); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	b.config = &cfg
+	b.mu.Unlock()
+
+	regionEntry, err := storage.Get(ctx, configRegionKey)
+	if err != nil || regionEntry == nil {
+		return err
+	}
+	var region string
+	if err := json.Unmarshal(regionEntry.Value, &region); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	if region != "" {
+		b.region = region
+	}
+	b.mu.Unlock()
+	return nil
+}
+
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	entry, err := req.Storage.Get(ctx, "config")
+	entry, err := req.Storage.Get(ctx, pathConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -155,17 +198,17 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 	}
 
 	// Load region
-	regionEntry, err := req.Storage.Get(ctx, "config/region")
+	regionEntry, err := req.Storage.Get(ctx, configRegionKey)
 	if err != nil {
 		return nil, err
 	}
-	region := "us-ashburn-1"
+	region := defaultRegion
 	if regionEntry != nil {
 		_ = json.Unmarshal(regionEntry.Value, &region)
 	}
 
 	// Load rotation check interval
-	rEntry, err := req.Storage.Get(ctx, "config/rotation_check_interval")
+	rEntry, err := req.Storage.Get(ctx, configRotationCheckKey)
 	if err != nil {
 		return nil, err
 	}

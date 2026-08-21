@@ -33,7 +33,13 @@ func (b *backend) secretUpCloud() *framework.Secret {
 	return &framework.Secret{
 		Type:   "upcloud_token",
 		Revoke: b.pathCredsRevoke,
-		Renew:  b.pathCredsRenew,
+		// No Renew callback, deliberately: framework.Secret.Renewable() is (Renew
+		// != nil) and that is the flag the LEASE carries, so a callback that only
+		// ever returns an error would still advertise renewable=true — and OpenBao
+		// REVOKES a lease whose renewal fails, destroying the credential the
+		// client was trying to keep. The token's expires_in is fixed at mint, so
+		// the lease is non-renewable and core refuses renewal before the plugin is
+		// reached (docs/ttl-semantics.md).
 	}
 }
 
@@ -168,13 +174,6 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	}
 
 	return nil, nil
-}
-
-// pathCredsRenew refuses renewal. The token's expires_in is fixed when UpCloud
-// mints it (the role's default TTL) and there is no extend API, so a renewed
-// lease would outlive the token it names. Issue a new credential instead.
-func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	return logical.ErrorResponse("upcloud api tokens cannot be renewed (expires_in is fixed at mint); issue a new credential instead"), nil
 }
 
 // loadRole fetches and validates a role for issuance. It returns either the
