@@ -49,9 +49,10 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 				minterSet(exoscaleMinter(liveMinterID, exoscaleLiveKey)))
 			plugintest.Write(t, b, storage, rolePath, exoscaleRoleFields())
 		},
-		IssuePath: issuePath,
-		RolePath:  rolePath,
-		SetPath:   setPath,
+		IssuePath:      issuePath,
+		RolePath:       rolePath,
+		WorkersRunning: credentialexoscale.WorkersRunning,
+		SetPath:        setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(exoscaleMinter(replacementMinterID, exoscaleOtherKey)))

@@ -123,6 +123,27 @@ type Harness struct {
 	LiveMinterID        string
 	ReplacementMinterID string
 
+	// WorkersRunning reports whether a backend's background workers are running,
+	// via the plugin's exported test seam. Required: KI-007's guard asserted only
+	// that Initialize returned nil, which it does when InitializeFunc is unset, so
+	// the category passed with the defect reintroduced (A11).
+	WorkersRunning func(b logical.Backend) bool
+
+	// SeedAgedOrphans plants TWO upstream entities whose creation timestamp is old
+	// enough to clear the reconciler's confirmation hold: one foreign (outside the
+	// owner-tag scheme) and one owner-prefixed orphan that no lease references. It
+	// returns their ids in that order.
+	//
+	// Required, because the existing SeedForeignEntity plants an entity with NO
+	// timestamp — which the fail-closed age guard skips before the prefix filter is
+	// ever consulted. The consequence was that the test protecting the invariant
+	// CLAUDE.md calls load-bearing passed with the prefix filter deleted outright,
+	// and DeleteEntity was never called once across 10 clouds x 7 categories (A9).
+	//
+	// A cloud whose list API returns no creation timestamp cannot supply this; it
+	// leaves the field nil and the suite prints why, which is the same fact as A5.
+	SeedAgedOrphans func() (foreignID, ownedOrphanID string)
+
 	// --- Error taxonomy ---
 
 	// FailNextMintWithStatus makes the upstream answer the NEXT mint with the

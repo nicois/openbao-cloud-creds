@@ -53,9 +53,10 @@ func azureHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, azureMinterToken)))
 			plugintest.Write(t, b, storage, rolePath, azureRoleFields())
 		},
-		IssuePath: issuePath,
-		RolePath:  rolePath,
-		SetPath:   setPath,
+		IssuePath:      issuePath,
+		RolePath:       rolePath,
+		WorkersRunning: credentialazure.WorkersRunning,
+		SetPath:        setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, azureMinterToken)))
@@ -88,6 +89,11 @@ func azureHarness(t *testing.T) plugintest.Harness {
 		SeedForeignEntity: func() string {
 			srv.AddRawPassword(foreignEntityID, foreignEntityName)
 			return foreignEntityID
+		},
+		SeedAgedOrphans: func() (string, string) {
+			srv.AddRawPasswordWithStartDateTime(agedForeignID, agedForeignName, agedTimestamp)
+			srv.AddRawPasswordWithStartDateTime(agedOwnedID, agedOwnedName, agedTimestamp)
+			return agedForeignID, agedOwnedID
 		},
 		HasEntity: srv.HasPassword,
 	}

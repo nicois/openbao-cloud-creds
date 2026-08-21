@@ -52,9 +52,10 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, akamaiMinterToken)))
 			plugintest.Write(t, b, storage, rolePath, akamaiRoleFields())
 		},
-		IssuePath: issuePath,
-		RolePath:  rolePath,
-		SetPath:   setPath,
+		IssuePath:      issuePath,
+		RolePath:       rolePath,
+		WorkersRunning: credentialakamai.WorkersRunning,
+		SetPath:        setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, akamaiOtherToken)))
@@ -90,6 +91,11 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 		SeedForeignEntity: func() string {
 			srv.AddRawClient(foreignEntityID, foreignEntityName)
 			return foreignEntityID
+		},
+		SeedAgedOrphans: func() (string, string) {
+			srv.AddRawClientWithCreatedDate(agedForeignID, agedForeignName, agedTimestamp)
+			srv.AddRawClientWithCreatedDate(agedOwnedID, agedOwnedName, agedTimestamp)
+			return agedForeignID, agedOwnedID
 		},
 		HasEntity: srv.HasClient,
 	}

@@ -71,9 +71,10 @@ func gcpHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath, minterSet(gcpMinter(liveMinterID)))
 			plugintest.Write(t, b, storage, rolePath, gcpRoleFields())
 		},
-		IssuePath: issuePath,
-		RolePath:  rolePath,
-		SetPath:   setPath,
+		IssuePath:      issuePath,
+		RolePath:       rolePath,
+		WorkersRunning: credentialgcp.WorkersRunning,
+		SetPath:        setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath, minterSet(gcpMinter(replacementMinterID)))
 		},

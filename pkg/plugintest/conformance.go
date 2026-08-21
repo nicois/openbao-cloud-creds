@@ -32,7 +32,10 @@ var suites = []suite{
 		name: CategoryReload,
 		run:  RunReloadSuite,
 		requires: func(h Harness) []string {
-			return missing(field{"RolePath", h.RolePath != ""})
+			return missing(
+				field{"RolePath", h.RolePath != ""},
+				field{"WorkersRunning", h.WorkersRunning != nil},
+			)
 		},
 	},
 	{

@@ -45,9 +45,10 @@ func upcloudHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, upcloudLiveToken)))
 			plugintest.Write(t, b, storage, rolePath, upcloudRoleFields())
 		},
-		IssuePath: issuePath,
-		RolePath:  rolePath,
-		SetPath:   setPath,
+		IssuePath:      issuePath,
+		RolePath:       rolePath,
+		WorkersRunning: credentialupcloud.WorkersRunning,
+		SetPath:        setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, upcloudOtherToken)))
@@ -83,6 +84,11 @@ func upcloudHarness(t *testing.T) plugintest.Harness {
 		SeedForeignEntity: func() string {
 			srv.AddRawToken(foreignEntityID, foreignEntityName)
 			return foreignEntityID
+		},
+		SeedAgedOrphans: func() (string, string) {
+			srv.AddRawTokenWithCreatedAt(agedForeignID, agedForeignName, agedTimestamp)
+			srv.AddRawTokenWithCreatedAt(agedOwnedID, agedOwnedName, agedTimestamp)
+			return agedForeignID, agedOwnedID
 		},
 		HasEntity: srv.HasToken,
 	}

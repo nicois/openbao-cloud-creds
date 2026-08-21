@@ -90,3 +90,22 @@ func plantDisabledRole(t *testing.T, storage logical.Storage) {
 		t.Fatalf("planting the disabled role failed: %v", err)
 	}
 }
+
+// Aged seeding constants for the reconciler-safety suite's reclamation case.
+//
+// The timestamp is far enough in the past to clear any confirmation hold the
+// plugins configure (1h worker, 5m manual floor). It is a fixed date rather than
+// a relative one so a failure is reproducible and the fixture is not
+// time-dependent.
+const (
+	agedTimestamp = "2020-01-01T00:00:00Z"
+
+	// Outside the owner-tag scheme: must survive every pass.
+	agedForeignID   = "aged-foreign-1"
+	agedForeignName = "operator-created-do-not-touch"
+
+	// Inside the owner-tag scheme and referenced by no lease: must be reclaimed,
+	// which is what stops the invariant assertion above being vacuous.
+	agedOwnedID   = "aged-owned-orphan-1"
+	agedOwnedName = "cloud-creds-test-role-stale-req"
+)
