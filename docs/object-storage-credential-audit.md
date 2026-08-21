@@ -1,6 +1,6 @@
 # Object Storage Credential Audit
 
-**Date:** 2026-05-30
+**Date:** 2026-05-30 (DigitalOcean rows re-verified and corrected 2026-08-21 — see [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md))
 **Question:** Can OpenBao serve as the source of long-lived object-storage credentials for droplet backups? Ideal target: 30-day validity, rotated every 7 days. Fallback: indefinite long-lived. Must be compatible with what Aiven services currently consume.
 
 ## TL;DR
@@ -15,7 +15,7 @@
 | OVH | Object Storage (S3) | Yes | Yes (`s3Credentials`) | No | **Viable** — ~2/user cap |
 | Vultr | Object Storage | Yes | Yes (`/v2/object-storage`) | No | **Viable but awkward** — 1 key/store, destructive rotation |
 | Linode (Akamai) | Object Storage | Yes | Yes (`/object-storage/keys`) | No | **Strong fit** — bucket-scopable, NEW plugin needed |
-| DigitalOcean | Spaces | Yes | **No public API** | No | **Blocked** — control-panel only |
+| DigitalOcean | Spaces | Yes | **Yes** (`POST /v2/spaces/keys`) | No | **Viable, quota-bounded** — was "Blocked"; see 2026-08-21 update |
 
 ## The Aiven Compatibility Contract (the linchpin)
 
@@ -98,11 +98,17 @@ Aiven services consume object-storage credentials as a **rohmu/pghoard config di
 - **Rotation:** No native expiry; clean multi-key issuance enables true JIT and 30d/7d phased rotation.
 - **S3:** `<region>.linodeobjects.com`.
 
-### DigitalOcean Spaces — Blocked
-- **Confirmed (April 2026 changelog):** Spaces access keys cannot be created via public API — control panel only. No `POST /v2/spaces/keys` public endpoint.
-- **Aiven's existing use** of `POST /v2/spaces/keys` implies an undocumented/partner endpoint — no stability guarantee, unsuitable for an open-source plugin.
-- **Quota:** 200 keys/account (control panel).
-- **Verdict:** Deferred. Only viable via the undocumented endpoint (high risk) — would need explicit verification and ToS review.
+### DigitalOcean Spaces — Viable (quota-bounded) — **revised 2026-08-21**
+
+> **This section originally read "Blocked."** It asserted (from the April 2026 changelog) that Spaces access keys could not be created via public API, and treated the `POST /v2/spaces/keys` call the upstream private project was already making as an undocumented/partner endpoint unsuitable for an open-source plugin. **That is no longer true.** Re-verified against DigitalOcean's current public OpenAPI spec on 2026-08-21: the endpoint is public, fully specified, and scope-gated. The ToS/stability objection is void; the quota objection stands.
+
+- **Credential:** `POST /v2/spaces/keys` (secret returned once, in `key_create_response.secret_key`); list `GET /v2/spaces/keys`; get `GET /v2/spaces/keys/{access_key}`; modify `PUT`/`PATCH /v2/spaces/keys/{access_key}`; revoke `DELETE /v2/spaces/keys/{access_key}`. Tagged **Spaces Keys** in the public spec.
+- **Scoping:** Per-bucket `grants: [{bucket, permission}]` with `read` / `readwrite` / `fullaccess`. `fullaccess` cannot be mixed with scoped grants and takes precedence if both are sent. Comparable granularity to Exoscale/Linode, better than OVH's per-user coarseness.
+- **Minter privilege:** dedicated `spaces_key:{read,create_credentials,update,delete}` PAT scopes — so a Spaces minter can be genuinely least-privilege (unlike the `credential-do` PAT minter, whose token-creation capability is unscopable).
+- **Native expiry:** None — consistent with cross-cutting finding #1; the plugin would own the TTL via JIT revoke or phased rotation.
+- **Safety boundary:** settable `name` (so the `cloud-creds-<role>-` owner-prefix scheme works) and a returned `created_at` (so the reconciler's `ConfirmationHold` age check is satisfiable — cf. F1 in `docs/state-assumption-verification-2026-05-31.md`, where missing create timestamps forced Exoscale/Vultr fail-closed).
+- **Quota:** 200 keys/account — **the remaining blocker.** Fine for short-lived JIT issuance (keys live minutes); still fatal for per-customer long-lived isolation at ~100k services, which was the original driver.
+- **Verdict:** No longer blocked on the API. Object storage as a whole remains out of scope for this repo (see below), and Path A (long-lived per-customer keys) remains infeasible on DO for quota reasons. If object-storage roles are ever built, DO Spaces is now a *normal* candidate rather than an excluded one.
 
 ## Cross-Cutting Findings
 
@@ -131,7 +137,7 @@ A new credential type — **`object-storage` roles** — within the existing plu
 3. **OVH** — viable, coarser scoping, verify per-user cap
 4. **Vultr** — indefinite-only realistically (no clean rotation)
 5. **Azure** — only if Azure-native backup tooling is acceptable (not S3)
-6. **DigitalOcean Spaces** — blocked; revisit only if the undocumented API is sanctioned
+6. **DigitalOcean Spaces** — ~~blocked; revisit only if the undocumented API is sanctioned~~ **(2026-08-21: the API is now public and per-bucket-scopable — ranks alongside Exoscale/Linode on fit for JIT/short-lived, but the 200-keys/account cap keeps it out for long-lived per-customer isolation)**
 
 **Open items to verify on the live dev cluster:**
 - Whether Aiven's GCS path can consume HMAC keys via the S3 config (vs. SA JSON)

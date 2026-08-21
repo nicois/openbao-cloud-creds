@@ -108,6 +108,13 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 		return logical.ErrorResponse("invalid minter set: %v", err), nil
 	}
 	set := &cloudconfig.MinterSet{Name: name, Minters: minters}
+	// Prove the candidate minters can mint for the roles already bound to this
+	// set before persisting them (see capability.go). The validation above only
+	// inspects expiry metadata; without this a replacement minter that
+	// authenticates but cannot mint would be accepted silently.
+	if errResp := b.verifySetCapability(ctx, req.Storage, set); errResp != nil {
+		return errResp, nil
+	}
 	entry, err := logical.StorageEntryJSON("minter-sets/"+name, set)
 	if err != nil {
 		return nil, err

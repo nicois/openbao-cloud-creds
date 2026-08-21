@@ -1,6 +1,6 @@
 # OpenBao Short-Lived Cloud Credentials — Design
 
-> **⚠️ STATUS (2026-05-30):** This is the original design doc, written for the DO reference round. It is retained for its envelope / lease-lifecycle / metrics / reconciler rationale, which remain accurate. Three things are STALE: (1) it lists only six clouds — ten are now implemented (adds Exoscale, Vultr, Akamai, Oracle/OCI); (2) the "Native (STS/GCP/Azure engine wrapper)" strategy was abandoned — OpenBao has no GCP/Azure engine, so those are full JIT plugins; (3) minters no longer live in `config` and roles no longer draw from a shared minter list — minters are now in named **minter sets** (`minter-sets/<name>`) and every role binds to a required `minter_set` (envelope api_version is now 2 with `minter_set`/`minter_id` provenance); (4) minters now have a lifecycle beyond this doc — an age gauge + configurable near-expiry warning, and operator-initiated **self-rotation** (`minter-sets/<name>/rotate`, grace-based and cross-node-safe) on the six clouds whose API can mint a mint-capable successor. See `docs/cloud-credential-research.md`, `CLAUDE.md` (Minter sets section), and `docs/decisions.md` for the current cloud list, per-cloud strategy, minter-set rationale, and minter-lifecycle design.
+> **⚠️ STATUS (2026-05-30):** This is the original design doc, written for the DO reference round. It is retained for its envelope / lease-lifecycle / metrics / reconciler rationale, which remain accurate. Three things are STALE: (1) it lists only six clouds — ten are now implemented (adds Exoscale, Vultr, Akamai, Oracle/OCI); (2) the "Native (STS/GCP/Azure engine wrapper)" strategy was abandoned — OpenBao has no GCP/Azure engine, so those are full JIT plugins; (3) minters no longer live in `config` and roles no longer draw from a shared minter list — minters are now in named **minter sets** (`minter-sets/<name>`) and every role binds to a required `minter_set` (envelope api_version is now 2 with `minter_set`/`minter_id` provenance); (4) minters now have a lifecycle beyond this doc — an age gauge + configurable near-expiry warning, and operator-initiated **self-rotation** (`minter-sets/<name>/rotate`, grace-based and cross-node-safe) on the six clouds whose API can mint a mint-capable successor. See `docs/cloud-credential-research.md`, `CLAUDE.md` (Minter sets section), and `docs/decisions.md` for the current cloud list, per-cloud strategy, minter-set rationale, and minter-lifecycle design. **Further correction (2026-08-21):** (5) the DO strategy row below presents `POST /v2/tokens` / `DELETE /v2/tokens/{id}` as public API — they are **not** in DigitalOcean's public OpenAPI spec (PAT creation is documented as control-panel-only), so the reference plugin depends on a control-panel-internal endpoint; and DO scopes are fine-grained `<resource>:<verb>` (e.g. `droplet:create`), not `read`/`write`. See [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md). (6) goal 2 below ("honest TTL semantics") is now backed by validation as well as by strategy: role TTLs a cloud cannot honour are rejected at write time and leases are non-renewable wherever the credential's expiry is fixed at mint — per-cloud matrix in [`docs/ttl-semantics.md`](ttl-semantics.md).
 
 **Status:** Draft (2026-05-29) — partly superseded, see banner
 **Scope of this round:** API contract + DO reference implementation
@@ -12,7 +12,7 @@ Control-plane services and CI jobs need short-lived, role-based credentials for 
 ## Goals
 
 1. Uniform OpenBao API: `bao read cloud-creds/<cloud>/creds/<role>` returns a credential plus a normalized envelope, regardless of cloud.
-2. Honest TTL semantics: every issued lease's `expires_at` reflects the actual time the credential is valid for the caller. No lying about lifetime.
+2. Honest TTL semantics: every issued lease's `expires_at` reflects the actual time the credential is valid for the caller. No lying about lifetime. (Enforcement, added 2026-08-21: TTLs the cloud cannot honour are rejected at role write — OVH exactly 3600s, AWS 900–43200s, GCP ≤43200s, UpCloud ≤8760h — and renewal is refused where the credential's expiry is fixed at mint. See [`ttl-semantics.md`](ttl-semantics.md).)
 3. No human in the rotation loop: bootstrap MAY require a one-time human action; steady-state rotation MUST be fully headless.
 4. Resilience to upstream flakiness: transient cloud failures are absorbed; auth failures self-heal once upstream recovers.
 5. Auto-deletion of expired credentials so cloud quotas don't fill with abandoned entities.
@@ -106,12 +106,19 @@ bao write cloud-creds/<cloud>/roles/<name> \
 Cloud-specific fields (not exhaustive):
 - AWS: `iam_role_arn`, `policy_arns[]`, `inline_policy`
 - GCP: `service_account_email`, `scopes[]`
-- DO: `scopes[]` (e.g. `read write`)
+- DO: `scopes[]` (fine-grained `<resource>:<verb>`, e.g. `droplet:create droplet:read`; `api:read`/`api:write` are all-read/all-write aliases — corrected 2026-08-21)
 - UpCloud: `permissions` (per UpCloud's API)
 
 ### Error model
 
 Standard OpenBao 4xx/5xx + JSON body with stable `error_code`. Codes are exported as Go constants in `pkg/credenvelope/errors.go`; adding a code is a spec change. Clients pin to `metadata.api_version`.
+
+Configuration-time rejections (an invalid role TTL, a failed capability probe) are
+plain OpenBao error responses on the *write* that caused them, not envelope
+errors: they never reach a credential-reading client, so they carry no
+`error_code`. This is why capability verification added none — and why the
+runtime `minter_insufficient_privilege` idea was deliberately not pursued (see
+[`decisions.md`](decisions.md)).
 
 | Code | HTTP | Meaning | Client retry |
 |------|------|---------|--------------|
@@ -215,6 +222,19 @@ Implications:
 - Two expiring minters with <7d gap → REJECTED (defeats seamless rotation)
 
 Plugin selects whichever minter is healthy + freshest for new requests. To rotate: operator adds another minter, waits for traffic to drift onto it, removes the oldest.
+
+**Validation is metadata-only, so it is not sufficient (added 2026-08-21).** The
+rule above inspects `never_expires`/`expires_at`/`Retired` and nothing else — it
+cannot tell a mint-capable minter from one that merely authenticates. Since a
+health check cannot tell them apart either (AWS `GetCallerIdentity` needs no
+policy; GCP's health call proves only the minter SA's own key; UpCloud's account
+endpoint does not report `can_create_tokens`), each set/role write additionally
+runs a **capability probe**: mint a throwaway credential with the real per-role
+mint shape, then delete it. It runs at minter-set write, at role write (so a role
+cannot bind to a set that has not been shown to mint what it asks for) and before
+a rotation commits; it is gated by `verify_minter_capability` (default true) and
+skipped on OCI, whose 2-token cap a probe would consume. Full detail:
+[`minter-capability-verification.md`](minter-capability-verification.md).
 
 ### Recovery state machine
 

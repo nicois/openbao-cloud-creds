@@ -9,17 +9,25 @@ const cloudName = "gcp"
 // Field and metric-label names that recur across schemas, responses, and
 // telemetry. Constified so the linter (goconst) has a single source of truth.
 const (
-	fieldName                = "name"
-	fieldRole                = "role"
-	fieldCloud               = "cloud"
-	fieldMinterSet           = "minter_set"
+	fieldName      = "name"
+	fieldRole      = "role"
+	fieldCloud     = "cloud"
+	fieldMinterSet = "minter_set"
+
+	// fieldDefaultTTL / fieldMaxTTL are the role TTL field names.
+	fieldDefaultTTL          = "default_ttl"
+	fieldMaxTTL              = "max_ttl"
 	fieldServiceAccountEmail = "service_account_email"
+	fieldScopes              = "scopes"
 
 	// fieldMinterID is the rotate-endpoint field naming the minter to rotate.
 	fieldMinterID = "minter_id"
 	// fieldMinterRetireGrace is the config field/response key for the retirement
 	// grace (seconds before a retired minter's upstream SA key is swept).
 	fieldMinterRetireGrace = "minter_retire_grace"
+	// fieldVerifyCapability is the config field toggling the capability probe
+	// (a throwaway mint-and-delete) run at minter-set and role write.
+	fieldVerifyCapability = "verify_minter_capability"
 	// fieldRotationParams is the per-minter rotation metadata map key (after
 	// rotation it carries the successor's upstream SA key resource name used by
 	// the retired-sweep to delete it).

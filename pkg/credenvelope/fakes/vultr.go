@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,11 @@ type VultrServer struct {
 	users      map[string]map[string]interface{}
 	nextID     atomic.Int64
 	nextStatus int
+	// ungrantableACL, when non-empty, makes POST /v2/users return 403 for any
+	// request whose acls list contains it, while GET /v2/account still succeeds.
+	// Test-only: reproduces Vultr refusing to grant a sub-user an ACL the creating
+	// key does not itself hold — a minter that is healthy but cannot serve a role.
+	ungrantableACL string
 }
 
 func NewVultrServer() *VultrServer {
@@ -60,6 +66,16 @@ func (s *VultrServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nextStatus = code
+}
+
+// SetUngrantableACL makes POST /v2/users return 403 whenever the requested acls
+// contain acl (empty disables), leaving the account health check unaffected.
+// Test-only: this is the "authenticates but cannot mint this role" condition the
+// capability probe exists to catch.
+func (s *VultrServer) SetUngrantableACL(acl string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ungrantableACL = acl
 }
 
 func (s *VultrServer) handler() http.Handler {
@@ -117,6 +133,17 @@ func (s *VultrServer) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	forbidden := s.ungrantableACL
+	s.mu.Unlock()
+	if forbidden != "" && slices.Contains(req.ACLs, forbidden) {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyError: fmt.Sprintf("your API key does not hold the %q ACL, so it cannot grant it", forbidden),
+		})
 		return
 	}
 

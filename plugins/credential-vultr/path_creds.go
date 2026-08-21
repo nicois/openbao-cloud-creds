@@ -17,6 +17,10 @@ import (
 // into generated sub-user names/emails to keep them short but unique-enough.
 const leaseShortIDLen = 8
 
+// defaultEmailDomain is the non-routable domain generated sub-user addresses use
+// when a role sets no email_domain.
+const defaultEmailDomain = "managed.local"
+
 func (b *backend) credsPaths() []*framework.Path {
 	return []*framework.Path{
 		{
@@ -137,8 +141,12 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	if err != nil {
 		client, err = b.anyHealthyMinterInSet(minterSet)
 		if err != nil {
+			// The upstream credential has no expiry of its own, so it does NOT
+			// lapse when the lease does: the owner-tag reconciler is the only
+			// backstop that will eventually delete it.
 			b.Logger().Warn("revoke: issuing minter gone and no fallback in set; "+
-				"leaving credential to expire via TTL",
+				"credential left upstream for the owner-tag reconciler to delete "+
+				"(it does not expire on its own)",
 				"minter_set", minterSet, "minter_id", minterID)
 			_ = req.Storage.Delete(ctx, "active-users/"+userID)
 			return nil, nil
@@ -231,17 +239,29 @@ func buildUserIdentity(roleName, leaseID string, role *vultrRole) (userName, use
 		leaseShortID = leaseShortID[:leaseShortIDLen]
 	}
 	userName = fmt.Sprintf("cloud-creds-%s-%s", roleName, leaseShortID)
-	emailDomain := role.EmailDomain
-	if emailDomain == "" {
-		emailDomain = "managed.local"
-	}
-	userEmail = fmt.Sprintf("cloud-creds-%s-%s@%s", roleName, leaseShortID, emailDomain)
+	userEmail = fmt.Sprintf("cloud-creds-%s-%s@%s", roleName, leaseShortID, emailDomainFor(role))
 
-	acls = strings.Split(role.ACLs, ",")
+	return userName, userEmail, parseACLs(role.ACLs)
+}
+
+// emailDomainFor returns the domain generated sub-user addresses are formed in:
+// the role's email_domain, or a non-routable default when it sets none.
+func emailDomainFor(role *vultrRole) string {
+	if role.EmailDomain == "" {
+		return defaultEmailDomain
+	}
+	return role.EmailDomain
+}
+
+// parseACLs splits a role's comma-separated ACL field into the list the Vultr
+// create-user call takes. Shared with the capability probe so a probe requests
+// exactly the ACLs a real issuance would.
+func parseACLs(raw string) []string {
+	acls := strings.Split(raw, ",")
 	for i := range acls {
 		acls[i] = strings.TrimSpace(acls[i])
 	}
-	return userName, userEmail, acls
+	return acls
 }
 
 // anyHealthyMinter returns a client for any healthy minter across all sets.

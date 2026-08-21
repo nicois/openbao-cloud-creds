@@ -9,7 +9,10 @@ OpenBao plugins that issue short-lived, role-scoped cloud credentials with a uni
 - [`docs/design.md`](docs/design.md) — companion with worked examples and detailed rationale (same caveat as the techrfc).
 - [`docs/decisions.md`](docs/decisions.md) — short rationale notes for design choices.
 - [`docs/cloud-credential-research.md`](docs/cloud-credential-research.md) — what each cloud's API actually supports; authoritative for per-cloud strategy.
-- [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md) — object-storage viability (out of scope, but analysed).
+- [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md) — object-storage viability (out of scope, but analysed; DO Spaces section revised 2026-08-21).
+- [`docs/do-api-verification-2026-08-21.md`](docs/do-api-verification-2026-08-21.md) — re-verification of the DO assumptions behind the reference plugin: `/v2/tokens` is undocumented, scopes are fine-grained, Spaces keys are now API-issuable.
+- [`docs/minter-capability-verification.md`](docs/minter-capability-verification.md) — authoritative for the capability probe: why health ≠ capability, the three probe points, the per-cloud probe/cost table, why OCI is not probed, and what was deliberately excluded.
+- [`docs/ttl-semantics.md`](docs/ttl-semantics.md) — authoritative per-cloud TTL matrix: what a lease TTL means on each cloud, which bounds are enforced at role write, and where a credential can outlive its lease.
 
 For the *envelope/error contract*, the techrfc wins. For *what is built and which strategy each cloud uses*, this file and `docs/cloud-credential-research.md` win — the techrfc's implementation-status claims are outdated.
 
@@ -32,7 +35,7 @@ All ten plugins are implemented, tested, lint-clean (golangci-lint v2), build as
 
 | Plugin | Strategy | Notes |
 |--------|----------|-------|
-| `credential-do` | JIT | Reference implementation; `POST /v2/tokens`; **hard revoke** (`DELETE /v2/tokens/{id}`) |
+| `credential-do` | JIT | Reference implementation; `POST /v2/tokens` (**undocumented endpoint** — see note below); **hard revoke** (`DELETE /v2/tokens/{id}`) |
 | `credential-aws` | JIT | STS AssumeRole (direct, not the OpenBao AWS engine); **no revoke** (STS expires) |
 | `credential-gcp` | JIT | SA impersonation, `generateAccessToken`; **no revoke** (token expires) |
 | `credential-azure` | JIT | Graph API `addPassword` on existing app registrations; **hard revoke** (`removePassword`) |
@@ -45,7 +48,11 @@ All ten plugins are implemented, tested, lint-clean (golangci-lint v2), build as
 
 Revoke summary: **hard revoke** (deletes upstream on lease end) — DO, UpCloud, Azure, Exoscale, Vultr, Akamai. **No revoke** (credential expires naturally) — AWS, GCP, OVH. **Soft revoke** (phased rotation) — OCI.
 
-Object-storage credentials (S3-style backup keys) are explicitly **out of scope** — see `docs/object-storage-credential-audit.md` for the viability analysis and why.
+**TTL semantics (`docs/ttl-semantics.md` is authoritative).** A TTL must be enforceable either by a mint-time lifetime (AWS `DurationSeconds`, GCP `lifetime`, Azure `endDateTime`, UpCloud `expires_in` — all set from the role TTL) or by hard revoke (DO, Exoscale, Vultr, Akamai — whose credentials have **no** upstream expiry, so revoke plus the owner-tag reconciler is the only bound). Unenforceable TTLs are rejected at role write: **AWS 900s–43200s**, **GCP ≤43200s**, **UpCloud ≤8760h**, **OVH exactly 3600s** (fixed 1h token, no revoke API — so neither longer nor shorter is honest). No floor is invented where the cloud documents none. Leases are non-renewable wherever the credential's expiry is fixed at mint (AWS, GCP, OVH, Azure, UpCloud, OCI); DO/Exoscale/Vultr/Akamai stay renewable because renewal just defers the revoke. OCI is the one deliberate "credential outlives lease" case (slot lives until its scheduled rotation); no plugin lets a lease outlive its credential (techrfc OBC-002).
+
+**DO API facts (re-verified 2026-08-21 — `docs/do-api-verification-2026-08-21.md`):** `POST /v2/tokens` / `DELETE /v2/tokens/{id}` are **not in DigitalOcean's public OpenAPI spec**; DO documents PAT creation as control-panel-only, so the reference plugin depends on a control-panel-internal endpoint (accepted, documented risk — the OAuth alternative needs interactive auth and can't mint headlessly). Don't cite `/v2/tokens` as public API. DO scopes are **fine-grained** `<resource>:<verb>` (`droplet:create`, `spaces_key:create_credentials`, …), not coarse `read`/`write`; role `scopes` is an unvalidated pass-through string, so new scopes need no code change, but the minter must itself hold every scope it grants. There is still no PAT-management scope, so DO minter self-rotation remains infeasible.
+
+Object-storage credentials (S3-style backup keys) are explicitly **out of scope** — see `docs/object-storage-credential-audit.md` for the viability analysis and why. Note that audit's DO Spaces section was revised 2026-08-21: `/v2/spaces/keys` **is** now public (full CRUD, per-bucket `grants`, secret-once-on-create, `created_at`), so the "no API" blocker is gone; object storage is simply not built here and DO's 200-keys/account cap rules out the long-lived per-customer case.
 
 ## Genealogy
 
@@ -62,6 +69,7 @@ Go workspace (`go.work`) with per-module `go.mod`; use the full module path, not
 ```bash
 go build github.com/nicois/openbao-cloud-creds/...
 go test -race github.com/nicois/openbao-cloud-creds/...
+make test-conformance  # the cloud × category matrix + the shared suites over all ten plugins
 make lint          # golangci-lint v2 (pinned v2.12.2) across every module — config in .golangci.yml
 make smoke-test    # build each plugin + register/enable in a live OpenBao dev server (needs `bao` on PATH)
 ```
@@ -81,7 +89,7 @@ go test -tags=cloud_real ./plugins/credential-do/...
 - Owner-tag scheme always uses prefix `cloud-creds-<role>-` or label `owner=cloud-creds`
 - Every error response includes a stable `error_code` (Go constants in `pkg/credenvelope/errors.go`); adding one is a spec change
 - Clients pin to `metadata.api_version` in the response envelope (currently `"2"`)
-- Every plugin MUST have a `resilience_test.go` wiring `pkg/plugintest` (reload, mid-lease perturbation, revoke-resilience categories). A new plugin is not complete without it. The reload category catches "config field set only in `pathConfigWrite`, not reloaded in `Factory`" bugs (KI-001 class); the perturbation/revoke categories catch revoke-wedging bugs (KI-002 class). See `docs/superpowers/specs/2026-05-30-resilience-test-taxonomy-design.md`. Injected-client plugins (AWS/GCP/OCI) `t.Skip` the reload category — their config-reload path is not covered, a known residual gap.
+- **Testing is conformance-first — read `AGENTS.md` before writing a test.** Every cloud-agnostic invariant lives once in `pkg/plugintest` as a suite over `plugintest.Harness`, and runs against all ten plugins from the `conformance/` module's single `registry` table. Five categories: `reload` (KI-001 class: config set in `pathConfigWrite` but not reloaded in `Factory`), `perturbation` + `revoke` (KI-002 class revoke-wedging), `capability` (probe rejects an incapable minter at write time), `reconciler-safety` (owner-tag invariant, `dry_run` deletes nothing). A new plugin is not complete until it is in that table — `TestEveryPluginIsRegistered` fails otherwise. A category that genuinely does not apply to a cloud is declared in `Harness.Skips` with a reason and printed by `TestConformanceMatrix`; **never** `t.Skip` a category inline. `Harness.Inject` is re-applied on reload, so AWS/GCP/OCI no longer skip the reload category (that residual gap is closed). Per-cloud vocabulary — mint shapes, deny knobs, unexported-symbol tests — stays in the plugin's own `*_test.go` and the fakes. Background: `docs/superpowers/specs/2026-05-30-resilience-test-taxonomy-design.md`.
 
 ## Minter sets
 
@@ -89,9 +97,17 @@ Minters are grouped into named **sets** at `cloud-creds/<cloud>/minter-sets/<nam
 
 **Minter lifecycle (audit-2, 2026-06-01).** Every minter carries `CreatedAt` and (since rotation) optional `Retired`/`RetiredAt`/`RotationParams` fields. Observability: `emitMinterMetrics` (health-check cadence) emits `cloud_creds_minter_age_seconds` for *every* minter incl. `never_expires`, and warn-logs within the configurable `minter_expiry_warn` (default `MinMinterGap`=7d) of an expiring minter's expiry. **Self-rotation:** `minter-sets/<name>/rotate` (field `minter_id`) is the uniform endpoint on all 10 plugins; the 6 feasible clouds (Azure ref, UpCloud, AWS, Akamai, GCP, Exoscale) implement `RotateMinter` (mint a mint-capable successor → validate-prospective-set-before-mint → health-check successor → swap in + mark old retired → a separate `rotateSweepMu`-guarded retired-sweep deletes the old upstream credential only after `minter_retire_grace` (default 7d), so other raft nodes' in-memory snapshots never wedge). DO/OVH/Vultr/OCI reject (verified infeasible). `selectMinter`/`anyHealthyMinter*`/`selectMinterForSet` skip `Retired` minters; the retired-sweep is keyed off `RetiredAt`, kept separate from the conservative owner-tag orphan reconciler. AWS/GCP minter key-management is hand-rolled signed REST (no new deps) and is fake-tested pending the deferred #7 real-cloud pass. See `docs/decisions.md` ("Why minter rotation retires with a grace period…").
 
+## Capability verification (2026-08-21)
+
+**Health ≠ capability.** A health check proves a minter credential is live, not that it may mint what its set's roles ask for (AWS `GetCallerIdentity` needs no policy at all; Akamai `GET /api-clients/self` answers for any live EdgeGrid credential; UpCloud's account endpoint doesn't report `can_create_tokens`; GCP's `TestConnection` only proves the minter SA's own key, while impersonation is a per-target-SA grant). So every plugin runs a **capability probe** — mint a throwaway credential with the real per-role mint shape, then delete it — via `pkg/capability` (`Check`/`Verify`/`Dedupe`/`Gate`/`ChecksPerMinter`/`ProbeName`/`RolesBoundTo`).
+
+Each plugin has a `capability.go` with `capabilityChecks` (per-cloud mint shape + `probeMint`), `verifySetCapability`, `verifyRoleCapability`, `gate()`, and — on the 6 rotation-capable clouds — `verifySuccessorCapability`, hooked in as **step 3b** of `pathMinterSetRotate` (after the successor health check, before the commit; failure calls `cleanupSuccessor`). Probe points: **minter-set write** (all active minters × enabled bound roles), **role write** (the bound set's active minters × this role — this is what blocks a role whose minting key is unsuitable, and forces sets to exist and work before roles bind), **rotation pre-commit**. Probes dedupe on `(minter ID, mint shape)`; verification stops at the first failure. Gated by config field `verify_minter_capability` (**default on**, `cloudconfig.PluginConfig.CapabilityVerificationEnabled()`); every rejection message carries the "set `verify_minter_capability=false`" hint. Probe names use the owner prefix (`cloud-creds-<role>-probe-<uniq>`) so a failed delete is still reconciler-reclaimable; a failed *delete* never fails a probe. Disabled roles are skipped. **AWS/GCP/OVH cannot revoke what the probe mints**, so the requested lifetime is pinned to the minimum (AWS 900s floor, GCP 60s, OVH's fixed 1h). **OCI returns `capability.ErrUnsupported`** (counted as *skipped*, write proceeds): its 2-token cap means a probe would consume a rotation slot. Akamai rotation additionally copies the incumbent's full `apiAccess`/`groupAccess` onto the successor (`GetSelf` → `successorGrants`) and fails closed if `self` is unreadable. Every plugin has a `capability_test.go` (4 cases). Details: `docs/minter-capability-verification.md`.
+
 ## Don't
 
+- Don't add a capability probe that cannot clean up without pinning the minted lifetime to the cloud's minimum, and don't let a plugin's *test* backend skip writing config/injecting a fake client — once probes exist, a config-less test backend calls the real cloud API
 - Don't change the response envelope shape without bumping `api_version` and updating the techrfc
 - Don't loosen the minter-validation rule (see RSK-005); silent infinite-expiry minters are explicitly rejected at config load
 - Don't make the reconciler delete anything not matching the owner-tag scheme — that's the load-bearing safety invariant
 - Don't mock cloud APIs in integration tests; use the cloud-fakes in `pkg/credenvelope/fakes/` (an `httptest.Server` with knobs for 401/403/429/500/timeout)
+- Don't accept a role TTL the cloud can't enforce, and don't make a lease renewable when the credential's expiry is fixed at mint — reject at role write instead (`docs/ttl-semantics.md`). Equally, don't invent a TTL floor a cloud doesn't document.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
 	credentialakamai "github.com/nicois/openbao-cloud-creds/plugins/credential-akamai"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -15,6 +16,19 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	b, err := credentialakamai.Factory(context.Background(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
+	}
+
+	// Point the backend at a fake Akamai. Role and minter-set writes run a
+	// capability probe (a real create-and-delete api-client call), so a test
+	// backend with no configured base URL would otherwise reach for production.
+	// Tests that need their own fake just write config again with their URL.
+	srv := fakes.NewAkamaiServer()
+	t.Cleanup(srv.Close)
+	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.UpdateOperation, Path: "config", Storage: config.StorageView,
+		Data: map[string]interface{}{"host": "akab-test.luna.akamaiapis.net", "akamai_api_url": srv.URL},
+	}); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
 	return b, config.StorageView
 }

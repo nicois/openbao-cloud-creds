@@ -18,6 +18,9 @@ const (
 	// grace; present for a uniform config surface across all clouds (OVH never
 	// marks a minter retired, so no sweep ever consumes it).
 	fieldMinterRetireGrace = "minter_retire_grace"
+	// fieldVerifyCapability is the config field toggling the capability probe
+	// (a throwaway mint-and-delete) run at minter-set and role write.
+	fieldVerifyCapability = "verify_minter_capability"
 )
 
 // metricNamespace is the leading segment of every metric key this plugin emits.

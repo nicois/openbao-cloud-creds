@@ -141,6 +141,90 @@ func TestMinterSetIsolation(t *testing.T) {
 		t.Fatalf("role2 used wrong minter: set=%v id=%v", meta["minter_set"], meta["minter_id"])
 	}
 }
+
+// Scope names used by TestPerRoleScopesFromSharedMinterSet. Hoisted to consts
+// because goconst counts test literals against production files in the package.
+const (
+	scopeDropletRead   = "droplet:read"
+	scopeDropletDelete = "droplet:delete"
+	sharedMinterSet    = "default"
+	sharedMinterID     = "minter-1"
+)
+
+// TestPerRoleScopesFromSharedMinterSet covers the two-role least-privilege shape:
+// one role may only read Droplets, another may only delete them, and BOTH mint
+// from the same minter set (one upstream minter PAT). Each issued credential must
+// carry only its own role's scopes — the minter's privilege is not inherited by
+// the credentials it mints.
+func TestPerRoleScopesFromSharedMinterSet(t *testing.T) {
+	srv := fakes.NewDOServer()
+	defer srv.Close()
+	b, storage := setupConfiguredBackend(t, srv.URL) // set "default" (minter-1) + role "test-role"
+
+	for roleName, scope := range map[string]string{
+		"droplet-reader":  scopeDropletRead,
+		"droplet-deleter": scopeDropletDelete,
+	} {
+		req := &logical.Request{
+			Operation: logical.UpdateOperation, Path: "roles/" + roleName, Storage: storage,
+			Data: map[string]interface{}{
+				"default_ttl": 900, "max_ttl": 3600,
+				"scopes": scope, "minter_set": sharedMinterSet,
+			},
+		}
+		if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+			t.Fatalf("%s role write: err=%v resp=%v", roleName, err, resp)
+		}
+	}
+
+	issue := func(roleName string) *logical.Response {
+		t.Helper()
+		req := &logical.Request{Operation: logical.ReadOperation, Path: "creds/" + roleName, Storage: storage}
+		resp, err := b.HandleRequest(context.Background(), req)
+		if err != nil || resp == nil || resp.IsError() {
+			t.Fatalf("%s issue failed: err=%v resp=%v", roleName, err, resp)
+		}
+		return resp
+	}
+
+	readerResp, deleterResp := issue("droplet-reader"), issue("droplet-deleter")
+
+	for _, tc := range []struct {
+		role  string
+		resp  *logical.Response
+		scope string
+	}{
+		{"droplet-reader", readerResp, scopeDropletRead},
+		{"droplet-deleter", deleterResp, scopeDropletDelete},
+	} {
+		cred := tc.resp.Data["credential"].(map[string]interface{})
+		scopes, ok := cred["scopes"].([]string)
+		if !ok {
+			t.Fatalf("%s: expected credential.scopes []string, got %T", tc.role, cred["scopes"])
+		}
+		if len(scopes) != 1 || scopes[0] != tc.scope {
+			t.Fatalf("%s: expected credential.scopes=[%s], got %v", tc.role, tc.scope, scopes)
+		}
+
+		meta := tc.resp.Data["metadata"].(map[string]interface{})
+		if meta["scope"] != tc.scope {
+			t.Fatalf("%s: expected metadata.scope=%s, got %v", tc.role, tc.scope, meta["scope"])
+		}
+		// Both roles share one minter set and one minter within it.
+		if meta["minter_set"] != sharedMinterSet || meta["minter_id"] != sharedMinterID {
+			t.Fatalf("%s: expected set=%s minter=%s, got set=%v minter=%v",
+				tc.role, sharedMinterSet, sharedMinterID, meta["minter_set"], meta["minter_id"])
+		}
+	}
+
+	// Distinct upstream credentials, so revoking one cannot affect the other.
+	readerID := readerResp.Data["credential_id"]
+	deleterID := deleterResp.Data["credential_id"]
+	if readerID == nil || readerID == deleterID {
+		t.Fatalf("expected distinct credential_ids, got %v and %v", readerID, deleterID)
+	}
+}
+
 func TestCredsRevoke(t *testing.T) {
 	srv := fakes.NewDOServer()
 	defer srv.Close()

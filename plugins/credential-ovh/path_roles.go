@@ -15,6 +15,21 @@ const (
 	// exceed it.
 	maxOVHTTL = 3600 * time.Second
 
+	// ...nor undercut it. OVH's token endpoint accepts no lifetime parameter and
+	// OVH exposes no token-revoke API, so an issued token is valid for exactly
+	// 1 hour regardless of the role's TTL. A shorter TTL would end the lease
+	// while the credential stayed live upstream — a dishonest TTL we cannot
+	// enforce — so short TTLs are rejected at role-write time rather than
+	// silently misrepresented. Combined with maxOVHTTL this pins OVH roles to
+	// exactly 3600s. See docs/decisions.md ("Why TTL bounds are enforced ...").
+	minOVHTTL = maxOVHTTL
+
+	// ovhShortTTLMsg is the rejection for a sub-1h TTL; %s is the field name.
+	ovhShortTTLMsg = "%s must be at least 3600 seconds: OVH tokens have a fixed " +
+		"1-hour lifetime that cannot be shortened at mint time, and OVH exposes no " +
+		"token-revoke API, so a shorter TTL would end the lease while the credential " +
+		"stayed valid upstream"
+
 	// Role TTL schema defaults, in seconds (framework.TypeDurationSecond). Both
 	// default to the OVH token lifetime (1h) since that is the hard ceiling.
 	defaultRoleTTLSeconds    = 3600 // 1h
@@ -41,12 +56,12 @@ func (b *backend) rolePaths() []*framework.Path {
 				"default_ttl": {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleTTLSeconds,
-					Description: "Default lease TTL in seconds (max 3600s — OVH tokens are fixed 1h)",
+					Description: "Default lease TTL in seconds (must be exactly 3600s — OVH tokens have a fixed 1h lifetime and cannot be revoked)",
 				},
 				"max_ttl": {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleMaxTTLSeconds,
-					Description: "Maximum lease TTL in seconds (max 3600s)",
+					Description: "Maximum lease TTL in seconds (must be exactly 3600s — see default_ttl)",
 				},
 				fieldMinterSet: {
 					Type:        framework.TypeString,
@@ -81,6 +96,15 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("default_ttl must not exceed 3600 seconds (OVH tokens have a fixed 1-hour lifetime)"), nil
 	}
 
+	// ...nor be shorter than it: OVH cannot mint a shorter-lived token and cannot
+	// revoke one, so a shorter TTL would be unenforceable.
+	if maxTTL < minOVHTTL {
+		return logical.ErrorResponse(ovhShortTTLMsg, "max_ttl"), nil
+	}
+	if defaultTTL < minOVHTTL {
+		return logical.ErrorResponse(ovhShortTTLMsg, "default_ttl"), nil
+	}
+
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
 		return logical.ErrorResponse("minter_set is required"), nil
@@ -110,6 +134,12 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MinterSet:  minterSet,
 	}
 
+	// Prove the bound set's minters can actually mint what this role asks for,
+	// so an unsuitable minting key is reported to whoever wrote the role rather
+	// than to the first caller that reads credentials from it.
+	if errResp := b.verifyRoleCapability(ctx, req.Storage, ovhR); errResp != nil {
+		return errResp, nil
+	}
 	entry, err := logical.StorageEntryJSON("roles/"+name, ovhR)
 	if err != nil {
 		return nil, err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
 	credentialupcloud "github.com/nicois/openbao-cloud-creds/plugins/credential-upcloud"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -15,6 +16,19 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	b, err := credentialupcloud.Factory(context.Background(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
+	}
+	// Point the backend at a fake UpCloud API. Minter-set and role writes now run
+	// a capability probe (a real token create-and-delete, see capability.go), so a
+	// backend left on the production base URL would make a live network call.
+	// Tests that need their own fake simply rewrite config over this one.
+	srv := fakes.NewUpCloudServer()
+	t.Cleanup(srv.Close)
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.UpdateOperation, Path: "config", Storage: config.StorageView,
+		Data: map[string]interface{}{"username": "testuser", "upcloud_api_url": srv.URL},
+	})
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("test config write failed: err=%v resp=%v", err, resp)
 	}
 	return b, config.StorageView
 }

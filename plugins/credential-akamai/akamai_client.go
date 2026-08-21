@@ -150,6 +150,96 @@ func (c *akamaiClient) resolveIdentityManagementAPIID(ctx context.Context, usern
 	return 0, fmt.Errorf("user %q has no allowed Identity-Management API entry", username)
 }
 
+// selfClient is the subset of GET /api-clients/self a rotation needs: the
+// incumbent minter's own grants. apiAccess is decoded (the Identity-Management
+// entry has to be found and possibly upgraded), while groupAccess is kept as raw
+// JSON and copied through verbatim — its shape (nested groups with
+// subGroups/roles) is not something this plugin should reinterpret.
+type selfClient struct {
+	ClientID  string `json:"clientId"`
+	APIAccess struct {
+		AllAccessibleAPIs bool `json:"allAccessibleApis"`
+		APIs              []struct {
+			APIID       int    `json:"apiId"`
+			APIName     string `json:"apiName"`
+			AccessLevel string `json:"accessLevel"`
+		} `json:"apis"`
+	} `json:"apiAccess"`
+	GroupAccess json.RawMessage `json:"groupAccess"`
+}
+
+// GetSelf reads the API client the signing credential belongs to, including its
+// apiAccess and groupAccess grants. A rotation successor is built from these, so
+// it inherits the incumbent's authority instead of being constructed with a
+// guess at what it needs.
+func (c *akamaiClient) GetSelf(ctx context.Context) (*selfClient, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/identity-management/v3/api-clients/self", http.NoBody)
+	if err != nil {
+		return nil, 0, err
+	}
+	signRequest(req, c.credential)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, resp.StatusCode, fmt.Errorf("akamai API self returned %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	var result selfClient
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return &result, resp.StatusCode, nil
+}
+
+// successorGrants builds the successor's apiAccess and groupAccess from the
+// incumbent's own grants (self) plus the per-account Identity-Management apiId.
+//
+// Every api the incumbent can reach is replicated at the same access level, and
+// the Identity-Management entry is added (or upgraded to READ-WRITE) so the
+// successor can rotate in turn. Constructing an Identity-Management-only grant
+// instead — as this used to — produced a successor that could rotate but could
+// not mint the credentials any role asks for, a difference no health check sees.
+// allAccessibleApis is carried through: when the incumbent holds it, the apis
+// list is irrelevant upstream and the successor gets the same blanket grant.
+func successorGrants(self *selfClient, identityAPIID int) (apiAccess, groupAccess interface{}) {
+	apis := make([]interface{}, 0, len(self.APIAccess.APIs)+1)
+	haveIdentityRW := false
+	for i := range self.APIAccess.APIs {
+		api := self.APIAccess.APIs[i]
+		level := api.AccessLevel
+		if api.APIID == identityAPIID {
+			// The successor must be able to create the NEXT successor, so this entry
+			// is never copied at READ-ONLY.
+			level = accessLevelReadWrite
+			haveIdentityRW = true
+		}
+		apis = append(apis, map[string]interface{}{jsonKeyAPIID: api.APIID, jsonKeyAccessLevel: level})
+	}
+	if !haveIdentityRW {
+		apis = append(apis, map[string]interface{}{jsonKeyAPIID: identityAPIID, jsonKeyAccessLevel: accessLevelReadWrite})
+	}
+
+	apiAccess = map[string]interface{}{
+		"allAccessibleApis": self.APIAccess.AllAccessibleAPIs,
+		jsonKeyAPIs:         apis,
+	}
+	return apiAccess, groupAccessFromSelf(self)
+}
+
+// groupAccessFromSelf returns the incumbent's groupAccess verbatim, or an empty
+// grant when it reported none.
+func groupAccessFromSelf(self *selfClient) interface{} {
+	if len(self.GroupAccess) == 0 || string(self.GroupAccess) == "null" {
+		return map[string]interface{}{jsonKeyGroups: []interface{}{}}
+	}
+	return self.GroupAccess
+}
+
 // rotationSuffix returns a short, monotonic-ish suffix for a successor minter
 // ID so successive rotations of the same minter never collide.
 func rotationSuffix() string {
@@ -175,17 +265,24 @@ func (c *akamaiClient) RotateMinter(ctx context.Context, old cloudconfig.Minter)
 		return cloudconfig.Minter{}, fmt.Errorf("could not grant the successor Identity-Management access; %w", err)
 	}
 
-	apiAccess := map[string]interface{}{
-		"allAccessibleApis": false,
-		jsonKeyAPIs: []interface{}{
-			map[string]interface{}{"apiId": apiID, "accessLevel": accessLevelReadWrite},
-		},
+	// Read the incumbent's OWN grants and replicate them, rather than constructing
+	// a grant from what rotation is known to need. A successor that holds only
+	// Identity-Management access can rotate but cannot mint anything a role asks
+	// for. Fail closed: without the incumbent's grants there is no safe grant to
+	// give the successor, so a failed read aborts the rotation rather than
+	// silently narrowing authority.
+	self, status, err := c.GetSelf(ctx)
+	if err != nil {
+		return cloudconfig.Minter{}, fmt.Errorf(
+			"could not read the incumbent minter's own grants to replicate onto the successor (status %d): %w", status, err)
 	}
-	groupAccess := map[string]interface{}{jsonKeyGroups: []interface{}{}}
-	if gid := old.RotationParams[fieldGroupIDParam]; gid != "" {
+	apiAccess, groupAccess := successorGrants(self, apiID)
+	// rotation_params.group_id remains an explicit override for the case where the
+	// incumbent reports no group access of its own.
+	if gid := old.RotationParams[fieldGroupIDParam]; gid != "" && len(self.GroupAccess) == 0 {
 		if n, perr := strconv.Atoi(gid); perr == nil {
 			groupAccess = map[string]interface{}{
-				jsonKeyGroups: []interface{}{map[string]interface{}{"groupId": n}},
+				jsonKeyGroups: []interface{}{map[string]interface{}{jsonKeyGroupID: n}},
 			}
 		}
 	}

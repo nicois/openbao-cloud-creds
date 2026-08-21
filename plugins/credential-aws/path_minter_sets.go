@@ -107,6 +107,13 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 		return logical.ErrorResponse("invalid minter set: %v", err), nil
 	}
 	set := &cloudconfig.MinterSet{Name: name, Minters: minters}
+	// Prove the candidate minters can mint for the roles already bound to this
+	// set before persisting them (see capability.go). The validation above only
+	// inspects expiry metadata; without this a replacement minter that
+	// authenticates but cannot mint would be accepted silently.
+	if errResp := b.verifySetCapability(ctx, req.Storage, set); errResp != nil {
+		return errResp, nil
+	}
 	entry, err := logical.StorageEntryJSON("minter-sets/"+name, set)
 	if err != nil {
 		return nil, err
@@ -247,6 +254,16 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 	if herr := b.checkSuccessorHealth(ctx, successor); herr != nil {
 		b.cleanupSuccessor(ctx, successor)
 		return logical.ErrorResponse("successor minter failed health check: %v", herr), nil
+	}
+
+	// 3b. Health is not capability: GetCallerIdentity succeeds for any valid
+	//     signature, so it cannot see that the successor key is denied
+	//     sts:AssumeRole on a bound role (a policy or trust policy that names the
+	//     old key, or a boundary changed since). Prove it can mint before
+	//     committing.
+	if errResp := b.verifySuccessorCapability(ctx, req.Storage, name, successor); errResp != nil {
+		b.cleanupSuccessor(ctx, successor)
+		return errResp, nil
 	}
 
 	// 4. Commit: append the real successor active, mark the old retired, then

@@ -102,6 +102,13 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 		return logical.ErrorResponse("invalid minter set: %v", err), nil
 	}
 	set := &cloudconfig.MinterSet{Name: name, Minters: minters}
+	// Prove the candidate minters can mint for the roles already bound to this
+	// set before persisting them (see capability.go). The validation above only
+	// inspects expiry metadata; without this a replacement minter that
+	// authenticates but cannot mint would be accepted silently.
+	if errResp := b.verifySetCapability(ctx, req.Storage, set); errResp != nil {
+		return errResp, nil
+	}
 	entry, err := logical.StorageEntryJSON("minter-sets/"+name, set)
 	if err != nil {
 		return nil, err
@@ -169,6 +176,23 @@ func withRotatedSuccessor(minters []cloudconfig.Minter, oldIdx int, retiredAt ti
 // token stays alive until the retired-sweep deletes it after minter_retire_grace
 // — so no other raft node, whose in-memory snapshot may still hold the original
 // as selectable, ever loses its minter mid-flight.
+// findRotatableMinter locates the named minter in the set and returns its index
+// and value, or an error response when it is absent or already retired (a
+// retired minter's upstream token is already scheduled for the sweep, so
+// rotating it again would create a successor nothing selects).
+func findRotatableMinter(set *cloudconfig.MinterSet, minterID string) (int, cloudconfig.Minter, *logical.Response) {
+	for i := range set.Minters {
+		if set.Minters[i].ID != minterID {
+			continue
+		}
+		if set.Minters[i].Retired {
+			return -1, cloudconfig.Minter{}, logical.ErrorResponse("minter %q is already retired", minterID)
+		}
+		return i, set.Minters[i], nil
+	}
+	return -1, cloudconfig.Minter{}, logical.ErrorResponse("minter %q not found in set %q", minterID, set.Name)
+}
+
 func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
 	minterID := d.Get(fieldMinterID).(string)
@@ -187,19 +211,9 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 		return logical.ErrorResponse("minter set %q does not exist", name), nil
 	}
 
-	oldIdx := -1
-	for i := range set.Minters {
-		if set.Minters[i].ID == minterID {
-			oldIdx = i
-			break
-		}
-	}
-	if oldIdx == -1 {
-		return logical.ErrorResponse("minter %q not found in set %q", minterID, name), nil
-	}
-	old := set.Minters[oldIdx]
-	if old.Retired {
-		return logical.ErrorResponse("minter %q is already retired", minterID), nil
+	oldIdx, old, errResp := findRotatableMinter(set, minterID)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	// 1. Validate the prospective post-rotation set FIRST, using a SYNTHETIC
@@ -239,6 +253,14 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 	if status, herr := successorClient.CheckHealth(ctx); herr != nil || status != http.StatusOK {
 		b.cleanupSuccessor(ctx, client, successor)
 		return logical.ErrorResponse("successor minter failed health check (status %d): %v", status, herr), nil
+	}
+
+	// 3b. Health is not capability: /1.3/account answers for any valid token,
+	//     including one without can_create_tokens. Prove the successor can
+	//     actually mint before committing, and clean up if it cannot.
+	if errResp := b.verifySuccessorCapability(ctx, req.Storage, name, successor); errResp != nil {
+		b.cleanupSuccessor(ctx, client, successor)
+		return errResp, nil
 	}
 
 	// 4. Commit: append the real successor active, mark the old retired, then

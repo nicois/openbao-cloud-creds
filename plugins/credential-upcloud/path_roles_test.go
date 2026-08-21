@@ -2,6 +2,7 @@ package credentialupcloud_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -137,6 +138,47 @@ func TestRoleValidation_TTL(t *testing.T) {
 	}
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected error for default_ttl > max_ttl")
+	}
+}
+
+// TestRoleValidation_TTLTooHigh covers UpCloud's documented expires_in ceiling
+// (8760h/365d): the role TTL becomes the token's expires_in, so a longer TTL
+// would be rejected upstream at mint time. Rejected at role write instead.
+func TestRoleValidation_TTLTooHigh(t *testing.T) {
+	const oneYearSeconds = 8760 * 3600
+
+	for _, tc := range []struct {
+		name       string
+		defaultTTL int
+		maxTTL     int
+	}{
+		{"max_ttl above 8760h", 900, oneYearSeconds + 3600},
+		{"default_ttl above 8760h", oneYearSeconds + 3600, oneYearSeconds + 7200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, storage := getTestBackend(t)
+
+			resp, err := b.HandleRequest(context.Background(), &logical.Request{
+				Operation: logical.UpdateOperation,
+				Path:      "roles/long-role",
+				Storage:   storage,
+				Data: map[string]interface{}{
+					"default_ttl": tc.defaultTTL,
+					"max_ttl":     tc.maxTTL,
+					"scopes":      "read",
+					"minter_set":  "default",
+				},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if resp == nil || !resp.IsError() {
+				t.Fatal("expected error for TTL above 8760h")
+			}
+			if msg := resp.Error().Error(); !strings.Contains(msg, "8760h") {
+				t.Fatalf("expected expires_in ceiling rejection, got %q", msg)
+			}
+		})
 	}
 }
 

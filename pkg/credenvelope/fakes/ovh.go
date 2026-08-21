@@ -13,6 +13,7 @@ type OVHServer struct {
 	*httptest.Server
 	mu         sync.Mutex
 	nextStatus int
+	forbidMint bool
 	tokenCount atomic.Int64
 	// ValidClients maps client_id -> client_secret for validation
 	ValidClients map[string]string
@@ -34,6 +35,19 @@ func (s *OVHServer) SetNextStatus(code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nextStatus = code
+}
+
+// SetForbidMint makes the token endpoint refuse every mint with 403
+// insufficient_scope until it is called again with false. Unlike SetNextStatus
+// this is sticky, which is what the shared capability suite needs: the "minter
+// authenticates but may not mint" shape must persist across the several calls a
+// configuration write makes. On OVH minting IS the health check — the same
+// endpoint answers both — so a forbidden mint necessarily also fails health;
+// that is a property of the cloud, not of this fake.
+func (s *OVHServer) SetForbidMint(forbid bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forbidMint = forbid
 }
 
 // TokenCount returns the total number of tokens issued by this fake.
@@ -101,7 +115,18 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	expectedSecret, clientExists := s.ValidClients[clientID]
+	forbidMint := s.forbidMint
 	s.mu.Unlock()
+
+	if forbidMint {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyError:            "insufficient_scope",
+			jsonKeyErrorDescription: "this service account may not mint tokens",
+		})
+		return
+	}
 
 	if !clientExists || clientSecret != expectedSecret {
 		w.Header().Set("Content-Type", "application/json")

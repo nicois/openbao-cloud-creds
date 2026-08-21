@@ -14,6 +14,14 @@ const (
 	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
 	defaultRoleTTLSeconds    = 900  // 15m
 	defaultRoleMaxTTLSeconds = 3600 // 1h
+
+	// STS DurationSeconds is documented as "Minimum value of 900. Maximum value
+	// of 43200"; a role TTL outside that range would be rejected by AssumeRole at
+	// mint time, so it is rejected at role-write time instead. STS sessions expire
+	// on their own and cannot be revoked, so a TTL below the floor could not be
+	// compensated for by early revocation either.
+	minSTSTTL = 900 * time.Second
+	maxSTSTTL = 43200 * time.Second
 )
 
 type awsRole struct {
@@ -36,12 +44,12 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
-				"default_ttl": {
+				fieldDefaultTTL: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleTTLSeconds,
 					Description: "Default STS session duration (min 900s/15m, max 43200s/12h)",
 				},
-				"max_ttl": {
+				fieldMaxTTL: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum STS session duration",
@@ -78,10 +86,30 @@ func (b *backend) rolePaths() []*framework.Path {
 	}
 }
 
+// validateSTSTTLs rejects role TTLs STS could not honour: AssumeRole documents
+// DurationSeconds as 900–43200, and an STS session cannot be revoked early, so a
+// TTL outside that range could not be made honest by any other means. Returns nil
+// when both TTLs are enforceable.
+func validateSTSTTLs(defaultTTL, maxTTL time.Duration) *logical.Response {
+	if defaultTTL < minSTSTTL {
+		return logical.ErrorResponse("default_ttl must be at least 900 seconds (15 minutes) per AWS STS limits")
+	}
+	if maxTTL < minSTSTTL {
+		return logical.ErrorResponse("max_ttl must be at least 900 seconds (15 minutes) per AWS STS limits")
+	}
+	if maxTTL > maxSTSTTL {
+		return logical.ErrorResponse("max_ttl must not exceed 43200 seconds (12 hours) per AWS STS limits")
+	}
+	if defaultTTL > maxSTSTTL {
+		return logical.ErrorResponse("default_ttl must not exceed 43200 seconds (12 hours) per AWS STS limits")
+	}
+	return nil
+}
+
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
-	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
-	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
+	defaultTTL := time.Duration(d.Get(fieldDefaultTTL).(int)) * time.Second
+	maxTTL := time.Duration(d.Get(fieldMaxTTL).(int)) * time.Second
 	iamRoleARN := d.Get(fieldIAMRoleARN).(string)
 
 	if iamRoleARN == "" {
@@ -100,14 +128,8 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
 	}
 
-	// AWS STS minimum session duration is 15 minutes (900 seconds)
-	if defaultTTL < 900*time.Second {
-		return logical.ErrorResponse("default_ttl must be at least 900 seconds (15 minutes) per AWS STS limits"), nil
-	}
-
-	// AWS STS maximum session duration is 12 hours (43200 seconds)
-	if maxTTL > 43200*time.Second {
-		return logical.ErrorResponse("max_ttl must not exceed 43200 seconds (12 hours) per AWS STS limits"), nil
+	if errResp := validateSTSTTLs(defaultTTL, maxTTL); errResp != nil {
+		return errResp, nil
 	}
 
 	role := &cloudconfig.Role{
@@ -143,6 +165,12 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MinterSet:   minterSet,
 	}
 
+	// Prove the bound set's minters can actually mint what this role asks for,
+	// so an unsuitable minting key is reported to whoever wrote the role rather
+	// than to the first caller that reads credentials from it.
+	if errResp := b.verifyRoleCapability(ctx, req.Storage, awsR); errResp != nil {
+		return errResp, nil
+	}
 	entry, err := logical.StorageEntryJSON("roles/"+name, awsR)
 	if err != nil {
 		return nil, err
@@ -171,8 +199,8 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 
 	data := map[string]interface{}{
 		fieldName:       role.Name,
-		"default_ttl":   int(role.DefaultTTL.Seconds()),
-		"max_ttl":       int(role.MaxTTL.Seconds()),
+		fieldDefaultTTL: int(role.DefaultTTL.Seconds()),
+		fieldMaxTTL:     int(role.MaxTTL.Seconds()),
 		fieldIAMRoleARN: role.IAMRoleARN,
 		fieldMinterSet:  role.MinterSet,
 	}

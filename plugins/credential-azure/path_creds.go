@@ -158,7 +158,7 @@ func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
 		Credential:   credential,
 		ExpiresAt:    expiresAt,
 		TTLSeconds:   int(a.role.DefaultTTL.Seconds()),
-		Renewable:    true,
+		Renewable:    false, // endDateTime is fixed at mint — see pathCredsRenew
 		CredentialID: a.pwResp.KeyID,
 		Scope:        a.role.AppObjectID,
 		IssuedBy:     "cloud-creds-azure/v0.1",
@@ -237,11 +237,13 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	return nil, nil
 }
 
+// pathCredsRenew refuses renewal. The client secret's endDateTime is fixed when
+// addPassword mints it (mint time + the role's default TTL) and Graph offers no
+// way to extend it, so a renewed lease would outlive the credential it names —
+// the client would hold a live-looking lease around a dead secret. Issue a new
+// credential instead.
 func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	resp := &logical.Response{Secret: req.Secret}
-	resp.Secret.TTL = req.Secret.TTL
-	resp.Secret.MaxTTL = req.Secret.MaxTTL
-	return resp, nil
+	return logical.ErrorResponse("azure client secrets cannot be renewed (endDateTime is fixed at mint); issue a new credential instead"), nil
 }
 
 // selectedMinter bundles the result of selectMinter: the set and minter that

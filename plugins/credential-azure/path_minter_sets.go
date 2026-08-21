@@ -108,6 +108,13 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 		return logical.ErrorResponse("invalid minter set: %v", err), nil
 	}
 	set := &cloudconfig.MinterSet{Name: name, Minters: minters}
+	// Prove the candidate minters can mint for the roles already bound to this
+	// set before persisting them (see capability.go). The validation above only
+	// inspects expiry metadata; without this a replacement minter that
+	// authenticates but cannot mint would be accepted silently.
+	if errResp := b.verifySetCapability(ctx, req.Storage, set); errResp != nil {
+		return errResp, nil
+	}
 	entry, err := logical.StorageEntryJSON("minter-sets/"+name, set)
 	if err != nil {
 		return nil, err
@@ -245,6 +252,16 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 	if _, herr := successorClient.CheckHealth(ctx, successor.RotationParams[fieldAppObjectID]); herr != nil {
 		b.cleanupSuccessor(ctx, client, successor)
 		return logical.ErrorResponse("successor minter failed health check: %v", herr), nil
+	}
+
+	// 3b. Health is not capability: the successor secret was minted on ONE app
+	//     registration, while the set's roles may name several, and a successor
+	//     that can read an application cannot necessarily add passwords to it.
+	//     Probe the successor against every bound role before committing, and
+	//     clean up if it cannot serve them all.
+	if errResp := b.verifySuccessorCapability(ctx, req.Storage, name, successor); errResp != nil {
+		b.cleanupSuccessor(ctx, client, successor)
+		return errResp, nil
 	}
 
 	// 4. Commit: append the real successor active, mark the old retired, then

@@ -28,6 +28,11 @@ type UpCloudServer struct {
 	// (the successor authenticates AS its own token, which the fake mints with a
 	// distinct prefix) without disturbing the minting client's health.
 	failHealthPrefix string
+	// noMintPrefix, when non-empty, makes POST /1.3/account/tokens return 403 for
+	// any request whose basic-auth password has it as a prefix. Test-only: models
+	// an UpCloud token that authenticates but was created WITHOUT
+	// can_create_tokens, which is invisible to GET /1.3/account.
+	noMintPrefix string
 }
 
 func NewUpCloudServer() *UpCloudServer {
@@ -98,6 +103,18 @@ func (s *UpCloudServer) SetFailHealthForTokenPrefix(prefix string) {
 	s.failHealthPrefix = prefix
 }
 
+// SetForbidMintForTokenPrefix makes POST /1.3/account/tokens return 403 for any
+// request whose basic-auth password starts with prefix (empty disables).
+// Test-only: a token minted by this fake carries the "ucat_fake_" prefix, so
+// forbidding that prefix models a rotation successor that is live and healthy
+// but was not given can_create_tokens, while the operator-provided minters keep
+// minting.
+func (s *UpCloudServer) SetForbidMintForTokenPrefix(prefix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noMintPrefix = prefix
+}
+
 // CanCreateTokens reports the can_create_tokens flag recorded for a created
 // token id (false if absent). Test-only: lets a rotation test assert the
 // successor was minted itself-mint-capable.
@@ -159,6 +176,21 @@ func (s *UpCloudServer) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.checkInjectedError(w) {
+		return
+	}
+
+	_, password, _ := r.BasicAuth()
+	s.mu.Lock()
+	noMint := s.noMintPrefix
+	s.mu.Unlock()
+	if noMint != "" && strings.HasPrefix(password, noMint) {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyError: map[string]interface{}{
+				"error_code":    "FORBIDDEN",
+				"error_message": "this token is not permitted to create tokens",
+			},
+		})
 		return
 	}
 

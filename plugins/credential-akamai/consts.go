@@ -37,6 +37,9 @@ const (
 	// fieldMinterRetireGrace is the config field/response key for the retirement
 	// grace (seconds before a retired minter's upstream API client is swept).
 	fieldMinterRetireGrace = "minter_retire_grace"
+	// fieldVerifyCapability is the config field toggling the capability probe
+	// (a throwaway mint-and-delete) run at minter-set and role write.
+	fieldVerifyCapability = "verify_minter_capability"
 )
 
 // pathConfig is the bare config endpoint path (operational + cloud settings).
@@ -45,11 +48,21 @@ const pathConfig = "config"
 // fieldAPIURL is the config field that overrides the Akamai API base URL.
 const fieldAPIURL = "akamai_api_url"
 
-// jsonKeyAPIs / jsonKeyGroups are the apiAccess / groupAccess request-body keys
-// shared by issuance (roleAccess) and rotation (RotateMinter).
+// jsonKeyAPIs / jsonKeyGroups and the per-entry keys are the apiAccess /
+// groupAccess request-body keys shared by issuance (roleAccess) and rotation
+// (RotateMinter / successorGrants).
 const (
-	jsonKeyAPIs   = "apis"
-	jsonKeyGroups = "groups"
+	jsonKeyAPIs        = "apis"
+	jsonKeyGroups      = "groups"
+	jsonKeyAPIID       = "apiId"
+	jsonKeyAccessLevel = "accessLevel"
+	jsonKeyGroupID     = "groupId"
+)
+
+// fieldDefaultTTL / fieldMaxTTL are the role TTL field names.
+const (
+	fieldDefaultTTL = "default_ttl"
+	fieldMaxTTL     = "max_ttl"
 )
 
 // metricNamespace is the leading segment of every metric key this plugin emits.

@@ -172,8 +172,12 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	if err != nil {
 		client, err = b.anyHealthyMinterInSet(minterSet)
 		if err != nil {
+			// The upstream credential has no expiry of its own, so it does NOT
+			// lapse when the lease does: the owner-tag reconciler is the only
+			// backstop that will eventually delete it.
 			b.Logger().Warn("revoke: issuing minter gone and no fallback in set; "+
-				"leaving credential to expire via TTL",
+				"credential left upstream for the owner-tag reconciler to delete "+
+				"(it does not expire on its own)",
 				"minter_set", minterSet, "minter_id", minterID)
 			_ = req.Storage.Delete(ctx, "active-tokens/"+keyID)
 			return nil, nil

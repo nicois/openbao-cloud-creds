@@ -18,6 +18,10 @@ const (
 	// grace; present for a uniform config surface across all clouds (DO never
 	// marks a minter retired, so no sweep ever consumes it).
 	fieldMinterRetireGrace = "minter_retire_grace"
+	// fieldVerifyCapability is the config field gating the capability probe (a
+	// throwaway mint-and-delete proving a minter can mint, not merely
+	// authenticate). See capability.go.
+	fieldVerifyCapability = "verify_minter_capability"
 )
 
 // Path and field keys reused across schemas, request handlers, and tests.

@@ -58,7 +58,8 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatal("expected credential.tenant_id")
 	}
 
-	// 2. Renew lease
+	// 2. Renewal must be refused: the secret's endDateTime is fixed at mint, so a
+	// renewed lease would outlive the credential.
 	renewReq := &logical.Request{
 		Operation: logical.RenewOperation,
 		Path:      "creds/test-role",
@@ -66,8 +67,11 @@ func TestFullLifecycle(t *testing.T) {
 		Secret:    issueResp.Secret,
 	}
 	renewResp, err := b.HandleRequest(context.Background(), renewReq)
-	if err != nil || (renewResp != nil && renewResp.IsError()) {
-		t.Fatalf("renew failed: err=%v resp=%v", err, renewResp)
+	if err != nil {
+		t.Fatalf("renew: unexpected error: %v", err)
+	}
+	if renewResp == nil || !renewResp.IsError() {
+		t.Fatalf("expected renew to be refused, got %v", renewResp)
 	}
 
 	// 3. Revoke lease

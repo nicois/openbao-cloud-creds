@@ -16,6 +16,13 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
+	// Role and minter-set writes run a capability probe (a real
+	// generateAccessToken), so a test backend with no injected client would
+	// otherwise try to sign a JWT with a fake SA key and call Google. Tests that
+	// need particular impersonation behaviour inject their own factory over this.
+	credentialgcp.SetIAMClientFactory(b, func(_ string) credentialgcp.IAMCredentialsClient {
+		return credentialgcp.NewFakeIAMClient(nil, nil)
+	})
 	return b, config.StorageView
 }
 

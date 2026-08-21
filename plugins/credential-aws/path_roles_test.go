@@ -175,6 +175,30 @@ func TestRoleValidation_TTLTooLow(t *testing.T) {
 	}
 }
 
+// TestRoleValidation_MaxTTLTooLow covers the max_ttl end of the STS floor: a
+// max_ttl under 900s would cap every lease below STS's documented minimum
+// DurationSeconds, so AssumeRole would reject the mint at read time.
+func TestRoleValidation_MaxTTLTooLow(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "roles/bad-role",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"default_ttl":  300,
+			"max_ttl":      600, // below the 900s STS minimum
+			"iam_role_arn": "arn:aws:iam::123456789012:role/test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatal("expected error for max_ttl below 900s")
+	}
+}
+
 func TestRoleValidation_TTLTooHigh(t *testing.T) {
 	b, storage := getTestBackend(t)
 

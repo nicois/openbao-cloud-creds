@@ -25,6 +25,12 @@ type ExoscaleServer struct {
 	// fake mints with a distinct prefix) without disturbing the minting client's
 	// health.
 	failHealthPrefix string
+	// noCreatePrefix, when non-empty, makes POST /v2/api-key return 403 for any
+	// request whose bearer key has it as a prefix, while GET /v2/zone still
+	// succeeds. Test-only: reproduces the Exoscale minter whose IAM role permits
+	// everything the health check touches but not api-key creation — the condition
+	// the capability probe exists to catch.
+	noCreatePrefix string
 }
 
 func NewExoscaleServer() *ExoscaleServer {
@@ -81,6 +87,17 @@ func (s *ExoscaleServer) SetFailHealthForKeyPrefix(prefix string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failHealthPrefix = prefix
+}
+
+// SetForbidCreateForKeyPrefix makes POST /v2/api-key return 403 for any request
+// whose bearer key starts with prefix (empty disables), leaving GET /v2/zone
+// healthy. Test-only: the fake mints keys with the "EXOsecret_fake_" prefix, so
+// forbidding that prefix makes exactly a rotation successor incapable of minting
+// while it still passes its health check.
+func (s *ExoscaleServer) SetForbidCreateForKeyPrefix(prefix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noCreatePrefix = prefix
 }
 
 // RoleIDForKey returns the role-id recorded for a created key-id (empty if
@@ -144,6 +161,21 @@ func (s *ExoscaleServer) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.checkInjectedError(w) {
+		return
+	}
+	// Per-key mint refusal: a key whose IAM role cannot create api-keys.
+	key := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	s.mu.Lock()
+	noCreate := s.noCreatePrefix
+	s.mu.Unlock()
+	if noCreate != "" && strings.HasPrefix(key, noCreate) {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    "FORBIDDEN",
+				jsonKeyMessage: "this api-key's IAM role does not permit api-key creation",
+			},
+		})
 		return
 	}
 

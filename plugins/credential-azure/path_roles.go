@@ -36,12 +36,12 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
-				"default_ttl": {
+				fieldDefaultTTL: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleTTLSeconds,
 					Description: "Default lease TTL (password expiry)",
 				},
-				"max_ttl": {
+				fieldMaxTTL: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum lease TTL",
@@ -80,8 +80,8 @@ func (b *backend) rolePaths() []*framework.Path {
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
-	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
-	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
+	defaultTTL := time.Duration(d.Get(fieldDefaultTTL).(int)) * time.Second
+	maxTTL := time.Duration(d.Get(fieldMaxTTL).(int)) * time.Second
 	appObjectID := d.Get(fieldAppObjectID).(string)
 	clientID := d.Get(fieldClientID).(string)
 
@@ -133,6 +133,12 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MinterSet:      minterSet,
 	}
 
+	// Prove the bound set's minters can actually mint what this role asks for,
+	// so an unsuitable minting key is reported to whoever wrote the role rather
+	// than to the first caller that reads credentials from it.
+	if errResp := b.verifyRoleCapability(ctx, req.Storage, azRole); errResp != nil {
+		return errResp, nil
+	}
 	entry, err := logical.StorageEntryJSON("roles/"+name, azRole)
 	if err != nil {
 		return nil, err
@@ -162,8 +168,8 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 	return &logical.Response{
 		Data: map[string]interface{}{
 			fieldName:         role.Name,
-			"default_ttl":     int(role.DefaultTTL.Seconds()),
-			"max_ttl":         int(role.MaxTTL.Seconds()),
+			fieldDefaultTTL:   int(role.DefaultTTL.Seconds()),
+			fieldMaxTTL:       int(role.MaxTTL.Seconds()),
 			fieldAppObjectID:  role.AppObjectID,
 			fieldClientID:     role.ClientID,
 			"subscription_id": role.SubscriptionID,

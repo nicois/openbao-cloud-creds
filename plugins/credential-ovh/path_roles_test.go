@@ -2,6 +2,7 @@ package credentialovh_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -149,6 +150,48 @@ func TestRoleValidation_DefaultTTLTooHigh(t *testing.T) {
 	}
 }
 
+// TestRoleValidation_TTLTooLow covers the TTL-honesty floor: OVH tokens live for
+// exactly 1h (no mint-time lifetime parameter) and OVH has no token-revoke API,
+// so a sub-1h role TTL would end the lease while the credential stayed valid
+// upstream. Such roles are rejected at write time instead.
+func TestRoleValidation_TTLTooLow(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		defaultTTL int
+		maxTTL     int
+	}{
+		{"default_ttl below 1h", 900, 3600},
+		{"both below 1h", 1800, 1800},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, storage := getTestBackend(t)
+			writeDefaultMinterSet(t, b, storage)
+
+			resp, err := b.HandleRequest(context.Background(), &logical.Request{
+				Operation: logical.UpdateOperation,
+				Path:      "roles/short-role",
+				Storage:   storage,
+				Data: map[string]interface{}{
+					"default_ttl": tc.defaultTTL,
+					"max_ttl":     tc.maxTTL,
+					"minter_set":  "default",
+				},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if resp == nil || !resp.IsError() {
+				t.Fatal("expected error for TTL below 3600s")
+			}
+			if msg := resp.Error().Error(); !strings.Contains(msg, "at least 3600 seconds") {
+				t.Fatalf("expected sub-1h TTL rejection, got %q", msg)
+			}
+		})
+	}
+}
+
+// Note: with both bounds pinned to 3600s the sub-1h floor rejects this role too;
+// the assertion is only that an inverted default/max pair cannot be written.
 func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 	b, storage := getTestBackend(t)
 	writeDefaultMinterSet(t, b, storage)

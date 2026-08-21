@@ -15,6 +15,10 @@ const (
 	fieldClientID    = "client_id"
 	fieldAppObjectID = "app_object_id"
 
+	// fieldDefaultTTL / fieldMaxTTL are the role TTL field names.
+	fieldDefaultTTL = "default_ttl"
+	fieldMaxTTL     = "max_ttl"
+
 	// fieldRotationParams is the per-minter rotation metadata map key (carries
 	// app_object_id and, after rotation, the upstream key_id used by the
 	// retired-sweep to removePassword the old secret).
@@ -28,6 +32,9 @@ const (
 	// fieldMinterRetireGrace is the config field/response key for the retirement
 	// grace (seconds before a retired minter's upstream credential is swept).
 	fieldMinterRetireGrace = "minter_retire_grace"
+	// fieldVerifyCapability is the config field toggling the capability probe
+	// (a throwaway mint-and-delete) run at minter-set and role write.
+	fieldVerifyCapability = "verify_minter_capability"
 )
 
 // pathConfig is the bare config endpoint path (operational + cloud settings).

@@ -107,6 +107,13 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MinterSet:  minterSet,
 	}
 
+	// Prove the bound set's minters can actually mint what this role asks for
+	// before persisting it, so an unsuitable pairing is rejected here rather than
+	// at the first credential read (see capability.go).
+	if errResp := b.verifyRoleCapability(ctx, req.Storage, doR); errResp != nil {
+		return errResp, nil
+	}
+
 	entry, err := logical.StorageEntryJSON("roles/"+name, doR)
 	if err != nil {
 		return nil, err

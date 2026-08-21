@@ -11,7 +11,15 @@ Control-plane services and CI jobs need short-lived, role-scoped credentials for
 - **JIT** (mint on read, revoke on lease end) — the strategy for nine of ten clouds. The plugin holds a long-lived "minter" credential and calls the cloud API per request to mint a short-lived credential. Clouds whose tokens expire naturally (AWS STS, GCP impersonation, OVH OAuth2 tokens) need no revoke call; the rest (DO, UpCloud, Azure, Exoscale, Vultr, Akamai) hard-revoke the upstream credential on lease end.
 - **Phased rotation** — N pre-provisioned credential slots rotated on schedule with phase offsets, so the freshest slot's TTL is always honest. Used only by Oracle (OCI), whose 2-token-per-user quota rules out per-request minting.
 
-Every issued lease's `expires_at` reflects actual remaining validity. Steady-state rotation is fully headless. Auto-deletion of expired or rotated-out credentials is bounded by an owner-tag scheme — the reconciler will only ever touch entities the plugin itself created. Issue-time upstream failures surface a stable `error_code` (`upstream_quota_exceeded`, `upstream_timeout`, `upstream_auth_failed`, `entity_unavailable`, or `internal`) so callers can distinguish retryable from fatal; raw upstream response bodies are logged operator-side, never returned to clients.
+Every issued lease's `expires_at` reflects actual remaining validity — never more
+than the credential really has. Where a cloud can't be made to honour a requested
+TTL, the *role* is rejected rather than the promise broken: OVH tokens are a fixed
+1 hour with no revoke API, so OVH roles must declare exactly `3600s`; AWS roles are
+held to STS's documented 900s–43200s range; GCP to ≤43200s; UpCloud to ≤8760h. And
+a lease is renewable only where the credential's expiry isn't already fixed at mint
+time. The full per-cloud matrix — who shortens at mint, who revokes at lease end,
+and the one deliberate case where a credential outlives its lease (OCI's rotation
+slots) — is in [`docs/ttl-semantics.md`](docs/ttl-semantics.md). Steady-state rotation is fully headless. Auto-deletion of expired or rotated-out credentials is bounded by an owner-tag scheme — the reconciler will only ever touch entities the plugin itself created. Issue-time upstream failures surface a stable `error_code` (`upstream_quota_exceeded`, `upstream_timeout`, `upstream_auth_failed`, `entity_unavailable`, or `internal`) so callers can distinguish retryable from fatal; raw upstream response bodies are logged operator-side, never returned to clients.
 
 The long-lived **minter** credentials themselves are observable (an age gauge plus a configurable near-expiry warning) and, on the clouds whose API can mint a mint-capable successor, rotatable through a uniform operator-initiated endpoint — see [Minter lifecycle](#minter-lifecycle).
 
@@ -19,7 +27,7 @@ The long-lived **minter** credentials themselves are observable (an age gauge pl
 
 | Plugin | Strategy | Upstream mechanism | Minter self-rotation |
 |--------|----------|--------------------|----------------------|
-| `credential-do` | JIT | DigitalOcean API tokens (`POST /v2/tokens`) — reference implementation | — |
+| `credential-do` | JIT | DigitalOcean API tokens (`POST /v2/tokens`¹) — reference implementation | — |
 | `credential-aws` | JIT | STS AssumeRole (called directly) | ✅ `CreateAccessKey` |
 | `credential-gcp` | JIT | Service-account impersonation (`generateAccessToken`) | ✅ `keys.create` (org-policy permitting) |
 | `credential-azure` | JIT | Graph API client secrets on app registrations | ✅ `addPassword` (rotation reference) |
@@ -32,7 +40,11 @@ The long-lived **minter** credentials themselves are observable (an age gauge pl
 
 The `minter-sets/<set>/rotate` endpoint exists on all ten plugins for a uniform API surface; the four marked **—** (DO, OVH, Vultr, OCI) reject it with "rotation not supported, rotate out-of-band" because their APIs cannot mint a mint-capable successor (verified — see [`docs/cloud-credential-research.md`](docs/cloud-credential-research.md)).
 
-Object-storage credentials (S3-style backup keys) are **out of scope** — see [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md). DigitalOcean Spaces is not supported because DO exposes no public API for managing Spaces access keys.
+¹ **`POST /v2/tokens` is not a public documented DigitalOcean endpoint.** DO's public OpenAPI spec has no `/v2/tokens` path, and DO documents personal-access-token creation as a control-panel flow only; the plugin uses the control-panel-internal endpoint, which works but carries no stability contract. The documented alternative (the OAuth flow) requires interactive authorization and cannot mint headlessly. Accepted, documented risk — details and the verification method in [`docs/do-api-verification-2026-08-21.md`](docs/do-api-verification-2026-08-21.md).
+
+DO roles take DigitalOcean's fine-grained scopes (`<resource>:<verb>`) verbatim, so a role can be narrowed to exactly the operations it needs — e.g. `scopes=droplet:create,droplet:read` for a role that may only launch and list Droplets. Scope strings are passed through unvalidated, and the minter must itself hold every scope it grants.
+
+Object-storage credentials (S3-style backup keys) are **out of scope** — see [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md). (DigitalOcean Spaces keys *are* API-issuable as of 2026-08 via `/v2/spaces/keys`, contrary to the original audit; object storage as a whole is simply not built here, and DO's 200-keys-per-account cap rules out the long-lived per-customer use case that motivated the audit.)
 
 ## Configuration flow
 
@@ -46,33 +58,54 @@ bao write cloud-creds/<cloud>/roles/<role> minter_set=<set> <role fields>
 
 Minters live in named **minter sets**, not in `config`. Every role is bound to a required `minter_set` and mints only from that set's credentials — the isolation boundary for least-privilege and audit provenance. Each issued credential records its `minter_set` and `minter_id` in the response envelope metadata (`api_version` 2). Each set must independently satisfy the minter-validation rule (at least one `never_expires` minter, or at least two with ≥7-day expiry separation) — evaluated over the set's **active** (non-retired) minters.
 
-The `config` endpoint's operational fields include `flush_interval`, `reconcile_cadence`, `max_deletes_per_pass`, `minter_expiry_warn` (the near-expiry warning threshold, default 7 days), and `minter_retire_grace` (how long a rotated-out minter stays usable before deletion, default 7 days — see below).
+The `config` endpoint's operational fields include `flush_interval`, `reconcile_cadence`, `max_deletes_per_pass`, `minter_expiry_warn` (the near-expiry warning threshold, default 7 days), `minter_retire_grace` (how long a rotated-out minter stays usable before deletion, default 7 days — see below), and `verify_minter_capability` (default **true** — see below).
+
+### Minter capability is verified, not assumed
+
+A health check proves a minter credential is *live*; it does not prove the credential may **mint** what the roles bound to its set ask for. AWS answers `GetCallerIdentity` without any policy permitting it; an Akamai api client can always read itself; UpCloud's account endpoint doesn't report `can_create_tokens`; GCP impersonation is a grant on each *target* service account. So an under-privileged minter is reported healthy indefinitely and fails at the first credential read — as an upstream 403 delivered to an unrelated caller, long after the operator who caused it got a `200 OK`.
+
+Instead each plugin runs a **capability probe**: mint a throwaway credential using the same request shape a real issuance would use, then delete it. Probes run when a minter set is written, when a role is bound to a set, and before a minter rotation commits — so an incapable minter is rejected at configuration time, naming the minter and the roles it cannot serve:
+
+```
+minter capability verification failed: minter "minter-1" cannot mint the
+credential role(s) purge-only require: probe api-client creation returned 403 …
+(set verify_minter_capability=false on the config endpoint to skip this check)
+```
+
+Verifying at role write is deliberate in both directions: it stops an operator defining a role whose minting key is unsuitable, and it means a minter set must exist and demonstrably work before roles can bind to it. On the three clouds that cannot revoke what the probe mints (AWS, GCP, OVH), the probe asks for the shortest lifetime the cloud accepts — a 900s STS session, a 60s GCP token, OVH's fixed 1h — and the credential is never returned to anyone. OCI is deliberately not probed: its two-auth-tokens-per-user cap means a probe would consume one of the rotation slots it exists to protect. Full per-cloud table, costs, and the escape hatch: [`docs/minter-capability-verification.md`](docs/minter-capability-verification.md).
 
 ## Minter lifecycle
 
 The long-lived minter credentials are the highest-value secrets at rest, so the plugins make them observable and, where the cloud API allows, rotatable.
 
 - **Observability.** On the health-check cadence each plugin emits `cloud_creds_minter_age_seconds` for **every** minter (including `never_expires` ones, which otherwise carry no lifetime signal), and logs a `minter nearing expiry` warning when an expiring minter is within `minter_expiry_warn` of its expiry.
-- **Self-rotation.** `bao write cloud-creds/<cloud>/minter-sets/<set>/rotate minter_id=<id>` mints a successor minter (a new long-lived credential of the same kind, itself mint-capable), health-checks it, and only then swaps it into the set and marks the old minter *retired*. The old credential is **not** deleted immediately: it stays upstream-alive for `minter_retire_grace` (default 7 days) so other nodes in a raft cluster — which cache the minter set in memory until they reload — keep working; a background sweep deletes the old upstream credential once the grace elapses. A retired minter is excluded from new issuance and from set validation the moment it is retired. Rotation is refused up front if retiring the chosen minter would leave the set unable to validate. Supported on the clouds marked ✅ above; the rest reject with a clear message.
+- **Self-rotation.** `bao write cloud-creds/<cloud>/minter-sets/<set>/rotate minter_id=<id>` mints a successor minter (a new long-lived credential of the same kind, itself mint-capable), health-checks it, **capability-probes it against every role bound to the set**, and only then swaps it into the set and marks the old minter *retired*. The old credential is **not** deleted immediately: it stays upstream-alive for `minter_retire_grace` (default 7 days) so other nodes in a raft cluster — which cache the minter set in memory until they reload — keep working; a background sweep deletes the old upstream credential once the grace elapses. A retired minter is excluded from new issuance and from set validation the moment it is retired. Rotation is refused up front if retiring the chosen minter would leave the set unable to validate. Supported on the clouds marked ✅ above; the rest reject with a clear message.
 
 ## Build and test
 
 ```bash
 go build github.com/nicois/openbao-cloud-creds/...   # build all (Go workspace)
 go test github.com/nicois/openbao-cloud-creds/...     # unit + fake-backed integration tests
+make test-conformance                                  # every shared test category × every plugin, plus the coverage matrix
 make smoke-test                                        # register every plugin in a live OpenBao dev server
 make lint                                              # golangci-lint v2 across all modules
 ```
 
 `make smoke-test` and the `cloud_real` build tag (`go test -tags=cloud_real ...`) require, respectively, an OpenBao binary on PATH and real cloud credentials.
 
+**Testing is conformance-first.** With ten near-identical plugins, a missing test looks exactly like a passing one, so every invariant that is about a plugin's own behaviour rather than a cloud's wire format is written once in `pkg/plugintest` and applied to all ten from a single table in the test-only [`conformance/`](conformance/) module: `reload`, `perturbation`, `revoke`, `capability`, `reconciler-safety`. A plugin missing from that table fails the build; a category that genuinely does not apply to a cloud must be *declared* with a reason (`Harness.Skips`) and is printed by `make test-conformance` as one reviewable line, rather than hidden in a `t.Skip`. Per-cloud vocabulary — mint shapes, deny knobs, unexported internals — stays in each plugin's own tests. Rationale in [`docs/decisions.md`](docs/decisions.md); the rules for contributors and agents are in [`AGENTS.md`](AGENTS.md).
+
 ## Documents
 
 - [`SUMMARY.md`](SUMMARY.md) — repository map: plugin/feature state, concepts, and a guide to every doc
+- [`AGENTS.md`](AGENTS.md) — how to change this repo without eroding it; the conformance-first testing rules
 - [`docs/cloud-credential-research.md`](docs/cloud-credential-research.md) — what each cloud's API supports; authoritative for per-cloud strategy
 - [`docs/techrfc.md`](docs/techrfc.md) — original RFC; authoritative for the response-envelope and error-code contract (its implementation-status notes are superseded — see the banner in that file)
 - [`docs/design.md`](docs/design.md) — companion design doc (same caveat)
 - [`docs/decisions.md`](docs/decisions.md) — non-obvious design choices and why
+- [`docs/ttl-semantics.md`](docs/ttl-semantics.md) — what a lease TTL means per cloud; enforced role-TTL bounds
+- [`docs/minter-capability-verification.md`](docs/minter-capability-verification.md) — why health ≠ capability, what each cloud's probe mints and costs, and what it deliberately doesn't cover
+- [`docs/known-issues.md`](docs/known-issues.md) — known issues and operational caveats (KI-001…)
 - [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md) — object-storage viability analysis (out of scope)
 
 ## License

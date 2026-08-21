@@ -85,6 +85,11 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     defaultMinterRetireGraceSeconds,
 					Description: "Seconds after a minter is retired before its upstream credential is deleted by the retired-sweep (unused on OVH: no self-rotation)",
 				},
+				fieldVerifyCapability: {
+					Type:        framework.TypeBool,
+					Default:     true,
+					Description: "Prove a minter can mint (throwaway mint-and-delete probe) at minter-set write and role write; set false only where a probe mint is unacceptable",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathConfigWrite},
@@ -104,6 +109,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
 	minterExpiryWarn := time.Duration(d.Get("minter_expiry_warn").(int)) * time.Second
 	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
+	verifyCapability := d.Get(fieldVerifyCapability).(bool)
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
@@ -113,6 +119,8 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		MaxDeletesPerPass: maxDeletesPerPass,
 		MinterExpiryWarn:  minterExpiryWarn,
 		MinterRetireGrace: minterRetireGrace,
+
+		VerifyMinterCapability: &verifyCapability,
 	}
 
 	entry, err := logical.StorageEntryJSON("config", cfg)
@@ -209,6 +217,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 			"reconcile_cadence":    int(cfg.ReconcileCadence.Seconds()),
 			"minter_expiry_warn":   int(cfg.MinterExpiryWarn.Seconds()),
 			fieldMinterRetireGrace: int(cfg.MinterRetireGrace.Seconds()),
+			fieldVerifyCapability:  cfg.CapabilityVerificationEnabled(),
 		},
 	}, nil
 }

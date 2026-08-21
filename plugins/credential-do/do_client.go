@@ -13,6 +13,16 @@ import (
 // httpTimeout bounds every DO API call the minter client makes.
 const httpTimeout = 30 * time.Second
 
+// The /v2/tokens endpoints used below (create/list/delete personal access
+// tokens) are NOT part of DigitalOcean's public API: they are absent from the
+// public OpenAPI spec, and DO documents PAT creation as a control-panel flow
+// only. They are what the control panel itself calls, and they are the only way
+// to mint headlessly — the documented OAuth flow needs interactive user
+// authorization — so this is a deliberate, documented dependency with no
+// stability contract. See docs/do-api-verification-2026-08-21.md (D1, D5); the
+// exact request shape (notably whether an expiry field is accepted or required,
+// which would give DO a native TTL) is unverified against real DO.
+
 type doClient struct {
 	baseURL    string
 	token      string

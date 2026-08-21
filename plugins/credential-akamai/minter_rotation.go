@@ -152,6 +152,15 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 		return errResp, nil
 	}
 
+	// 3b. Health is not capability: GET /api-clients/self succeeds for any live
+	//     EdgeGrid credential, including a successor whose copied grants came back
+	//     narrower than the incumbent's and so cannot delegate a bound role's
+	//     apiAccess. Prove the successor can mint before committing.
+	if errResp := b.verifySuccessorCapability(ctx, req.Storage, name, successor); errResp != nil {
+		b.cleanupSuccessor(ctx, client, successor)
+		return errResp, nil
+	}
+
 	// 4. Commit: append the real successor active, mark the old retired, then
 	//    persist the set and refresh the in-memory snapshot.
 	set.Minters = withRotatedSuccessor(set.Minters, oldIdx, retiredAt, successor)

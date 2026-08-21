@@ -33,6 +33,10 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]interface{}{
 			"region": "eu",
+			// The injected token client fails on purpose, so the role-write capability
+			// probe would (correctly) reject the role. This test exercises issuance-time
+			// failure/recovery, not configuration-time verification.
+			"verify_minter_capability": false,
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), req)

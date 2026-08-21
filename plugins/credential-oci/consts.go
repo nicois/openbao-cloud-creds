@@ -24,6 +24,9 @@ const (
 	// phased slot rotation and never marks a minter retired, so no sweep ever
 	// consumes it.
 	fieldMinterRetireGrace = "minter_retire_grace"
+	// fieldVerifyCapability is the config field toggling the capability probe
+	// (a throwaway mint-and-delete) run at minter-set and role write.
+	fieldVerifyCapability = "verify_minter_capability"
 )
 
 // descRoleName is the shared field description for the role-name parameter.

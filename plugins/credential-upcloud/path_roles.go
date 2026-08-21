@@ -14,6 +14,19 @@ const (
 	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
 	defaultRoleTTLSeconds    = 900  // 15m
 	defaultRoleMaxTTLSeconds = 3600 // 1h
+
+	// maxUpCloudTTL is UpCloud's documented ceiling on a token's expires_in
+	// ("a positive duration and maximum of 8760h"). A role TTL above it would
+	// fail at mint time with an upstream 4xx, so it is rejected at role write.
+	// There is no documented minimum: UpCloud honours any positive expires_in,
+	// the plugin passes the role TTL through as the token's lifetime, and the
+	// lease additionally hard-revokes the token — so short TTLs are honest.
+	maxUpCloudTTL = 8760 * time.Hour
+
+	// upcloudLongTTLMsg is the rejection for a TTL above maxUpCloudTTL; %s is the
+	// field name.
+	upcloudLongTTLMsg = "%s must not exceed 8760h (365 days): UpCloud caps an API " +
+		"token's expires_in at that value and would reject the mint request"
 )
 
 type upcloudRole struct {
@@ -34,12 +47,12 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
-				"default_ttl": {
+				fieldDefaultTTL: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleTTLSeconds,
 					Description: "Default lease TTL",
 				},
-				"max_ttl": {
+				fieldMaxTTL: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum lease TTL",
@@ -70,9 +83,17 @@ func (b *backend) rolePaths() []*framework.Path {
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
-	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
-	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
+	defaultTTL := time.Duration(d.Get(fieldDefaultTTL).(int)) * time.Second
+	maxTTL := time.Duration(d.Get(fieldMaxTTL).(int)) * time.Second
 	scopes := d.Get(fieldScopes).(string)
+
+	// UpCloud rejects an expires_in above 8760h; catch it here rather than at mint.
+	if maxTTL > maxUpCloudTTL {
+		return logical.ErrorResponse(upcloudLongTTLMsg, "max_ttl"), nil
+	}
+	if defaultTTL > maxUpCloudTTL {
+		return logical.ErrorResponse(upcloudLongTTLMsg, "default_ttl"), nil
+	}
 
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
@@ -107,6 +128,12 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MinterSet:  minterSet,
 	}
 
+	// Prove the bound set's minters can actually mint what this role asks for,
+	// so an unsuitable minting key is reported to whoever wrote the role rather
+	// than to the first caller that reads credentials from it.
+	if errResp := b.verifyRoleCapability(ctx, req.Storage, ucRole); errResp != nil {
+		return errResp, nil
+	}
 	entry, err := logical.StorageEntryJSON("roles/"+name, ucRole)
 	if err != nil {
 		return nil, err
@@ -135,11 +162,11 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			fieldName:      role.Name,
-			"default_ttl":  int(role.DefaultTTL.Seconds()),
-			"max_ttl":      int(role.MaxTTL.Seconds()),
-			fieldScopes:    role.Scopes,
-			fieldMinterSet: role.MinterSet,
+			fieldName:       role.Name,
+			fieldDefaultTTL: int(role.DefaultTTL.Seconds()),
+			fieldMaxTTL:     int(role.MaxTTL.Seconds()),
+			fieldScopes:     role.Scopes,
+			fieldMinterSet:  role.MinterSet,
 		},
 	}, nil
 }

@@ -24,6 +24,25 @@ const akamaiMaxBodyHashBytes = 131072
 // at rotation time rather than hard-coding it.
 const fakeIdentityManagementAPIID = 4200
 
+// accessLevelRW is the Akamai grant level the fake reports and accepts.
+const accessLevelRW = "READ-WRITE"
+
+// JSON keys of the apiAccess / groupAccess grant bodies the fake reports and
+// parses.
+const (
+	jsonKeyAPIID       = "apiId"
+	jsonKeyAPIName     = "apiName"
+	jsonKeyAccessLevel = "accessLevel"
+)
+
+// fakeContentAPIID is the apiId of a non-Identity-Management API the fake's
+// default self-grants include, standing in for whatever content API a minter
+// hands out to its roles. Rotation must copy it onto the successor.
+const fakeContentAPIID = 4300
+
+// fakeSelfGroupID is the groupId in the fake's default self group-access.
+const fakeSelfGroupID = 7700
+
 // fakeIdentityManagementAPIName is the apiName the fake reports for the
 // Identity-Management API; it must match the name the plugin matches on.
 const fakeIdentityManagementAPIName = "Identity Management: API Clients"
@@ -61,6 +80,17 @@ type AkamaiServer struct {
 	// identityManagementAPIID is the per-account apiId returned by the
 	// allowed-apis lookup for the Identity-Management API.
 	identityManagementAPIID int
+	// selfAPIAccess / selfGroupAccess are the grants GET /api-clients/self reports
+	// for the signing credential. Rotation replicates these onto the successor, so
+	// tests set them to assert the copy (SetSelfGrants).
+	selfAPIAccess   interface{}
+	selfGroupAccess interface{}
+	// ungrantableAPIID, when non-zero, is an apiId this account's signing
+	// credential may not delegate: creating an api client whose apiAccess includes
+	// it returns 403. Models the real Akamai rule that an api client cannot grant
+	// access it does not itself hold — the "authenticates but cannot mint" case
+	// (SetUngrantableAPIID).
+	ungrantableAPIID int
 }
 
 func NewAkamaiServer() *AkamaiServer {
@@ -74,8 +104,62 @@ func NewAkamaiServer() *AkamaiServer {
 	}
 	s.nextID.Store(fakeStartID)
 	s.nextCredID.Store(fakeStartCredID)
+	// Default self-grants: a minter that can reach one content API plus
+	// Identity-Management, which is the realistic shape of an operator-provisioned
+	// minter (it must hold every api its roles hand out).
+	s.selfAPIAccess = map[string]interface{}{
+		"allAccessibleApis": false,
+		"apis": []map[string]interface{}{
+			{jsonKeyAPIID: fakeContentAPIID, jsonKeyAPIName: "CCU APIs", jsonKeyAccessLevel: accessLevelRW},
+			{jsonKeyAPIID: fakeIdentityManagementAPIID, jsonKeyAPIName: fakeIdentityManagementAPIName, jsonKeyAccessLevel: accessLevelRW},
+		},
+	}
+	s.selfGroupAccess = map[string]interface{}{"groups": []map[string]interface{}{{"groupId": fakeSelfGroupID}}}
 	s.Server = httptest.NewServer(s.handler())
 	return s
+}
+
+// SetSelfGrants overrides the apiAccess / groupAccess GET /api-clients/self
+// reports. Test-only: rotation copies these onto the successor, so a test can
+// give the incumbent a distinctive grant and assert the successor received it.
+func (s *AkamaiServer) SetSelfGrants(apiAccess, groupAccess interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selfAPIAccess = apiAccess
+	s.selfGroupAccess = groupAccess
+}
+
+// IdentityManagementAPIID returns the per-account apiId the fake reports for the
+// Identity-Management API in the allowed-apis lookup. Test-only: rotation
+// resolves this id at run time, so a test asserting the successor's grants needs
+// to know which id to look for.
+func (s *AkamaiServer) IdentityManagementAPIID() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.identityManagementAPIID
+}
+
+// SetUngrantableAPIID makes POST /api-clients reject any request whose apiAccess
+// includes the given apiId with 403, while GET /api-clients/self keeps
+// succeeding. Test-only: this is the shape of a minter that is healthy but
+// cannot mint what a role asks for.
+func (s *AkamaiServer) SetUngrantableAPIID(apiID int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ungrantableAPIID = apiID
+}
+
+// GrantsForClient returns the apiAccess and groupAccess recorded for a created
+// API client. Test-only: lets a rotation test assert what the successor was
+// actually granted.
+func (s *AkamaiServer) GrantsForClient(clientID string) (apiAccess, groupAccess interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.clients[clientID]
+	if !ok {
+		return nil, nil
+	}
+	return c["apiAccess"], c["groupAccess"]
 }
 
 // fakeStandardCredentials are the minter triples (client_token -> client_secret)
@@ -348,6 +432,19 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.mu.Lock()
+	forbidden := s.ungrantableAPIID
+	s.mu.Unlock()
+	if forbidden != 0 && apiAccessGrants(req.APIAccess, forbidden) {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/forbidden",
+			jsonKeyTitle:  "Forbidden",
+			jsonKeyDetail: fmt.Sprintf("you may not grant access to apiId %d", forbidden),
+		})
+		return
+	}
+
 	clientID := fmt.Sprintf("akamai-client-%d", s.nextID.Add(1))
 
 	client := map[string]interface{}{
@@ -380,6 +477,30 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, client)
+}
+
+// apiAccessGrants reports whether a create-api-client apiAccess body asks for the
+// given apiId. The body is whatever the caller sent, so every level is checked
+// defensively rather than assumed.
+func apiAccessGrants(apiAccess interface{}, apiID int) bool {
+	access, ok := apiAccess.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	apis, ok := access["apis"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, entry := range apis {
+		api, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if id, ok := api[jsonKeyAPIID].(float64); ok && int(id) == apiID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AkamaiServer) deleteClient(w http.ResponseWriter, r *http.Request) {
@@ -454,9 +575,9 @@ func (s *AkamaiServer) allowedAPIs(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	writeJSON(w, []map[string]interface{}{
 		{
-			"apiId":        apiID,
-			"apiName":      fakeIdentityManagementAPIName,
-			"accessLevels": []string{"READ-ONLY", "READ-WRITE"},
+			jsonKeyAPIID:   apiID,
+			jsonKeyAPIName: fakeIdentityManagementAPIName,
+			"accessLevels": []string{"READ-ONLY", accessLevelRW},
 		},
 	})
 }
@@ -483,11 +604,17 @@ func (s *AkamaiServer) getSelf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.mu.Lock()
+	apiAccess, groupAccess := s.selfAPIAccess, s.selfGroupAccess
+	s.mu.Unlock()
+
 	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]interface{}{
 		jsonKeyClientID:    "minter-self-id",
 		jsonKeyClientName:  "cloud-creds-minter",
 		jsonKeyIsLocked:    false,
 		jsonKeyCreatedDate: "2025-01-01T00:00:00Z",
+		"apiAccess":        apiAccess,
+		"groupAccess":      groupAccess,
 	})
 }

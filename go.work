@@ -1,6 +1,8 @@
 go 1.26.1
 
 use (
+	./conformance
+	./pkg/capability
 	./pkg/cloudconfig
 	./pkg/credenvelope
 	./pkg/localexpiry

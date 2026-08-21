@@ -16,6 +16,12 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
+	// Role and minter-set writes run a capability probe (a real AssumeRole), so a
+	// test backend with no injected client would otherwise call AWS. Tests that
+	// need particular STS behaviour inject their own factory over this one.
+	credentialaws.SetSTSClientFactory(b, func(_, _, _, _ string) credentialaws.STSClient {
+		return credentialaws.NewFakeSTSClient(nil, nil)
+	})
 	return b, config.StorageView
 }
 

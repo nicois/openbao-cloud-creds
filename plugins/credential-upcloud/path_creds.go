@@ -88,7 +88,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		},
 		ExpiresAt:    expiresAt,
 		TTLSeconds:   int(role.DefaultTTL.Seconds()),
-		Renewable:    true,
+		Renewable:    false, // expires_in is fixed at mint — see pathCredsRenew
 		CredentialID: tokenResp.ID,
 		Scope:        role.Scopes,
 		IssuedBy:     "cloud-creds-upcloud/v0.1",
@@ -170,11 +170,11 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	return nil, nil
 }
 
+// pathCredsRenew refuses renewal. The token's expires_in is fixed when UpCloud
+// mints it (the role's default TTL) and there is no extend API, so a renewed
+// lease would outlive the token it names. Issue a new credential instead.
 func (b *backend) pathCredsRenew(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	resp := &logical.Response{Secret: req.Secret}
-	resp.Secret.TTL = req.Secret.TTL
-	resp.Secret.MaxTTL = req.Secret.MaxTTL
-	return resp, nil
+	return logical.ErrorResponse("upcloud api tokens cannot be renewed (expires_in is fixed at mint); issue a new credential instead"), nil
 }
 
 // loadRole fetches and validates a role for issuance. It returns either the

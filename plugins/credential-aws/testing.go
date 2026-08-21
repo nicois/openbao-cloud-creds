@@ -2,6 +2,7 @@ package credentialaws
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -38,4 +39,23 @@ func NewFakeSTSClient(assumeRoleFn AssumeRoleFunc, getCallerIdentityFn GetCaller
 		assumeRoleFunc:        assumeRoleFn,
 		getCallerIdentityFunc: getCallerIdentityFn,
 	}
+}
+
+// NewSwitchableSTSClient returns a fake STS client whose AssumeRole fails with
+// AccessDenied whenever deny() reports true, while GetCallerIdentity — the health
+// check, which AWS permits with no policy at all — keeps succeeding. That is the
+// "authenticates but cannot mint" shape the cloud-agnostic conformance suite
+// needs; deny is consulted per call, so the switch can be flipped between
+// requests. It lives here rather than in the caller so the STS request types stay
+// inside this module.
+func NewSwitchableSTSClient(deny func() bool, onMint func()) STSClient {
+	return NewFakeSTSClient(func(ctx context.Context, params *sts.AssumeRoleInput) (*sts.AssumeRoleOutput, error) {
+		if onMint != nil {
+			onMint()
+		}
+		if deny != nil && deny() {
+			return nil, fmt.Errorf("AccessDenied: this access key is not authorized to perform: sts:AssumeRole")
+		}
+		return NewFakeSTSClient(nil, nil).AssumeRole(ctx, params)
+	}, nil)
 }

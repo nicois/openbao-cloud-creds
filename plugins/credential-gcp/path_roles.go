@@ -13,6 +13,13 @@ import (
 
 const (
 	defaultScope = "https://www.googleapis.com/auth/cloud-platform"
+
+	// maxGCPTTL is the absolute ceiling on generateAccessToken's `lifetime`
+	// (12h, and only with the credential-lifetime-extension org policy; 1h
+	// otherwise). GCP documents NO minimum lifetime — any shorter lifetime is
+	// honoured verbatim and the token then expires on its own — so there is no
+	// floor to enforce here.
+	maxGCPTTL = 43200 * time.Second
 )
 
 type gcpRole struct {
@@ -34,12 +41,12 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
-				"default_ttl": {
+				fieldDefaultTTL: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleTTLSeconds,
 					Description: "Default token lifetime in seconds (max 3600s by default, up to 43200s with org policy)",
 				},
-				"max_ttl": {
+				fieldMaxTTL: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleTTLSeconds,
 					Description: "Maximum token lifetime in seconds",
@@ -48,7 +55,7 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Target service account email to impersonate (e.g. my-sa@project.iam.gserviceaccount.com)",
 				},
-				"scopes": {
+				fieldScopes: {
 					Type:        framework.TypeCommaStringSlice,
 					Default:     []string{defaultScope},
 					Description: "OAuth2 scopes for the generated access token",
@@ -73,10 +80,27 @@ func (b *backend) rolePaths() []*framework.Path {
 	}
 }
 
+// validateRoleShape rejects a target service account GCP could not parse and a
+// lifetime generateAccessToken could not honour. The ceiling is 43200s (12h, and
+// only with the credential-lifetime-extension org policy); GCP documents no
+// minimum, so no floor is invented. Returns nil when the role is enforceable.
+func validateRoleShape(serviceAccountEmail string, defaultTTL, maxTTL time.Duration) *logical.Response {
+	if !strings.Contains(serviceAccountEmail, "@") || !strings.HasSuffix(serviceAccountEmail, ".iam.gserviceaccount.com") {
+		return logical.ErrorResponse("service_account_email must be a valid GCP service account email (ending in .iam.gserviceaccount.com)")
+	}
+	if maxTTL > maxGCPTTL {
+		return logical.ErrorResponse("max_ttl must not exceed 43200 seconds (12 hours) per GCP limits")
+	}
+	if defaultTTL > maxGCPTTL {
+		return logical.ErrorResponse("default_ttl must not exceed 43200 seconds (12 hours) per GCP limits")
+	}
+	return nil
+}
+
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
-	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
-	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
+	defaultTTL := time.Duration(d.Get(fieldDefaultTTL).(int)) * time.Second
+	maxTTL := time.Duration(d.Get(fieldMaxTTL).(int)) * time.Second
 	serviceAccountEmail := d.Get(fieldServiceAccountEmail).(string)
 
 	if serviceAccountEmail == "" {
@@ -95,16 +119,8 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
 	}
 
-	// Validate service account email format
-	if !strings.Contains(serviceAccountEmail, "@") || !strings.HasSuffix(serviceAccountEmail, ".iam.gserviceaccount.com") {
-		return logical.ErrorResponse("service_account_email must be a valid GCP service account email (ending in .iam.gserviceaccount.com)"), nil
-	}
-
-	// GCP access tokens have a maximum lifetime of 3600s by default,
-	// or up to 43200s (12h) with the org policy constraint
-	// constraints/iam.allowServiceAccountCredentialLifetimeExtension
-	if maxTTL > 43200*time.Second {
-		return logical.ErrorResponse("max_ttl must not exceed 43200 seconds (12 hours) per GCP limits"), nil
+	if errResp := validateRoleShape(serviceAccountEmail, defaultTTL, maxTTL); errResp != nil {
+		return errResp, nil
 	}
 
 	role := &cloudconfig.Role{
@@ -113,7 +129,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
 		CloudConfig: map[string]interface{}{
-			"service_account_email": serviceAccountEmail,
+			fieldServiceAccountEmail: serviceAccountEmail,
 		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
@@ -121,7 +137,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	var scopes []string
-	if scopesRaw, ok := d.GetOk("scopes"); ok && scopesRaw != nil {
+	if scopesRaw, ok := d.GetOk(fieldScopes); ok && scopesRaw != nil {
 		scopes = scopesRaw.([]string)
 	}
 	if len(scopes) == 0 {
@@ -137,6 +153,12 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MinterSet:           minterSet,
 	}
 
+	// Prove the bound set's minters can actually mint what this role asks for,
+	// so an unsuitable minting key is reported to whoever wrote the role rather
+	// than to the first caller that reads credentials from it.
+	if errResp := b.verifyRoleCapability(ctx, req.Storage, gcpR); errResp != nil {
+		return errResp, nil
+	}
 	entry, err := logical.StorageEntryJSON("roles/"+name, gcpR)
 	if err != nil {
 		return nil, err
@@ -164,12 +186,12 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 	}
 
 	data := map[string]interface{}{
-		"name":                  role.Name,
-		"default_ttl":           int(role.DefaultTTL.Seconds()),
-		"max_ttl":               int(role.MaxTTL.Seconds()),
-		"service_account_email": role.ServiceAccountEmail,
-		"scopes":                role.Scopes,
-		"minter_set":            role.MinterSet,
+		fieldName:                role.Name,
+		fieldDefaultTTL:          int(role.DefaultTTL.Seconds()),
+		fieldMaxTTL:              int(role.MaxTTL.Seconds()),
+		fieldServiceAccountEmail: role.ServiceAccountEmail,
+		fieldScopes:              role.Scopes,
+		fieldMinterSet:           role.MinterSet,
 	}
 
 	return &logical.Response{Data: data}, nil

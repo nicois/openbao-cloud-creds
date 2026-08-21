@@ -20,11 +20,15 @@ const (
 
 type AzureServer struct {
 	*httptest.Server
-	mu                sync.Mutex
-	passwords         map[string]map[string]interface{} // keyId -> password credential
-	nextID            atomic.Int64
-	nextStatus        int
-	failGetApp        bool
+	mu         sync.Mutex
+	passwords  map[string]map[string]interface{} // keyId -> password credential
+	nextID     atomic.Int64
+	nextStatus int
+	failGetApp bool
+	// forbiddenApps names app registrations whose addPassword returns 403,
+	// modelling a service principal that may read an application but is not an
+	// owner of it (Application.ReadWrite.OwnedBy without ownership).
+	forbiddenApps     map[string]bool
 	tokenRequestCount atomic.Int64
 	validClientID     string
 	validClientSecret string
@@ -41,6 +45,7 @@ func NewAzureServer() *AzureServer {
 		validClientID:     "fake-client-id",
 		validClientSecret: "fake-client-secret",
 		appObjectID:       "fake-app-object-id",
+		forbiddenApps:     make(map[string]bool),
 	}
 	s.nextID.Store(fakeStartID)
 	s.Server = httptest.NewServer(s.handler())
@@ -61,6 +66,15 @@ func (s *AzureServer) SetFailGetApplication(fail bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failGetApp = fail
+}
+
+// SetAddPasswordForbidden makes addPassword on the named app registration
+// return 403 while every other app keeps working. Test-only: models the minter
+// that authenticates, and can even read the application, but cannot mint on it.
+func (s *AzureServer) SetAddPasswordForbidden(appObjectID string, forbidden bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forbiddenApps[appObjectID] = forbidden
 }
 
 func (s *AzureServer) TokenRequestCount() int64 {
@@ -228,6 +242,21 @@ func (s *AzureServer) addPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.checkInjectedError(w) {
+		return
+	}
+
+	appID := r.PathValue("app_id")
+	s.mu.Lock()
+	forbidden := s.forbiddenApps[appID]
+	s.mu.Unlock()
+	if forbidden {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]interface{}{
+			jsonKeyError: map[string]interface{}{
+				jsonKeyCode:    "Authorization_RequestDenied",
+				jsonKeyMessage: "Insufficient privileges to complete the operation.",
+			},
+		})
 		return
 	}
 

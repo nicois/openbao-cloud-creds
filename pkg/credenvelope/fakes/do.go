@@ -11,10 +11,11 @@ import (
 
 type DOServer struct {
 	*httptest.Server
-	mu         sync.Mutex
-	tokens     map[string]map[string]interface{}
-	nextID     atomic.Int64
-	nextStatus int
+	mu           sync.Mutex
+	tokens       map[string]map[string]interface{}
+	nextID       atomic.Int64
+	nextStatus   int
+	forbidCreate bool
 }
 
 func NewDOServer() *DOServer {
@@ -73,6 +74,17 @@ func (s *DOServer) SetNextStatus(code int) {
 	s.nextStatus = code
 }
 
+// SetForbidCreate makes POST /v2/tokens refuse with 403 until it is called again
+// with false, while GET /v2/account (the health check) keeps succeeding. Unlike
+// SetNextStatus this is sticky and mint-specific, which is the shape the shared
+// capability suite needs: a minter that authenticates but may not mint, across
+// however many calls one configuration write makes.
+func (s *DOServer) SetForbidCreate(forbid bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forbidCreate = forbid
+}
+
 func (s *DOServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v2/account", s.getAccount)
@@ -101,6 +113,18 @@ func (s *DOServer) checkInjectedError(w http.ResponseWriter) bool {
 
 func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 	if s.checkInjectedError(w) {
+		return
+	}
+
+	s.mu.Lock()
+	forbidCreate := s.forbidCreate
+	s.mu.Unlock()
+	if forbidCreate {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]interface{}{
+			"id":           "forbidden",
+			jsonKeyMessage: "this token may not create tokens",
+		})
 		return
 	}
 

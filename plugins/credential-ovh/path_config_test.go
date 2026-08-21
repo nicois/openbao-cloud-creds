@@ -16,6 +16,13 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
+	// Install a succeeding fake token client. Minter-set and role writes now run a
+	// capability probe, which on OVH is a real MintToken call (see capability.go),
+	// so a backend left on the real client would try to reach OVH. Tests that want
+	// a failing minter inject their own factory over this.
+	credentialovh.SetTokenClientFactory(b, func(_, _, _ string) credentialovh.TokenClient {
+		return credentialovh.NewFakeTokenClient(nil, nil)
+	})
 	return b, config.StorageView
 }
 
