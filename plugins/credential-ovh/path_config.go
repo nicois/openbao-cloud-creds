@@ -101,6 +101,12 @@ func (b *backend) configPaths() []*framework.Path {
 }
 
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+
+	// Refuse an endpoint that could carry the minter credential off-box. TLS for
+	// anything not loopback (A3); the fakes and e2e use http on 127.0.0.1.
+	if err := cloudconfig.ValidateEndpoint("token_endpoint", d.Get("token_endpoint").(string)); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 	region := d.Get(fieldRegion).(string)
 	if _, valid := regionEndpoints[region]; !valid {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "invalid region %q: must be eu, ca, or us", region), nil

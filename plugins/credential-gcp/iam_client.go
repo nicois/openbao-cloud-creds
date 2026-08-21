@@ -17,10 +17,16 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 )
 
 // httpTimeout bounds every GCP API call the minter client makes.
 const httpTimeout = 30 * time.Second
+
+// defaultTokenURI is Google's OAuth2 token endpoint, used when the supplied
+// service-account JSON omits token_uri.
+const defaultTokenURI = "https://oauth2.googleapis.com/token"
 
 var httpClient = &http.Client{
 	Timeout: httpTimeout,
@@ -111,7 +117,16 @@ func signServiceAccountJWT(key *serviceAccountKey) (jwt, tokenURI string, err er
 	// Build JWT
 	tokenURI = key.TokenURI
 	if tokenURI == "" {
-		tokenURI = "https://oauth2.googleapis.com/token"
+		tokenURI = defaultTokenURI
+	}
+	// token_uri arrives inside operator-supplied service-account JSON and was
+	// used verbatim: a signed assertion for this service account would be POSTed
+	// to whatever host it named, and the response body was returned in the error
+	// as an oracle. Same exposure as the endpoint overrides on the other nine
+	// plugins (A3 in docs/audit-2026-08-22.md), through a field nobody reads as
+	// configuration.
+	if err := cloudconfig.ValidateEndpoint("token_uri", tokenURI); err != nil {
+		return "", "", err
 	}
 
 	now := time.Now()

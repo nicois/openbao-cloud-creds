@@ -60,6 +60,12 @@ func (b *backend) configPaths() []*framework.Path {
 }
 
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+
+	// Refuse an endpoint that could carry the minter credential off-box. TLS for
+	// anything not loopback (A3); the fakes and e2e use http on 127.0.0.1.
+	if err := cloudconfig.ValidateEndpoint(fieldAPIURL, d.Get(fieldAPIURL).(string)); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 	host := d.Get(fieldHost).(string)
 	if host == "" {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "host is required"), nil

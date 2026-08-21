@@ -87,6 +87,12 @@ func (b *backend) configPaths() []*framework.Path {
 }
 
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+
+	// Refuse an endpoint that could carry the minter credential off-box. TLS for
+	// anything not loopback (A3); the fakes and e2e use http on 127.0.0.1.
+	if err := cloudconfig.ValidateEndpoint("vultr_api_url", d.Get("vultr_api_url").(string)); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 	flushInterval := time.Duration(d.Get(fieldFlushInterval).(int)) * time.Second
 	reconcileCadence := time.Duration(d.Get(fieldReconcileCadence).(int)) * time.Second
 	minterExpiryWarn := time.Duration(d.Get(fieldMinterExpiryWarn).(int)) * time.Second
