@@ -114,7 +114,7 @@ func newRotationBackend(t *testing.T, store *fakeIAMStore, minters []interface{}
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
 
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -134,14 +134,14 @@ func newRotationBackend(t *testing.T, store *fakeIAMStore, minters []interface{}
 		return &fakeIAMMinterClient{store: store}
 	})
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{configRegionKey: defaultRegion},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
 		Data: map[string]interface{}{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
@@ -153,7 +153,7 @@ func newRotationBackend(t *testing.T, store *fakeIAMStore, minters []interface{}
 // loadSetFromStorage reads the persisted default minter set straight from storage.
 func loadSetFromStorage(t *testing.T, storage logical.Storage) cloudconfig.MinterSet {
 	t.Helper()
-	entry, err := storage.Get(context.Background(), "minter-sets/"+defaultSetName)
+	entry, err := storage.Get(t.Context(), "minter-sets/"+defaultSetName)
 	if err != nil {
 		t.Fatalf("get set: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestMinterRotation_HappyPath(t *testing.T) {
 		neverExpiresMinter(rotMinter2ID, "AKIA2", "secret2"),
 	})
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
 	})
@@ -309,12 +309,12 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode set: %v", err)
 	}
-	if err := storage.Put(context.Background(), entry); err != nil {
+	if err := storage.Put(t.Context(), entry); err != nil {
 		t.Fatalf("put set: %v", err)
 	}
 	bk.loadMinterSet(&set)
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
 	})
@@ -359,7 +359,7 @@ func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
 		neverExpiresMinter(rotMinter2ID, "AKIA2", "secret2"),
 	})
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
 	})
@@ -393,7 +393,7 @@ func newRotationBackendFailHealth(t *testing.T, store *fakeIAMStore, minters []i
 	t.Helper()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -413,13 +413,13 @@ func newRotationBackendFailHealth(t *testing.T, store *fakeIAMStore, minters []i
 		return &failHealthIAMClient{store: store}
 	})
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{configRegionKey: defaultRegion},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
 		Data: map[string]interface{}{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
@@ -473,7 +473,7 @@ func TestRotateConfig_MinterRetireGraceRoundTrip(t *testing.T) {
 		neverExpiresMinter(rotMinter2ID, "AKIA2", "secret2"),
 	})
 
-	if resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{
 			configRegionKey:        defaultRegion,
@@ -483,7 +483,7 @@ func TestRotateConfig_MinterRetireGraceRoundTrip(t *testing.T) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: pathConfigKey, Storage: storage,
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
@@ -524,12 +524,12 @@ func TestRetireSweep_DropsAfterGraceKeepsBeforeGrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode set: %v", err)
 	}
-	if err := storage.Put(context.Background(), entry); err != nil {
+	if err := storage.Put(t.Context(), entry); err != nil {
 		t.Fatalf("put set: %v", err)
 	}
 	bk.loadMinterSet(&set)
 
-	if err := bk.sweepRetiredMinters(context.Background(), storage, now); err != nil {
+	if err := bk.sweepRetiredMinters(t.Context(), storage, now); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 
@@ -571,7 +571,7 @@ func TestMinterRotation_TwoKeyGuard(t *testing.T) {
 		neverExpiresMinter(rotMinter2ID, "AKIA2", "secret2"),
 	})
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
 	})

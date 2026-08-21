@@ -1,13 +1,14 @@
 package plugintest
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 )
 
 // leaseSlack is how far the envelope's expires_at may sit from now+ttl_seconds.
@@ -28,9 +29,63 @@ const leaseSlack = time.Minute
 // Renew callback that always returns an error still advertises renewable=true;
 // the only correct way to say "not renewable" is to register no callback.
 func RunLeaseContractSuite(t *testing.T, h Harness) {
+	t.Run("EnvelopeShapeIsTheDeclaredShape", func(t *testing.T) { assertEnvelopeShape(t, h) })
 	t.Run("EnvelopeAgreesWithLease", func(t *testing.T) { assertEnvelopeAgreesWithLease(t, h) })
 	t.Run("RenewMatchesWhatTheLeaseAdvertises", func(t *testing.T) { assertRenewMatchesLease(t, h) })
 	t.Run("InternalDataSurvivesRPC", func(t *testing.T) { assertInternalDataSurvivesRPC(t, h) })
+}
+
+// assertEnvelopeShape checks the success side of the response contract, which is
+// the counterpart to the error-taxonomy category's check on the failure side.
+//
+// Every plugin builds its issuance response through credenvelope.NewEnvelope and
+// serialises it with ToMap, so the shape is centralised by construction — but
+// nothing *enforced* that, and a hand-built Data map would have been as invisible
+// in review as the 166 code-less error responses were. So the assertion compares
+// against a reference envelope built by the same constructor rather than against a
+// hard-coded key list: the reference cannot drift from ToMap, and an added or
+// dropped field fails here for all ten plugins at once. An EXTRA key fails too — a
+// client pinning api_version 2 is entitled to be told when the shape grows.
+func assertEnvelopeShape(t *testing.T, h Harness) {
+	t.Helper()
+	b, storage := newConfiguredBackend(t, h)
+	resp := mustIssue(t, b, storage, h.IssuePath)
+
+	reference := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{}).ToMap()
+	assertSameKeys(t, "envelope", reference, resp.Data)
+
+	refMeta, ok := reference["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("reference envelope metadata is %T, want map", reference["metadata"])
+	}
+	gotMeta, ok := resp.Data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("envelope metadata is %T, want map[string]interface{} — clients read "+
+			"api_version out of it", resp.Data["metadata"])
+	}
+	assertSameKeys(t, "envelope metadata", refMeta, gotMeta)
+
+	if version, _ := gotMeta["api_version"].(string); version != credenvelope.APIVersion {
+		t.Errorf("envelope api_version is %q, want %q: this is the field clients pin to, and an "+
+			"empty one means the response was built without NewEnvelope", version, credenvelope.APIVersion)
+	}
+}
+
+// assertSameKeys compares two maps by key set only, in both directions.
+func assertSameKeys(t *testing.T, what string, want, got map[string]interface{}) {
+	t.Helper()
+	for key := range want {
+		if _, present := got[key]; !present {
+			t.Errorf("%s is missing key %q, which credenvelope.ToMap always writes", what, key)
+		}
+	}
+	for key := range got {
+		if _, expected := want[key]; !expected {
+			t.Errorf("%s carries an extra key %q that credenvelope.ToMap does not write: the "+
+				"envelope shape is versioned by api_version, so growing it silently breaks the "+
+				"contract clients pin to", what, key)
+		}
+	}
 }
 
 func assertEnvelopeAgreesWithLease(t *testing.T, h Harness) {
@@ -83,7 +138,7 @@ func assertRenewMatchesLease(t *testing.T, h Harness) {
 	t.Helper()
 	b, storage := newConfiguredBackend(t, h)
 	resp := mustIssue(t, b, storage, h.IssuePath)
-	renewResp, renewErr := b.HandleRequest(context.Background(), &logical.Request{
+	renewResp, renewErr := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.RenewOperation,
 		Path:      h.IssuePath,
 		Storage:   storage,

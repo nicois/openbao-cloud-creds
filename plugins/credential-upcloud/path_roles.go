@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -89,22 +90,22 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	// UpCloud rejects an expires_in above 8760h; catch it here rather than at mint.
 	if maxTTL > maxUpCloudTTL {
-		return logical.ErrorResponse(upcloudLongTTLMsg, "max_ttl"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, upcloudLongTTLMsg, "max_ttl"), nil
 	}
 	if defaultTTL > maxUpCloudTTL {
-		return logical.ErrorResponse(upcloudLongTTLMsg, "default_ttl"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, upcloudLongTTLMsg, "default_ttl"), nil
 	}
 
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
-		return logical.ErrorResponse("minter_set is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil
 	}
 	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", minterSet), nil
 	}
 
 	role := &cloudconfig.Role{
@@ -117,7 +118,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
 	ucRole := &upcloudRole{

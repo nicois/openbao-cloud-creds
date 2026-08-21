@@ -38,6 +38,13 @@ const (
 	// IAM access key id (set on rotation successors; absent on operator-provided
 	// originals).
 	fieldAccessKeyID = "access_key_id"
+
+	// elemAccessKeyID is AWS's own spelling of the same thing: the query parameter
+	// DeleteAccessKey takes, and the element AssumeRole answers with. Constified
+	// because goconst counts occurrences package-wide *including* _test.go files,
+	// so the real-cloud tests' use of the element name otherwise reports as a
+	// finding against this production package.
+	elemAccessKeyID = "AccessKeyId"
 )
 
 // pathConfig is the bare config endpoint path (operational + cloud settings).

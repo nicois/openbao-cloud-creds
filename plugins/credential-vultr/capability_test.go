@@ -1,7 +1,6 @@
 package credentialvultr
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -28,19 +27,19 @@ func newCapabilityBackend(t *testing.T, minters []interface{}) (*backend, *fakes
 
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
 	storage := config.StorageView
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{fieldAPIURL: srv.URL},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
 		Data: map[string]interface{}{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
@@ -57,7 +56,7 @@ func capMinter(id, token string) map[string]interface{} {
 // capWriteRole writes a role bound to the default set and returns the response.
 func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Response {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
 		Data: map[string]interface{}{
 			fieldDefaultTTL: 3600, fieldMaxTTL: 86400,
@@ -73,7 +72,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Re
 // capLoadSet reads the persisted default minter set straight from storage.
 func capLoadSet(t *testing.T, storage logical.Storage) cloudconfig.MinterSet {
 	t.Helper()
-	entry, err := storage.Get(context.Background(), "minter-sets/"+capSetName)
+	entry, err := storage.Get(t.Context(), "minter-sets/"+capSetName)
 	if err != nil || entry == nil {
 		t.Fatalf("get set: err=%v entry=%v", err, entry)
 	}
@@ -95,7 +94,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotGrantACLs(t *testing.T) {
 	if resp == nil || !resp.IsError() {
 		t.Fatalf("expected the role write to be rejected, got %v", resp)
 	}
-	read, err := bk.HandleRequest(context.Background(), &logical.Request{
+	read, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: capRolePath, Storage: storage,
 	})
 	if err != nil {
@@ -127,7 +126,7 @@ func TestCapability_SetRewriteRejectedWhenReplacementCannotGrantACLs(t *testing.
 	}
 
 	srv.SetUngrantableACL(capUngrantable)
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
 		Data: map[string]interface{}{fieldMintersKey: []interface{}{
 			capMinter("minter-replacement", "VULTR_key_9"),
@@ -147,7 +146,7 @@ func TestCapability_SetRewriteRejectedWhenReplacementCannotGrantACLs(t *testing.
 // The probe is skippable for operators who cannot accept a probe mint.
 func TestCapability_DisabledSkipsProbe(t *testing.T) {
 	bk, srv, storage := newCapabilityBackend(t, []interface{}{capMinter(capMinter1ID, capMinter1Key)})
-	if resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{fieldAPIURL: srv.URL, fieldVerifyCapability: false},
 	}); err != nil || (resp != nil && resp.IsError()) {

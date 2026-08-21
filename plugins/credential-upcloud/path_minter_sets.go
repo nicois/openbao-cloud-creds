@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -92,14 +93,14 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
 	if err := cloudconfig.ValidateSetName(name); err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 	minters, err := parseMinters(d)
 	if err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 	if err := cloudconfig.ValidateMinterSet(minters); err != nil {
-		return logical.ErrorResponse("invalid minter set: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "invalid minter set: %v", err), nil
 	}
 	set := &cloudconfig.MinterSet{Name: name, Minters: minters}
 	// Prove the candidate minters can mint for the roles already bound to this
@@ -186,18 +187,18 @@ func findRotatableMinter(set *cloudconfig.MinterSet, minterID string) (int, clou
 			continue
 		}
 		if set.Minters[i].Retired {
-			return -1, cloudconfig.Minter{}, logical.ErrorResponse("minter %q is already retired", minterID)
+			return -1, cloudconfig.Minter{}, credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter %q is already retired", minterID)
 		}
 		return i, set.Minters[i], nil
 	}
-	return -1, cloudconfig.Minter{}, logical.ErrorResponse("minter %q not found in set %q", minterID, set.Name)
+	return -1, cloudconfig.Minter{}, credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter %q not found in set %q", minterID, set.Name)
 }
 
 func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
 	minterID := d.Get(fieldMinterID).(string)
 	if minterID == "" {
-		return logical.ErrorResponse("minter_id is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_id is required"), nil
 	}
 
 	b.rotateSweepMu.Lock()
@@ -208,7 +209,7 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 		return nil, err
 	}
 	if set == nil {
-		return logical.ErrorResponse("minter set %q does not exist", name), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter set %q does not exist", name), nil
 	}
 
 	oldIdx, old, errResp := findRotatableMinter(set, minterID)
@@ -232,7 +233,7 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 		synthetic.ExpiresAt = time.Now().Add(defaultMinterSecretLifetime)
 	}
 	if verr := cloudconfig.ValidateMinterSet(withRotatedSuccessor(set.Minters, oldIdx, retiredAt, synthetic)); verr != nil {
-		return logical.ErrorResponse("rotation would invalidate the minter set: %v", verr), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "rotation would invalidate the minter set: %v", verr), nil
 	}
 
 	// 2. Validation passed: NOW mint the real mint-capable successor, using a
@@ -240,11 +241,11 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 	//    selectable, else any other active minter in the set).
 	client, err := b.rotationClient(name, minterID, time.Now())
 	if err != nil {
-		return logical.ErrorResponse("no healthy minter to perform rotation: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "no healthy minter to perform rotation: %v", err), nil
 	}
 	successor, err := client.RotateMinter(ctx, old)
 	if err != nil {
-		return logical.ErrorResponse("rotation failed: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.Classify(credenvelope.StatusNone, err), "rotation failed: %v", err), nil
 	}
 
 	// 3. Health-check the successor via a client built from ITS token. If it
@@ -252,7 +253,7 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 	successorClient := b.newClientForMinter(successor)
 	if status, herr := successorClient.CheckHealth(ctx); herr != nil || status != http.StatusOK {
 		b.cleanupSuccessor(ctx, client, successor)
-		return logical.ErrorResponse("successor minter failed health check (status %d): %v", status, herr), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "successor minter failed health check (status %d): %v", status, herr), nil
 	}
 
 	// 3b. Health is not capability: /1.3/account answers for any valid token,

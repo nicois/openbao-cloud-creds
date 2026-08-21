@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -92,16 +93,16 @@ func (b *backend) rolePaths() []*framework.Path {
 // when both TTLs are enforceable.
 func validateSTSTTLs(defaultTTL, maxTTL time.Duration) *logical.Response {
 	if defaultTTL < minSTSTTL {
-		return logical.ErrorResponse("default_ttl must be at least 900 seconds (15 minutes) per AWS STS limits")
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "default_ttl must be at least 900 seconds (15 minutes) per AWS STS limits")
 	}
 	if maxTTL < minSTSTTL {
-		return logical.ErrorResponse("max_ttl must be at least 900 seconds (15 minutes) per AWS STS limits")
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "max_ttl must be at least 900 seconds (15 minutes) per AWS STS limits")
 	}
 	if maxTTL > maxSTSTTL {
-		return logical.ErrorResponse("max_ttl must not exceed 43200 seconds (12 hours) per AWS STS limits")
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "max_ttl must not exceed 43200 seconds (12 hours) per AWS STS limits")
 	}
 	if defaultTTL > maxSTSTTL {
-		return logical.ErrorResponse("default_ttl must not exceed 43200 seconds (12 hours) per AWS STS limits")
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "default_ttl must not exceed 43200 seconds (12 hours) per AWS STS limits")
 	}
 	return nil
 }
@@ -113,19 +114,19 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	iamRoleARN := d.Get(fieldIAMRoleARN).(string)
 
 	if iamRoleARN == "" {
-		return logical.ErrorResponse("iam_role_arn is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "iam_role_arn is required"), nil
 	}
 
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
-		return logical.ErrorResponse("minter_set is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil
 	}
 	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", minterSet), nil
 	}
 
 	if errResp := validateSTSTTLs(defaultTTL, maxTTL); errResp != nil {
@@ -142,7 +143,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
 	var sessionTags map[string]string

@@ -28,7 +28,7 @@ func TestWorkerTicks(t *testing.T) {
 			return nil
 		})
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		wm.Start(ctx)
 
 		// Advance the fake clock by 5 full intervals. Each Sleep+Wait lands
@@ -62,7 +62,7 @@ func TestWorkerInitialDelay(t *testing.T) {
 			return nil
 		})
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		wm.Start(ctx)
 
 		// t=25ms: still inside the 30ms initial delay, no ticks yet.
@@ -90,7 +90,7 @@ func TestWorkerStopDrainsCleanly(t *testing.T) {
 		return nil
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	wm.Start(ctx)
 	time.Sleep(20 * time.Millisecond)
 	cancel()
@@ -109,7 +109,7 @@ func TestWorkerErrorDoesNotCrash(t *testing.T) {
 		return fmt.Errorf("oops")
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	wm.Start(ctx)
 	time.Sleep(35 * time.Millisecond)
 	cancel()
@@ -133,7 +133,7 @@ func TestWorker_ErrorHandlerInvokedOnError(t *testing.T) {
 	m.Register("failer", 5*time.Millisecond, worker.Opts{}, func(ctx context.Context) error {
 		return fmt.Errorf("boom")
 	})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	m.Start(ctx)
 	time.Sleep(30 * time.Millisecond)
 	cancel()
@@ -162,7 +162,7 @@ func TestWorker_PanicRecoveredAndReported(t *testing.T) {
 	m.Register("panicker", 5*time.Millisecond, worker.Opts{}, func(ctx context.Context) error {
 		panic("kaboom")
 	})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	m.Start(ctx)
 	time.Sleep(30 * time.Millisecond)
 	cancel()
@@ -187,7 +187,7 @@ func TestWorker_NilHandlerStillRecoversPanic(t *testing.T) {
 		atomic.AddInt32(&ticks, 1)
 		return nil
 	})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	m.Start(ctx)
 	time.Sleep(40 * time.Millisecond)
 	cancel()
@@ -209,7 +209,7 @@ func TestConcurrentStartWaitCycles(t *testing.T) {
 			defer wgOuter.Done()
 			m := worker.New()
 			m.Register("noop", time.Hour, worker.Opts{}, func(ctx context.Context) error { return nil })
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			m.Start(ctx)
 			cancel()
 			m.Wait()

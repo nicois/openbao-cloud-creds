@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -44,7 +45,7 @@ func (b *backend) locateRotatable(ctx context.Context, storage logical.Storage, 
 		return nil, nil, err
 	}
 	if set == nil {
-		return nil, logical.ErrorResponse("minter set %q does not exist", name), nil
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter set %q does not exist", name), nil
 	}
 	oldIdx := -1
 	for i := range set.Minters {
@@ -54,10 +55,10 @@ func (b *backend) locateRotatable(ctx context.Context, storage logical.Storage, 
 		}
 	}
 	if oldIdx == -1 {
-		return nil, logical.ErrorResponse("minter %q not found in set %q", minterID, name), nil
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter %q not found in set %q", minterID, name), nil
 	}
 	if set.Minters[oldIdx].Retired {
-		return nil, logical.ErrorResponse("minter %q is already retired", minterID), nil
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter %q is already retired", minterID), nil
 	}
 	return &rotationTarget{set: set, oldIdx: oldIdx}, nil, nil
 }
@@ -77,7 +78,7 @@ func validateRotation(minters []cloudconfig.Minter, oldIdx int, retiredAt time.T
 		synthetic.ExpiresAt = time.Now().Add(minterSecretLifetime)
 	}
 	if verr := cloudconfig.ValidateMinterSet(withRotatedSuccessor(minters, oldIdx, retiredAt, synthetic)); verr != nil {
-		return logical.ErrorResponse("rotation would invalidate the minter set: %v", verr)
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "rotation would invalidate the minter set: %v", verr)
 	}
 	return nil
 }
@@ -90,21 +91,21 @@ func validateRotation(minters []cloudconfig.Minter, oldIdx int, retiredAt time.T
 func (b *backend) mintAndCheckSuccessor(ctx context.Context, name, minterID string, old cloudconfig.Minter) (*akamaiClient, cloudconfig.Minter, *logical.Response) {
 	client, err := b.rotationClient(name, minterID, time.Now())
 	if err != nil {
-		return nil, cloudconfig.Minter{}, logical.ErrorResponse("no healthy minter to perform rotation: %v", err)
+		return nil, cloudconfig.Minter{}, credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "no healthy minter to perform rotation: %v", err)
 	}
 	successor, err := client.RotateMinter(ctx, old)
 	if err != nil {
-		return nil, cloudconfig.Minter{}, logical.ErrorResponse("rotation failed: %v", err)
+		return nil, cloudconfig.Minter{}, credenvelope.ErrorResponse(credenvelope.Classify(credenvelope.StatusNone, err), "rotation failed: %v", err)
 	}
 
 	successorClient, err := b.clientForMinter(successor)
 	if err != nil {
 		b.cleanupSuccessor(ctx, client, successor)
-		return nil, cloudconfig.Minter{}, logical.ErrorResponse("could not build successor client: %v", err)
+		return nil, cloudconfig.Minter{}, credenvelope.ErrorResponse(credenvelope.ErrInternal, "could not build successor client: %v", err)
 	}
 	if status, herr := successorClient.CheckHealth(ctx); herr != nil || status != http.StatusOK {
 		b.cleanupSuccessor(ctx, client, successor)
-		return nil, cloudconfig.Minter{}, logical.ErrorResponse("successor minter failed health check (status %d): %v", status, herr)
+		return nil, cloudconfig.Minter{}, credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "successor minter failed health check (status %d): %v", status, herr)
 	}
 	return client, successor, nil
 }
@@ -123,7 +124,7 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 	name := d.Get(fieldName).(string)
 	minterID := d.Get(fieldMinterID).(string)
 	if minterID == "" {
-		return logical.ErrorResponse("minter_id is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_id is required"), nil
 	}
 
 	b.rotateSweepMu.Lock()

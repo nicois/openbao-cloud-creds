@@ -162,7 +162,7 @@ func (c *realIAMMinterClient) CreateAccessKey(ctx context.Context) (accessKeyID,
 }
 
 func (c *realIAMMinterClient) DeleteAccessKey(ctx context.Context, accessKeyID string) error {
-	_, err := c.do(ctx, "DeleteAccessKey", url.Values{"AccessKeyId": {accessKeyID}})
+	_, err := c.do(ctx, "DeleteAccessKey", url.Values{elemAccessKeyID: {accessKeyID}})
 	return err
 }
 

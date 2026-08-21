@@ -43,7 +43,7 @@ func TestCredsIssue_TrackingWriteFailureCompensates(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   &putFailStorage{Storage: storage, failPrefix: "active-tokens/"},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected hard error: %v", err)
 	}

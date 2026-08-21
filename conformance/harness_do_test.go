@@ -66,8 +66,12 @@ func doHarness(t *testing.T) plugintest.Harness {
 		PlantDisabledProbeRole: plantDisabledRole,
 		DenyMint:               func() { srv.SetForbidCreate(true) },
 		AllowMint:              func() { srv.SetForbidCreate(false) },
-		LiveMinterID:           liveMinterID,
-		ReplacementMinterID:    replacementMinterID,
+		FailNextMintWithStatus: func(_ *testing.T, status int) string {
+			srv.SetNextStatus(status)
+			return ""
+		},
+		LiveMinterID:        liveMinterID,
+		ReplacementMinterID: replacementMinterID,
 
 		SeedForeignEntity: func() string {
 			srv.AddRawToken(foreignEntityID, foreignEntityName)

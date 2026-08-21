@@ -1,7 +1,6 @@
 package credentialazure
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -31,14 +30,14 @@ func newRotationBackend(t *testing.T, minters []interface{}) (*backend, *fakes.A
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
 
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
 	bk := b.(*backend)
 	storage := config.StorageView
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{
 			fieldTenantID:      "test-tenant",
@@ -49,7 +48,7 @@ func newRotationBackend(t *testing.T, minters []interface{}) (*backend, *fakes.A
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
 		Data: map[string]interface{}{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
@@ -61,7 +60,7 @@ func newRotationBackend(t *testing.T, minters []interface{}) (*backend, *fakes.A
 // loadSetFromStorage reads the persisted default minter set straight from storage.
 func loadSetFromStorage(t *testing.T, storage logical.Storage) cloudconfig.MinterSet {
 	t.Helper()
-	entry, err := storage.Get(context.Background(), "minter-sets/"+defaultSetName)
+	entry, err := storage.Get(t.Context(), "minter-sets/"+defaultSetName)
 	if err != nil {
 		t.Fatalf("get set: %v", err)
 	}
@@ -91,7 +90,7 @@ func TestMinterRotation_HappyPath(t *testing.T) {
 		neverExpiresMinter("minter-2", "cid2:secret2"),
 	})
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: "minter-1"},
 	})
@@ -185,7 +184,7 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 	})
 	beforePasswords := srv.PasswordCount()
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: "minter-2"},
 	})
@@ -226,7 +225,7 @@ func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
 	// Make the successor's CheckHealth (GetApplication) fail.
 	srv.SetFailGetApplication(true)
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: "minter-1"},
 	})
@@ -261,7 +260,7 @@ func TestRotateConfig_MinterRetireGraceRoundTrip(t *testing.T) {
 	})
 	_ = srv
 
-	if resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{
 			fieldTenantID:          "test-tenant",
@@ -273,7 +272,7 @@ func TestRotateConfig_MinterRetireGraceRoundTrip(t *testing.T) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: pathConfigKey, Storage: storage,
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
@@ -321,12 +320,12 @@ func TestRetireSweep_DropsAfterGraceKeepsBeforeGrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode set: %v", err)
 	}
-	if err := storage.Put(context.Background(), entry); err != nil {
+	if err := storage.Put(t.Context(), entry); err != nil {
 		t.Fatalf("put set: %v", err)
 	}
 	bk.loadMinterSet(&set)
 
-	if err := bk.sweepRetiredMinters(context.Background(), storage, now); err != nil {
+	if err := bk.sweepRetiredMinters(t.Context(), storage, now); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 

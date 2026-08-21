@@ -38,7 +38,7 @@ func (b *backend) healthCheckWorker(ctx context.Context) error {
 		if status == http.StatusOK {
 			p.sm.RecordSuccess(now)
 		} else {
-			p.sm.RecordError(status, now)
+			p.sm.RecordUpstream(status, err, now)
 		}
 	}
 

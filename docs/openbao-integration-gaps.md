@@ -20,7 +20,7 @@ records the resulting gaps, found by auditing what the code reads from `req`,
 | conformance table (`conformance/`, suites in `pkg/plugintest`) | same, × all ten plugins | cloud-agnostic invariants: reload-from-storage, `Initialize`, envelope/lease agreement, revoke idempotence, capability probes, reconciler safety |
 | **`e2e/` (new)** | **plugin binary as a child process of a live `bao server -dev`, driven over HTTP** | **lease lifecycle through the expiration manager, plugin RPC round-trip, core-assigned `req.ID`, `bao plugin reload`** |
 | `make smoke-test` | live `bao`, register + enable only | the binary exists, `Factory` does not panic, the RPC handshake matches |
-| `cloud_real` build tag | *nothing — no file carries the tag* | (intended: that the fakes resemble the real clouds) |
+| `cloud_real` build tag (DO, AWS) | the plugin's own client against the **real cloud API**, with a real credential | whether the cloud accepts the plugin's actual mint shape, whether the credential it returns works, and what the fake gets wrong; nothing about the other eight clouds |
 
 ## The gaps
 
@@ -189,14 +189,76 @@ as a child process has nothing to point at a fake:
 Declared as skips with these reasons in the e2e registry, so the matrix prints
 them rather than the table quietly covering seven clouds and claiming ten.
 
-### G9 — `cloud_real` is a documented tag that no file carries — OPEN, tracked as audit #7
+### G9 — `cloud_real` carried nothing — PARTLY CLOSED on DigitalOcean and AWS, still open for eight clouds
 
-`grep -rl 'go:build cloud_real'` returns nothing; `make test-cloud-real` and the
-documented `go test -tags=cloud_real ./plugins/credential-do/...` compile and run
-zero tests. So the claim the fakes make — that they resemble the clouds they
-stand in for — is untested, and G8's OCI signing stub proves the class of thing
-that can hide behind it. The follow-up (disposable accounts, CI secrets,
-record/replay so real interactions become durable fixtures) is
+As found: `grep -rl 'go:build cloud_real'` returned nothing, so the documented
+real-cloud test ran zero tests and the claim the fakes make — that they resemble
+the clouds they stand in for — was untested. G8's OCI signing stub is the class of
+thing that hides behind that.
+
+**Closed for DO (2026-08-21).** `plugins/credential-do/real_cloud_test.go` is the
+first file to carry the tag (`make test-cloud-real-do`). It drives the plugin's own
+`doClient` against real DO with a real PAT, mints and deletes real tokens under the
+owner-tag prefix, and records every response through a fail-closed scrubber into
+`plugins/credential-do/testdata/cloud-real/`. It produced, in two runs, findings
+neither the spec pass nor any fake could reach: the health check `GET /v2/account`
+is 403 for a scoped PAT, one fake correction (DO's real 403 body), and — decisively
+— **KI-009**: `POST /v2/tokens` is refused for a *full-access* PAT too, from
+DigitalOcean's edge gateway (`X-Response-From: Edge-Gateway`) rather than from a
+service, while eleven other endpoints on the same token are served normally. The
+reference plugin cannot mint against real DigitalOcean
+([`known-issues.md`](known-issues.md), and R1 in
+[`do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md)).
+
+That is what this layer is *for*, and it is worth being blunt about how the layers
+compare: the in-process table, `e2e/`, the fakes and a careful read of DO's
+published spec all agreed the mint path was sound. It is not. Only a real credential
+against the real API could tell "undocumented" from "forbidden", and the discriminator
+was a response header, not a status code.
+
+**Closed for AWS (2026-08-21), and it is the contrasting case.**
+`plugins/credential-aws/real_cloud_test.go` (`make test-cloud-real-aws`) drives the
+plugin's own STS client — built by the plugin's own `newRealSTSClient`, shaped by its
+own `buildAssumeRoleInput`/`probeAssumeRoleInput` — against real STS with a real IAM
+user's access key. The recorder is injected **per call** through the options
+`STSClient` already exposes, so no production seam exists for the test's benefit.
+Everything the plugin claims held: the capability probe's shape is accepted, session
+tags are accepted, the credential AWS returns **authenticates**, and the granted
+expiry equals the requested TTL exactly (15m→15m, 30m→30m) — which is the assumption
+the whole AWS TTL contract rests on, since an STS session cannot be revoked.
+
+It still found a defect on its first run: **KI-010**. AWS refuses an out-of-range
+duration with `<Type>Sender</Type><Code>ValidationError</Code>`, and
+`classifyAWSError` has no branch for it, so a caller's invalid request is reported as
+`error_code: internal` *and* recorded as a fault against a healthy minter. That is
+the surfacing behaviour of a gap neither write-time gate can see: the capability
+probe pins its request to AWS's 900s floor, so a target role whose
+`MaxSessionDuration` is below a role's TTL passes verification and fails every
+issuance. The probe **declares** that gap rather than skipping it, and takes an
+optional `CLOUDREAL_AWS_LOWCAP_ROLE_ARN` to turn the declaration into a live
+assertion.
+
+Two clouds in, the layer's record is one upstream blocker and one code defect,
+neither reachable from a fake — because a fake answers with whatever the plugin's
+authors believed. Fixture parity had to be built differently here: AWS is an
+injected-client plugin (G8), so there is no HTTP-level fake to replay bodies
+against, and `plugins/credential-aws/fake_parity_test.go` instead holds
+`fakeSTSClient` to the *set of elements real STS sends* and re-applies every scrub
+gate to the committed recordings.
+
+**What is still open, and should not be glossed:**
+- **Nine clouds have no real-cloud test at all.** DO was chosen first because its
+  mint endpoint is undocumented, so it carried the most assumption risk — and that
+  judgement was vindicated in the worst way. The same class of surprise is
+  unexcluded on the other nine.
+- **Nothing runs it automatically** — there is no CI job, so this is an on-demand
+  test, not coverage that defends itself. (Fixture parity *is* wired: DO's
+  recordings are replayed against the fake by `fake_parity_test.go` in ordinary
+  credential-free `go test`, and drift fails the build. That mechanism is
+  DO-shaped and not yet generalised.)
+
+The plan for the rest (disposable accounts, CI secrets, record/replay so real
+interactions become durable fixtures) remains
 [`free-account-viability.md`](free-account-viability.md).
 
 ## Summary
@@ -211,7 +273,7 @@ record/replay so real interactions become durable fixtures) is
 | G6 RPC JSON round-trip | closed for 7 clouds e2e, all ten in the `lease` category | `e2e/`, `pkg/plugintest/lease.go` |
 | G7 no `Invalidate`/`SpecialPaths`/`PeriodicFunc` | partly closed (`InitializeFunc` landed); rest open, accepted | here |
 | G8 AWS/GCP/OCI not e2e-reachable | open | e2e registry skips |
-| G9 `cloud_real` tag unused | open, planned | audit #7, [`free-account-viability.md`](free-account-viability.md) |
+| G9 `cloud_real` tag unused | **partly closed** (DO probe found KI-009 — the reference plugin cannot mint against real DO; AWS probe found KI-010 and confirmed STS honours requested TTLs exactly); eight clouds open, no CI | audit #7, [`free-account-viability.md`](free-account-viability.md), [`do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md), [`known-issues.md`](known-issues.md) |
 
 Two of the three live defects this audit found (G2/KI-007, G5/KI-008) were
 invisible to every pre-existing test and were found within an hour of the `e2e/`

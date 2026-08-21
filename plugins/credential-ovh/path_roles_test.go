@@ -1,7 +1,6 @@
 package credentialovh_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -21,7 +20,7 @@ func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Stor
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
@@ -42,7 +41,7 @@ func TestRoleCRUD(t *testing.T) {
 			"minter_set":  "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role create failed: err=%v resp=%v", err, resp)
 	}
@@ -53,7 +52,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/deploy-role",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role read failed: err=%v resp=%v", err, resp)
 	}
@@ -73,7 +72,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role list failed: err=%v resp=%v", err, resp)
 	}
@@ -88,7 +87,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/deploy-role",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role delete failed: err=%v resp=%v", err, resp)
 	}
@@ -99,7 +98,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/deploy-role",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -120,7 +119,7 @@ func TestRoleValidation_TTLTooHigh(t *testing.T) {
 			"max_ttl":     7200, // exceeds 3600s OVH limit
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -141,7 +140,7 @@ func TestRoleValidation_DefaultTTLTooHigh(t *testing.T) {
 			"max_ttl":     3600,
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -167,7 +166,7 @@ func TestRoleValidation_TTLTooLow(t *testing.T) {
 			b, storage := getTestBackend(t)
 			writeDefaultMinterSet(t, b, storage)
 
-			resp, err := b.HandleRequest(context.Background(), &logical.Request{
+			resp, err := b.HandleRequest(t.Context(), &logical.Request{
 				Operation: logical.UpdateOperation,
 				Path:      "roles/short-role",
 				Storage:   storage,
@@ -206,7 +205,7 @@ func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 			"minter_set":  "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

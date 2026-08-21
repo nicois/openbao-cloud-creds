@@ -1,7 +1,6 @@
 package credentialdo
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -23,20 +22,20 @@ func TestMinterSetRotate_RejectsAndDoesNotMutate(t *testing.T) {
 	defer srv.Close()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
 	storage := config.StorageView
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
 		Data: map[string]interface{}{"do_api_url": srv.URL},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config: %v %v", err, resp)
 	}
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/" + rotationTestSet, Storage: storage,
 		Data: map[string]interface{}{"minters": []interface{}{
 			map[string]interface{}{"id": "minter-1", minterTokenKey: "dop_v1_a", "never_expires": true},
@@ -48,7 +47,7 @@ func TestMinterSetRotate_RejectsAndDoesNotMutate(t *testing.T) {
 
 	before := readSetSnapshot(t, b, storage)
 
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/" + rotationTestSet + "/rotate", Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: "minter-1"},
 	})
@@ -76,20 +75,20 @@ func TestConfigMinterRetireGraceRoundTrip(t *testing.T) {
 	defer srv.Close()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
 	storage := config.StorageView
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
 		Data: map[string]interface{}{"do_api_url": srv.URL, fieldMinterRetireGrace: graceSeconds},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: %v %v", err, resp)
 	}
 
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: "config", Storage: storage,
 	})
 	if err != nil || resp == nil || resp.IsError() {
@@ -104,7 +103,7 @@ func TestConfigMinterRetireGraceRoundTrip(t *testing.T) {
 // membership and retired flags, for before/after equality assertions.
 func readSetSnapshot(t *testing.T, b logical.Backend, storage logical.Storage) string {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: "minter-sets/" + rotationTestSet, Storage: storage,
 	})
 	if err != nil || resp == nil || resp.IsError() {

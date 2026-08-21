@@ -45,7 +45,7 @@ func putMinterSet(t *testing.T, storage logical.Storage, set *cloudconfig.Minter
 	if err != nil {
 		t.Fatalf("entry build failed: %v", err)
 	}
-	if err := storage.Put(context.Background(), entry); err != nil {
+	if err := storage.Put(t.Context(), entry); err != nil {
 		t.Fatalf("put failed: %v", err)
 	}
 }
@@ -68,7 +68,7 @@ func TestGate_VerifySetProbesEveryMinterForEveryBoundRole(t *testing.T) {
 
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: true}
-	if resp := gate.VerifySet(context.Background(), storage, twoMinterSet(), probeRecorder(&probed, nil)); resp != nil {
+	if resp := gate.VerifySet(t.Context(), storage, twoMinterSet(), probeRecorder(&probed, nil)); resp != nil {
 		t.Fatalf("expected success, got %v", resp.Error())
 	}
 	if len(probed) != 4 {
@@ -92,7 +92,7 @@ func TestGate_VerifySuccessorProbesOnlyTheSuccessor(t *testing.T) {
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: true}
 	successor := cloudconfig.Minter{ID: "successor", NeverExpires: true}
-	if resp := gate.VerifySuccessor(context.Background(), storage, setAlpha, successor, probeRecorder(&probed, nil)); resp != nil {
+	if resp := gate.VerifySuccessor(t.Context(), storage, setAlpha, successor, probeRecorder(&probed, nil)); resp != nil {
 		t.Fatalf("expected success, got %v", resp.Error())
 	}
 	if len(probed) != 1 || probed[0] != "successor/role-a" {
@@ -103,7 +103,7 @@ func TestGate_VerifySuccessorProbesOnlyTheSuccessor(t *testing.T) {
 func TestGate_VerifyRoleRejectsMissingSet(t *testing.T) {
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: true}
-	resp := gate.VerifyRole(context.Background(), &logical.InmemStorage{}, "nope",
+	resp := gate.VerifyRole(t.Context(), &logical.InmemStorage{}, "nope",
 		[]byte(`{"name":"role-a"}`), probeRecorder(&probed, nil))
 	if resp == nil || !resp.IsError() {
 		t.Fatalf("binding a role to a nonexistent set must be rejected, got %v", resp)
@@ -121,7 +121,7 @@ func TestGate_FailureExplainsAndOffersTheEscapeHatch(t *testing.T) {
 
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: true}
-	resp := gate.VerifyRole(context.Background(), storage, setAlpha,
+	resp := gate.VerifyRole(t.Context(), storage, setAlpha,
 		[]byte(`{"name":"role-a"}`), probeRecorder(&probed, errors.New("403 forbidden")))
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected rejection")
@@ -141,10 +141,10 @@ func TestGate_DisabledRunsNoProbes(t *testing.T) {
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: false}
 	fail := probeRecorder(&probed, errors.New("would fail"))
-	if resp := gate.VerifySet(context.Background(), storage, twoMinterSet(), fail); resp != nil {
+	if resp := gate.VerifySet(t.Context(), storage, twoMinterSet(), fail); resp != nil {
 		t.Fatalf("disabled gate rejected a set write: %v", resp.Error())
 	}
-	if resp := gate.VerifyRole(context.Background(), storage, setAlpha, []byte(`{"name":"role-a"}`), fail); resp != nil {
+	if resp := gate.VerifyRole(t.Context(), storage, setAlpha, []byte(`{"name":"role-a"}`), fail); resp != nil {
 		t.Fatalf("disabled gate rejected a role write: %v", resp.Error())
 	}
 	if len(probed) != 0 {
@@ -153,7 +153,7 @@ func TestGate_DisabledRunsNoProbes(t *testing.T) {
 }
 
 func TestLoadMinterSet_MissingIsNotAnError(t *testing.T) {
-	set, err := LoadMinterSet(context.Background(), &logical.InmemStorage{}, "nope")
+	set, err := LoadMinterSet(t.Context(), &logical.InmemStorage{}, "nope")
 	if err != nil || set != nil {
 		t.Fatalf("expected (nil, nil), got (%v, %v)", set, err)
 	}
@@ -186,7 +186,7 @@ func TestGate_RolesWithTheSameMintShapeProbeOnce(t *testing.T) {
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: true}
 	set := &cloudconfig.MinterSet{Name: setAlpha, Minters: []cloudconfig.Minter{{ID: "minter-1", NeverExpires: true}}}
-	if resp := gate.VerifySet(context.Background(), storage, set, probeRecorder(&probed, nil)); resp != nil {
+	if resp := gate.VerifySet(t.Context(), storage, set, probeRecorder(&probed, nil)); resp != nil {
 		t.Fatalf("expected success, got %v", resp.Error())
 	}
 	if len(probed) != 1 {

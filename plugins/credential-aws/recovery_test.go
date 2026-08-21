@@ -54,7 +54,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 			"verify_minter_capability": false,
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
@@ -75,7 +75,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 			},
 		},
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
@@ -92,7 +92,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 			"minter_set":   "default",
 		},
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role write failed: err=%v resp=%v", err, resp)
 	}
@@ -103,7 +103,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), issueReq)
+	resp, err = b.HandleRequest(t.Context(), issueReq)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 	}
 
 	// Recovery: second call should succeed
-	resp, err = b.HandleRequest(context.Background(), issueReq)
+	resp, err = b.HandleRequest(t.Context(), issueReq)
 	if err != nil {
 		t.Fatalf("unexpected error on retry: %v", err)
 	}

@@ -121,9 +121,15 @@ func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if forbidCreate {
 		w.WriteHeader(http.StatusForbidden)
+		// Byte-for-byte what real DO returns to a PAT that is live but not
+		// authorized for token management — recorded from a real account in
+		// plugins/credential-do/testdata/cloud-real/POST_v2_tokens_403.json.
+		// The capitalised "Forbidden" and the generic message are DO's, not a
+		// convenience for the test: a fake that invents friendlier errors is a
+		// fake whose error handling is untested.
 		writeJSON(w, map[string]interface{}{
-			"id":           "forbidden",
-			jsonKeyMessage: "this token may not create tokens",
+			"id":           "Forbidden",
+			jsonKeyMessage: "You are not authorized to perform this operation",
 		})
 		return
 	}

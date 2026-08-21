@@ -1,7 +1,6 @@
 package credentialoci_test
 
 import (
-	"context"
 	"testing"
 
 	credentialoci "github.com/nicois/openbao-cloud-creds/plugins/credential-oci"
@@ -17,7 +16,7 @@ func TestFullLifecycle(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	issueResp, err := b.HandleRequest(context.Background(), issueReq)
+	issueResp, err := b.HandleRequest(t.Context(), issueReq)
 	if err != nil || issueResp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, issueResp)
 	}
@@ -46,7 +45,7 @@ func TestFullLifecycle(t *testing.T) {
 		Path:      "rotate-slot/test-role/0",
 		Storage:   storage,
 	}
-	rotateResp, err := b.HandleRequest(context.Background(), rotateReq)
+	rotateResp, err := b.HandleRequest(t.Context(), rotateReq)
 	if err != nil || (rotateResp != nil && rotateResp.IsError()) {
 		t.Fatalf("rotate failed: err=%v resp=%v", err, rotateResp)
 	}
@@ -55,7 +54,7 @@ func TestFullLifecycle(t *testing.T) {
 	}
 
 	// 3. Read again — should now get the rotated credential (freshest)
-	issueResp2, err := b.HandleRequest(context.Background(), issueReq)
+	issueResp2, err := b.HandleRequest(t.Context(), issueReq)
 	if err != nil || issueResp2.IsError() {
 		t.Fatalf("second issue failed: err=%v resp=%v", err, issueResp2)
 	}
@@ -71,7 +70,7 @@ func TestFullLifecycle(t *testing.T) {
 		Storage:   storage,
 		Secret:    issueResp2.Secret,
 	}
-	revokeResp, err := b.HandleRequest(context.Background(), revokeReq)
+	revokeResp, err := b.HandleRequest(t.Context(), revokeReq)
 	if err != nil {
 		t.Fatalf("revoke failed: %v", err)
 	}
@@ -86,7 +85,7 @@ func TestFullLifecycle(t *testing.T) {
 		Storage:   storage,
 		Data:      map[string]interface{}{"mode": "dry_run"},
 	}
-	reconcileResp, err := b.HandleRequest(context.Background(), reconcileReq)
+	reconcileResp, err := b.HandleRequest(t.Context(), reconcileReq)
 	if err != nil || (reconcileResp != nil && reconcileResp.IsError()) {
 		t.Fatalf("reconcile failed: err=%v resp=%v", err, reconcileResp)
 	}
@@ -97,7 +96,7 @@ func TestFullLifecycle(t *testing.T) {
 		Path:      "metrics/entity/default/minter-1",
 		Storage:   storage,
 	}
-	metricsResp, err := b.HandleRequest(context.Background(), metricsReq)
+	metricsResp, err := b.HandleRequest(t.Context(), metricsReq)
 	if err != nil {
 		t.Fatalf("metrics query failed: %v", err)
 	}
@@ -117,7 +116,7 @@ func TestRotateSlot_InvalidIndex(t *testing.T) {
 		Path:      "rotate-slot/test-role/5",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,7 +134,7 @@ func TestRotateSlot_RoleNotFound(t *testing.T) {
 		Path:      "rotate-slot/nonexistent/0",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,7 +152,7 @@ func TestRoleDelete_CleansUpSlots(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), readReq)
+	resp, err := b.HandleRequest(t.Context(), readReq)
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("pre-delete read failed: err=%v resp=%v", err, resp)
 	}
@@ -164,13 +163,13 @@ func TestRoleDelete_CleansUpSlots(t *testing.T) {
 		Path:      "roles/test-role",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), delReq)
+	resp, err = b.HandleRequest(t.Context(), delReq)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role delete failed: err=%v resp=%v", err, resp)
 	}
 
 	// Verify creds no longer work
-	resp, err = b.HandleRequest(context.Background(), readReq)
+	resp, err = b.HandleRequest(t.Context(), readReq)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -86,13 +87,13 @@ func (b *backend) rolePaths() []*framework.Path {
 // minimum, so no floor is invented. Returns nil when the role is enforceable.
 func validateRoleShape(serviceAccountEmail string, defaultTTL, maxTTL time.Duration) *logical.Response {
 	if !strings.Contains(serviceAccountEmail, "@") || !strings.HasSuffix(serviceAccountEmail, ".iam.gserviceaccount.com") {
-		return logical.ErrorResponse("service_account_email must be a valid GCP service account email (ending in .iam.gserviceaccount.com)")
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "service_account_email must be a valid GCP service account email (ending in .iam.gserviceaccount.com)")
 	}
 	if maxTTL > maxGCPTTL {
-		return logical.ErrorResponse("max_ttl must not exceed 43200 seconds (12 hours) per GCP limits")
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "max_ttl must not exceed 43200 seconds (12 hours) per GCP limits")
 	}
 	if defaultTTL > maxGCPTTL {
-		return logical.ErrorResponse("default_ttl must not exceed 43200 seconds (12 hours) per GCP limits")
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "default_ttl must not exceed 43200 seconds (12 hours) per GCP limits")
 	}
 	return nil
 }
@@ -104,19 +105,19 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	serviceAccountEmail := d.Get(fieldServiceAccountEmail).(string)
 
 	if serviceAccountEmail == "" {
-		return logical.ErrorResponse("service_account_email is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "service_account_email is required"), nil
 	}
 
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
-		return logical.ErrorResponse("minter_set is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil
 	}
 	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", minterSet), nil
 	}
 
 	if errResp := validateRoleShape(serviceAccountEmail, defaultTTL, maxTTL); errResp != nil {
@@ -133,7 +134,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
 	var scopes []string

@@ -180,7 +180,7 @@ The following requirements apply unless specific deviations are called out:
 | ID | Description |
 | :---- | :---- |
 | API-001 | Plugin paths follow OpenBao conventions (`cloud-creds/<cloud>/<resource>`). |
-| API-002 | All error responses include `error_code` (stable, exported as Go constants in `pkg/credenvelope/errors.go`). Adding a code is a spec change. Clients pin to `metadata.api_version`. |
+| API-002 | All error responses include `error_code` (stable, exported as Go constants in `pkg/credenvelope/errors.go`), on **every** path — credential reads, revoke, and the config / role / minter-set / reconcile / rotate write paths. Enforced by the build: `logical.ErrorResponse` is forbidden outside `pkg/credenvelope` (`forbidigo` in `.golangci.yml`), and the only alternative takes an `ErrorCode` as its first argument. **The vocabulary is additive and `api_version` does not version it** — an error response carries no envelope, so `metadata.api_version` (which lives only inside one) is absent from exactly the responses a code appears in. Clients MUST therefore treat an unrecognised code as `internal`; new codes ship in a documented spec revision without a version bump, while removing or redefining one is breaking and does need a bump. A code is added only if a client would **act** differently. |
 | API-003 | All List operations return arrays without pagination at this stage (per-cloud entity counts are in the hundreds, not thousands). Pagination MAY be added in a follow-up RFC if any role's entity count grows. |
 
 | ID | Description |

@@ -1,7 +1,6 @@
 package credentialoci_test
 
 import (
-	"context"
 	"testing"
 
 	credentialoci "github.com/nicois/openbao-cloud-creds/plugins/credential-oci"
@@ -22,7 +21,7 @@ func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Stor
 			},
 		},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 }
@@ -46,7 +45,7 @@ func TestRoleCRUD(t *testing.T) {
 			"minter_set":      "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role create failed: err=%v resp=%v", err, resp)
 	}
@@ -57,7 +56,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/test-user",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role read failed: err=%v resp=%v", err, resp)
 	}
@@ -77,7 +76,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role list failed: err=%v resp=%v", err, resp)
 	}
@@ -92,7 +91,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/test-user",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role delete failed: err=%v resp=%v", err, resp)
 	}
@@ -103,7 +102,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/test-user",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +125,7 @@ func TestRoleValidation_MissingUserOCID(t *testing.T) {
 			"max_ttl":         604800,
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -151,7 +150,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 			"minter_set":      "nonexistent",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,7 +177,7 @@ func TestRoleValidation_TTLExceedsRotationInterval(t *testing.T) {
 			"minter_set":      "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -204,7 +203,7 @@ func TestRoleValidation_SlotCountExceedsMax(t *testing.T) {
 			"minter_set":      "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -230,7 +229,7 @@ func TestRoleValidation_DefaultTTLGtMaxTTL(t *testing.T) {
 			"minter_set":      "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

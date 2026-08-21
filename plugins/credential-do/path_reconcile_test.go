@@ -1,7 +1,6 @@
 package credentialdo_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -14,7 +13,7 @@ const doTokenPrefix = "cloud-creds-"
 // runReconcile drives the manual reconcile path and returns the response.
 func runReconcile(t *testing.T, b logical.Backend, storage logical.Storage, data map[string]interface{}) *logical.Response {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage, Data: data,
 	})
 	if err != nil {
@@ -104,7 +103,7 @@ func TestReconcile_NeverDeletesForeignEntity(t *testing.T) {
 	b, storage := setupConfiguredBackend(t, srv.URL)
 
 	// Issue one credential so the fake holds a cloud-creds- named token.
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: "creds/test-role", Storage: storage,
 	}); err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
@@ -113,7 +112,7 @@ func TestReconcile_NeverDeletesForeignEntity(t *testing.T) {
 	// Plant a foreign-named token that the reconciler must never touch.
 	srv.AddRawToken("foreign-1", "someone-elses-token")
 
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
 		Data: map[string]interface{}{"mode": "normal"},
 	})
@@ -146,7 +145,7 @@ func TestReconcileEndpoint_DryRun(t *testing.T) {
 			"mode": "dry_run",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}

@@ -27,7 +27,7 @@ func (b *backend) healthCheckWorker(ctx context.Context) error {
 	for _, p := range probes {
 		err := p.client.TestConnection(ctx)
 		if err != nil {
-			p.sm.RecordError(classifyGCPError(err), now)
+			p.sm.RecordUpstream(classifyGCPError(err), err, now)
 		} else {
 			p.sm.RecordSuccess(now)
 		}

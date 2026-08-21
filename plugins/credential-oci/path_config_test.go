@@ -1,7 +1,6 @@
 package credentialoci_test
 
 import (
-	"context"
 	"testing"
 
 	credentialoci "github.com/nicois/openbao-cloud-creds/plugins/credential-oci"
@@ -12,7 +11,7 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	t.Helper()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := credentialoci.Factory(context.Background(), config)
+	b, err := credentialoci.Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
@@ -32,7 +31,7 @@ func TestConfigWriteRead(t *testing.T) {
 		},
 	}
 
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
@@ -43,7 +42,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config read failed: err=%v resp=%v", err, resp)
 	}

@@ -33,7 +33,7 @@ func (b *backend) healthCheckWorker(ctx context.Context) error {
 		// We have no per-set app_object_id here, so health is a token-only
 		// probe: can this minter authenticate to Graph at all?
 		if _, tokenStatus, err := p.client.getToken(ctx); err != nil {
-			p.sm.RecordError(tokenStatus, now)
+			p.sm.RecordUpstream(tokenStatus, err, now)
 		} else {
 			p.sm.RecordSuccess(now)
 		}

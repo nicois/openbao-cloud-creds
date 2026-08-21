@@ -1,7 +1,6 @@
 package credentialakamai_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
@@ -13,7 +12,7 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	t.Helper()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := credentialakamai.Factory(context.Background(), config)
+	b, err := credentialakamai.Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
@@ -24,7 +23,7 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	// Tests that need their own fake just write config again with their URL.
 	srv := fakes.NewAkamaiServer()
 	t.Cleanup(srv.Close)
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: config.StorageView,
 		Data: map[string]interface{}{"host": "akab-test.luna.akamaiapis.net", "akamai_api_url": srv.URL},
 	}); err != nil || (resp != nil && resp.IsError()) {
@@ -46,7 +45,7 @@ func TestConfigWriteRead(t *testing.T) {
 		},
 	}
 
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
@@ -57,7 +56,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config read failed: err=%v resp=%v", err, resp)
 	}
@@ -85,7 +84,7 @@ func TestMinterSetRejectsInvalidToken(t *testing.T) {
 		},
 	}
 
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,7 +103,7 @@ func TestConfigWriteMissingHost(t *testing.T) {
 		Data:      map[string]interface{}{},
 	}
 
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

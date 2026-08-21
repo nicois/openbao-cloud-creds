@@ -1,7 +1,6 @@
 package metrics_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -36,12 +35,12 @@ func TestFlushAndLoad(t *testing.T) {
 	tracker.RecordAccess("entity-1", "role-a", now)
 	tracker.RecordAccess("entity-1", "role-a", now.Add(time.Minute))
 
-	if err := tracker.Flush(context.Background(), now.Add(2*time.Minute)); err != nil {
+	if err := tracker.Flush(t.Context(), now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("flush failed: %v", err)
 	}
 
 	tracker2 := metrics.NewAccessTracker("node-2", store)
-	merged, err := tracker2.MergeEntity(context.Background(), "entity-1", now.Add(3*time.Minute))
+	merged, err := tracker2.MergeEntity(t.Context(), "entity-1", now.Add(3*time.Minute))
 	if err != nil {
 		t.Fatalf("merge failed: %v", err)
 	}
@@ -63,15 +62,15 @@ func TestMergeMultipleNodes(t *testing.T) {
 	t1.RecordAccess("entity-1", "role-a", now.Add(time.Minute))
 	t2.RecordAccess("entity-1", "role-a", now.Add(2*time.Minute))
 
-	if err := t1.Flush(context.Background(), now.Add(3*time.Minute)); err != nil {
+	if err := t1.Flush(t.Context(), now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("t1 flush failed: %v", err)
 	}
-	if err := t2.Flush(context.Background(), now.Add(3*time.Minute)); err != nil {
+	if err := t2.Flush(t.Context(), now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("t2 flush failed: %v", err)
 	}
 
 	t3 := metrics.NewAccessTracker("node-3", store)
-	merged, err := t3.MergeEntity(context.Background(), "entity-1", now.Add(4*time.Minute))
+	merged, err := t3.MergeEntity(t.Context(), "entity-1", now.Add(4*time.Minute))
 	if err != nil {
 		t.Fatalf("merge failed: %v", err)
 	}
@@ -86,10 +85,10 @@ func TestMergeEntity_NoDoubleCountOnLocalNode(t *testing.T) {
 	now := time.Now()
 	tr.RecordAccess("set-a/minter-1", "role-x", now)
 	tr.RecordAccess("set-a/minter-1", "role-x", now.Add(time.Minute))
-	if err := tr.Flush(context.Background(), now.Add(2*time.Minute)); err != nil {
+	if err := tr.Flush(t.Context(), now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
-	merged, err := tr.MergeEntity(context.Background(), "set-a/minter-1", now.Add(3*time.Minute))
+	merged, err := tr.MergeEntity(t.Context(), "set-a/minter-1", now.Add(3*time.Minute))
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -104,10 +103,10 @@ func TestListStaleEntities_EntityIDWithSlash(t *testing.T) {
 	now := time.Now()
 	tr.RecordAccess("set-a/minter-old", "role-x", now.Add(-10*24*time.Hour))
 	tr.RecordAccess("set-a/minter-new", "role-x", now.Add(-1*time.Hour))
-	if err := tr.Flush(context.Background(), now); err != nil {
+	if err := tr.Flush(t.Context(), now); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
-	stale, err := tr.ListStaleEntities(context.Background(), 7*24*time.Hour, now)
+	stale, err := tr.ListStaleEntities(t.Context(), 7*24*time.Hour, now)
 	if err != nil {
 		t.Fatalf("stale: %v", err)
 	}
@@ -127,11 +126,11 @@ func TestListStaleEntities(t *testing.T) {
 	tracker.RecordAccess("old-entity", "role-a", now.Add(-10*24*time.Hour))
 	tracker.RecordAccess("fresh-entity", "role-a", now.Add(-1*time.Hour))
 
-	if err := tracker.Flush(context.Background(), now); err != nil {
+	if err := tracker.Flush(t.Context(), now); err != nil {
 		t.Fatalf("flush failed: %v", err)
 	}
 
-	stale, err := tracker.ListStaleEntities(context.Background(), 7*24*time.Hour, now)
+	stale, err := tracker.ListStaleEntities(t.Context(), 7*24*time.Hour, now)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

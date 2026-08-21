@@ -17,12 +17,12 @@ func TestReconcile_PopulatesCreatedAt(t *testing.T) {
 	defer srv.Close()
 
 	client := newUpCloudClient(srv.URL, "user", "pass")
-	if _, _, err := client.CreateToken(context.Background(), tokenPrefix+"role-abc", "1h"); err != nil {
+	if _, _, err := client.CreateToken(t.Context(), tokenPrefix+"role-abc", "1h"); err != nil {
 		t.Fatalf("seed create: %v", err)
 	}
 
 	lister := &upcloudCloudLister{client: client}
-	ents, err := lister.ListTaggedEntities(context.Background())
+	ents, err := lister.ListTaggedEntities(t.Context())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 				ConfirmationHold:  time.Hour,
 			}, lister, allOrphansRegistry{})
 
-			res, err := rec.Run(context.Background(), now)
+			res, err := rec.Run(t.Context(), now)
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}

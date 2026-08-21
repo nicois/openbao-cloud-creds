@@ -80,8 +80,12 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 		PlantDisabledProbeRole: plantDisabledRole,
 		DenyMint:               func() { srv.SetUngrantableAPIID(akamaiRoleAPIID) },
 		AllowMint:              func() { srv.SetUngrantableAPIID(akamaiAllowedAPIKey) },
-		LiveMinterID:           liveMinterID,
-		ReplacementMinterID:    replacementMinterID,
+		FailNextMintWithStatus: func(_ *testing.T, status int) string {
+			srv.SetNextStatus(status)
+			return ""
+		},
+		LiveMinterID:        liveMinterID,
+		ReplacementMinterID: replacementMinterID,
 
 		SeedForeignEntity: func() string {
 			srv.AddRawClient(foreignEntityID, foreignEntityName)

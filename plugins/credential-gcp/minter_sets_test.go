@@ -1,7 +1,6 @@
 package credentialgcp_test
 
 import (
-	"context"
 	"testing"
 
 	credentialgcp "github.com/nicois/openbao-cloud-creds/plugins/credential-gcp"
@@ -22,14 +21,14 @@ func TestMinterSetCRUD(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Read it back
 	req = &logical.Request{Operation: logical.ReadOperation, Path: "minter-sets/backup", Storage: storage}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("set read failed: err=%v resp=%v", err, resp)
 	}
@@ -39,7 +38,7 @@ func TestMinterSetCRUD(t *testing.T) {
 
 	// List
 	req = &logical.Request{Operation: logical.ListOperation, Path: "minter-sets/", Storage: storage}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || resp == nil {
 		t.Fatalf("set list failed: err=%v resp=%v", err, resp)
 	}
@@ -61,7 +60,7 @@ func TestMinterSetValidationRejectsSingleExpiring(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,7 +81,7 @@ func TestMinterSetMissingCredentialsJSON(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +106,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 			"service_account_email": "sa@test-project.iam.gserviceaccount.com",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -127,7 +126,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 			"minter_set":            "does-not-exist",
 		},
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -156,7 +155,7 @@ func TestMinterSetIsolation(t *testing.T) {
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
 		Data: map[string]interface{}{},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
 
@@ -167,7 +166,7 @@ func TestMinterSetIsolation(t *testing.T) {
 			map[string]interface{}{"id": "minter-1", "credentials_json": testCredentialsJSON, "never_expires": true},
 		}},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("default set write: err=%v resp=%v", err, resp)
 	}
 
@@ -178,7 +177,7 @@ func TestMinterSetIsolation(t *testing.T) {
 			map[string]interface{}{"id": "minter-2", "credentials_json": secondaryCredentialsJSON, "never_expires": true},
 		}},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("secondary set write: err=%v resp=%v", err, resp)
 	}
 	req = &logical.Request{
@@ -189,13 +188,13 @@ func TestMinterSetIsolation(t *testing.T) {
 			"minter_set":            "secondary",
 		},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role2 write: err=%v resp=%v", err, resp)
 	}
 
 	// role2 must mint via minter-2 / secondary credentials.
 	req = &logical.Request{Operation: logical.ReadOperation, Path: "creds/role2", Storage: storage}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("role2 issue failed: err=%v resp=%v", err, resp)
 	}

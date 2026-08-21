@@ -1,7 +1,6 @@
 package credentialazure
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -16,7 +15,7 @@ const (
 // registration, and returns the response for the caller to assert on.
 func capWriteRole(t *testing.T, b *backend, storage logical.Storage, appObjectID string) *logical.Response {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
 		Data: map[string]interface{}{
 			fieldDefaultTTL: 3600, fieldMaxTTL: 86400,
@@ -44,7 +43,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotMintForItsApp(t *testing.T)
 		t.Fatalf("expected the role write to be rejected, got %v", resp)
 	}
 
-	read, err := bk.HandleRequest(context.Background(), &logical.Request{
+	read, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: capRolePath, Storage: storage,
 	})
 	if err != nil {
@@ -85,7 +84,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMintForABoundRole(t *test
 	before := srv.PasswordCount()
 	srv.SetAddPasswordForbidden(capOtherApp, true)
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: "minter-1"},
 	})
@@ -122,7 +121,7 @@ func TestCapability_RotationCommitsWhenSuccessorIsCapable(t *testing.T) {
 		t.Fatalf("role write failed: %v", resp.Error())
 	}
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: "minter-1"},
 	})
@@ -144,7 +143,7 @@ func TestCapability_SetRewriteRejectedWhenReplacementCannotMint(t *testing.T) {
 	}
 
 	srv.SetAddPasswordForbidden(capOtherApp, true)
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
 		Data: map[string]interface{}{fieldMintersKey: []interface{}{
 			neverExpiresMinter("minter-replacement", "cid9:secret9"),
@@ -167,7 +166,7 @@ func TestCapability_DisabledSkipsProbe(t *testing.T) {
 	bk, srv, storage := newRotationBackend(t, []interface{}{
 		neverExpiresMinter("minter-1", "cid1:secret1"),
 	})
-	if resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{
 			fieldTenantID: "test-tenant", fieldGraphEndpoint: srv.URL, fieldLoginEndpoint: srv.URL,

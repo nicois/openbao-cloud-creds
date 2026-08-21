@@ -1,7 +1,6 @@
 package credentialdo
 
 import (
-	"context"
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
@@ -15,7 +14,7 @@ import (
 func TestBackend_CleanStopsWorkers(t *testing.T) {
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	lb, err := Factory(context.Background(), config)
+	lb, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
@@ -31,12 +30,12 @@ func TestBackend_CleanStopsWorkers(t *testing.T) {
 	bk.mu.Unlock()
 
 	// Start workers synchronously to guarantee a running manager.
-	bk.startWorkers(context.Background(), storage)
+	bk.startWorkers(t.Context(), storage)
 	if mgr := bk.runningManager(); mgr == nil || !mgr.Running() {
 		t.Fatal("expected workers running after startWorkers")
 	}
 
-	bk.Clean(context.Background())
+	bk.Clean(t.Context())
 
 	if mgr := bk.runningManager(); mgr != nil && mgr.Running() {
 		t.Fatal("workers still running after Clean")

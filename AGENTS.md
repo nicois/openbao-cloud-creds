@@ -20,7 +20,7 @@ plugins/<x>/*_test  only what is true of <x> alone.
 
 `pkg/plugintest` must never import a plugin (that would be an import cycle, since every plugin imports `pkg/plugintest`). The `conformance/` module is where the two meet; it is test-only, so plugin-module isolation still holds.
 
-## The six categories
+## The seven categories
 
 `plugintest.AllCategories()` is the list. Each is one shared suite over one `Harness`:
 
@@ -32,8 +32,25 @@ plugins/<x>/*_test  only what is true of <x> alone.
 | `revoke` | revoke is idempotent; a second revoke is a clean no-op |
 | `capability` | the mint-then-delete probe rejects an incapable minter at *write* time, leaves no residue, respects `verify_minter_capability=false`, and skips disabled roles |
 | `reconciler-safety` | the reconciler never touches an entity outside the owner-tag scheme, and `dry_run` deletes nothing |
+| `error-taxonomy` | every error a client can receive carries a code from `credenvelope.AllCodes()`, and the code says what the client should *do* |
 
-`lease` is the one category **no cloud may opt out of**: it needs no cloud-specific
+`error-taxonomy` is the second category **no cloud may opt out of** (its `requires`
+returns nothing, like `lease`). Individual cases that need a knob — a mint refusal, a
+forced upstream status — skip themselves *with a printed reason*, so a cloud lacking a
+knob still gets the cases that need none. It earned its place on its first run by
+finding that OVH's error classifier had no 5xx branch at all, so a cloud returning 500
+still read as `internal`. Two rules come with it:
+
+- **An `error_code` is added only if a client would act differently.** Four actions
+  exist — retry now, retry later, fix config and don't retry, page a human. A code that
+  does not change one of those is documentation, not protocol.
+- **`api_version` does not version the error vocabulary, and cannot.** A code travels in
+  the error string; an error response carries no envelope; `api_version` lives only
+  inside an envelope, so it is absent from exactly the responses codes appear in. The
+  vocabulary is additive, clients must treat an unknown code as `internal`, and
+  `api_version` keeps meaning one thing: the envelope's shape.
+
+`lease` is the third category **no cloud may opt out of**: it needs no cloud-specific
 `Harness` field, so a skip could only ever mean "this plugin lies to its clients".
 Its load-bearing assertion is renewability, because `framework.Secret.Renewable()`
 is `(Renew != nil)` and OpenBao **revokes a lease whose renewal fails** — so a
@@ -68,10 +85,48 @@ Rules of thumb:
   an HTTP endpoint, so they have nothing to point at a fake (G8 in
   [`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md)). The
   matrix prints the gap rather than covering seven clouds and implying ten.
-- Above e2e sits an unbuilt layer: real clouds via CI secrets, whose purpose is
-  proving the fakes are realistic, planned in
-  [`docs/free-account-viability.md`](docs/free-account-viability.md). The `cloud_real`
-  build tag is currently carried by **no file** — do not cite it as coverage.
+- Above e2e sits the real-cloud layer, whose purpose is proving the fakes are
+  realistic; planned in
+  [`docs/free-account-viability.md`](docs/free-account-viability.md) and started on
+  **DigitalOcean and AWS** (`plugins/credential-do/real_cloud_test.go` and
+  `plugins/credential-aws/real_cloud_test.go`, the two files carrying `cloud_real`,
+  run by `make test-cloud-real-do` / `make test-cloud-real-aws`). Do not cite the tag
+  as coverage for the other eight clouds. Rules for adding one: it must **fail, not
+  skip**, when its credential env var is missing (the build tag is the opt-in, so a
+  run that passes without credentials proves nothing); it must confine itself to
+  the owner-tag prefix and sweep leftovers; it must drive the **plugin's own
+  client**, so response decoding is under test; and it must record every response
+  through the fail-closed scrubber, because a real-cloud run is only worth its
+  credentials if it leaves credential-free evidence behind. Recordings are
+  committed to a public repo, so the scrubber refuses to write **anything** bearing
+  a credential *or* the account's identity (an email address fails the write; UUIDs
+  are replaced) — a real account answers with more than protocol.
+  Its failure messages carry the interpretation — which statuses are conclusive
+  about the endpoint and which only about privilege — since that is the difference
+  between a finding and a wall of 403s. When a probe *settles* its question,
+  rewrite it to **pin the answer** rather than deleting it or leaving it red: the DO
+  probe now asserts the fence it found (KI-009) and fails loudly, with instructions,
+  if DigitalOcean ever lifts it. A permanently-failing real-cloud test teaches
+  people to ignore the layer.
+- **A recording is only worth having if something asserts on it.** DO's are replayed
+  against the fake by `plugins/credential-do/fake_parity_test.go`, an ordinary
+  credential-free test: it drives the fake to the same state and compares bodies, so
+  the fake cannot drift back to inventing friendlier errors than the real cloud
+  sends. A recording that is neither asserted nor listed in `unassertable` **with a
+  reason about the fake's design** fails that test — the same discipline as
+  `Harness.Skips`. That test earns its keep: it failed the moment AWS's recordings
+  landed, because the 400 was unasserted, and asserting it is what produced KI-010.
+- **Inject the recorder through a seam production code already has.** AWS's probe
+  passes an `sts.Options` mutator to the per-call variadic the `STSClient` interface
+  already exposes, so the plugin's own client, credentials, signing and decoding are
+  all under test with nothing added for the test's benefit. Reach for a new exported
+  seam only when there is genuinely no existing one.
+- **An injected-client plugin cannot have body-level fake parity** (AWS, GCP, OCI —
+  G8: there is no HTTP fake to replay against). Assert at the level that *is* shared
+  instead: `plugins/credential-aws/fake_parity_test.go` holds `fakeSTSClient` to the
+  set of response elements real STS sends, which still catches the bug class that
+  matters — the plugin reading a field the cloud does not send, or the fake
+  populating one it does not. Do not let "no HTTP fake" become "no parity check".
 
 ## Non-negotiables
 
@@ -79,8 +134,17 @@ Rules of thumb:
 2. **Never write `t.Skip` for a category.** Declare it in `Harness.Skips` with a reason that says why the invariant does not apply *to that cloud*. `ValidateHarness` rejects an empty reason, an unknown category name, and a category that is neither wired nor declared. `TestConformanceMatrix` prints every declared gap as one line, so gaps are reviewable in one place instead of buried in ten files.
 3. **A skip reason must be about the cloud, not about effort.** "AWS reconcile prunes local tracking entries only, STS sessions are not upstream entities" is a reason. "not wired up yet" is a TODO pretending to be a reason — wire it instead.
 4. **Fix a bug in all ten, or in the shared suite.** If you fix a plugin and cannot express a test for it in `pkg/plugintest`, say why in the commit message. Nine other plugins probably have the same bug.
-5. **Cloud fakes go in `pkg/credenvelope/fakes/`, never mocks.** Deny knobs there are deliberately *sticky* (they model a standing upstream authorization state) and must be *mint-only* where the cloud's health check is a different endpoint — that asymmetry is the whole point of the capability category. Restore them with `t.Cleanup`; a fake server is shared by every subtest in a category.
-6. **A harness must inject its fake through `Harness.Inject`, not by calling `Factory` itself.** `Inject` is re-applied on every backend instance, including the reload the `reload` category performs. Injected-client plugins (AWS, GCP, OCI) used to skip `reload` for exactly this reason; that skip is gone and must not come back.
+5. **Never build an error response without a code.** `credenvelope.ErrorResponse`
+   takes an `ErrorCode` as its first argument, so it cannot be called without one, and
+   `logical.ErrorResponse` is **forbidden by lint** (`forbidigo`) outside
+   `pkg/credenvelope`. That is deliberate: 166 code-less responses accumulated while the
+   rule was only a convention, and a missing code is invisible in review — it looks
+   exactly like a message that happens to lack a prefix. If a new code is genuinely
+   needed, add it to `AllCodes()` and to the tables in `docs/techrfc.md` and
+   `docs/design.md` in the same change.
+6. **Cloud fakes go in `pkg/credenvelope/fakes/`, never mocks.** Deny knobs there are deliberately *sticky* (they model a standing upstream authorization state) and must be *mint-only* where the cloud's health check is a different endpoint — that asymmetry is the whole point of the capability category. Restore them with `t.Cleanup`; a fake server is shared by every subtest in a category.
+7. **`context.Background()` does not appear in a test.** Use `t.Context()`: it is cancelled when the test ends, so a hung upstream call or a worker that outlives its test fails loudly instead of hanging or leaking into the next test. Two exceptions, both explicit: work inside `t.Cleanup` needs `context.WithoutCancel(...)`, because `t.Context()` is *already* cancelled by the time cleanups run (that is what makes the DO probe's token deletion still happen); and a fake's handler should pass the caller's `ctx` through rather than mint a new one. The only legitimate `context.Background()` in the repo is each plugin's `baseCtx` root in `backend.go` — a worker's lifetime is the backend's, and the contexts available where workers start are request contexts core cancels on return. That is commented at all ten sites; don't "tidy" it away, and don't add an eleventh root.
+8. **A harness must inject its fake through `Harness.Inject`, not by calling `Factory` itself.** `Inject` is re-applied on every backend instance, including the reload the `reload` category performs. Injected-client plugins (AWS, GCP, OCI) used to skip `reload` for exactly this reason; that skip is gone and must not come back.
 
 ## Where per-cloud vocabulary lives
 

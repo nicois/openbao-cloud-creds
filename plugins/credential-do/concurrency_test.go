@@ -1,7 +1,6 @@
 package credentialdo_test
 
 import (
-	"context"
 	"sync"
 	"testing"
 
@@ -38,7 +37,7 @@ func TestConcurrent_IssueDuringWorkerActivity(t *testing.T) {
 					Path:      "creds/test-role",
 					Storage:   storage,
 				}
-				resp, err := b.HandleRequest(context.Background(), req)
+				resp, err := b.HandleRequest(t.Context(), req)
 				if err != nil {
 					t.Errorf("issue failed: %v", err)
 					return
@@ -62,7 +61,7 @@ func TestConcurrent_IssueDuringWorkerActivity(t *testing.T) {
 					Path:      "metrics/entity/default/minter-1",
 					Storage:   storage,
 				}
-				if _, err := b.HandleRequest(context.Background(), req); err != nil {
+				if _, err := b.HandleRequest(t.Context(), req); err != nil {
 					t.Errorf("metrics read failed: %v", err)
 					return
 				}

@@ -1,7 +1,6 @@
 package credentialovh_test
 
 import (
-	"context"
 	"testing"
 
 	credentialovh "github.com/nicois/openbao-cloud-creds/plugins/credential-ovh"
@@ -12,7 +11,7 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	t.Helper()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := credentialovh.Factory(context.Background(), config)
+	b, err := credentialovh.Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
@@ -39,7 +38,7 @@ func TestConfigWriteRead(t *testing.T) {
 		},
 	}
 
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
@@ -50,7 +49,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config read failed: err=%v resp=%v", err, resp)
 	}
@@ -75,7 +74,7 @@ func TestConfigWrite_InvalidRegion(t *testing.T) {
 		},
 	}
 
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -98,7 +97,7 @@ func TestConfigWrite_AllRegions(t *testing.T) {
 				},
 			}
 
-			resp, err := b.HandleRequest(context.Background(), req)
+			resp, err := b.HandleRequest(t.Context(), req)
 			if err != nil || (resp != nil && resp.IsError()) {
 				t.Fatalf("config write failed for region %s: err=%v resp=%v", region, err, resp)
 			}
@@ -109,7 +108,7 @@ func TestConfigWrite_AllRegions(t *testing.T) {
 				Path:      "config",
 				Storage:   storage,
 			}
-			resp, err = b.HandleRequest(context.Background(), req)
+			resp, err = b.HandleRequest(t.Context(), req)
 			if err != nil || (resp != nil && resp.IsError()) {
 				t.Fatalf("config read failed: err=%v resp=%v", err, resp)
 			}

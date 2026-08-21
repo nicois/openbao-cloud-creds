@@ -1,7 +1,6 @@
 package credentialdo
 
 import (
-	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -19,7 +18,7 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 	// Setup backend
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
@@ -31,7 +30,7 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
 		Data: map[string]interface{}{"do_api_url": srv.URL},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
 
@@ -45,12 +44,12 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 			},
 		},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Drive minter-1 into 429 cool-down
-	bk.recordMinterError("default", "minter-1", http.StatusTooManyRequests, time.Now())
+	bk.recordMinterError("default", "minter-1", http.StatusTooManyRequests, nil, time.Now())
 
 	// selectMinter should skip cooling-down minter-1 and choose minter-2
 	sel, err := bk.selectMinter("default", time.Now())

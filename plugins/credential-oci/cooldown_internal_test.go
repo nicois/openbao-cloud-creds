@@ -1,7 +1,6 @@
 package credentialoci
 
 import (
-	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -21,7 +20,7 @@ const (
 func TestSelectMinterForSet_SkipsCooldownMinter(t *testing.T) {
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
@@ -35,7 +34,7 @@ func TestSelectMinterForSet_SkipsCooldownMinter(t *testing.T) {
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
 		Data: map[string]interface{}{testRegionField: testRegionValue},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
 
@@ -49,7 +48,7 @@ func TestSelectMinterForSet_SkipsCooldownMinter(t *testing.T) {
 			},
 		},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
@@ -60,7 +59,7 @@ func TestSelectMinterForSet_SkipsCooldownMinter(t *testing.T) {
 	if ms1 == nil {
 		t.Fatal("minter-1 state not loaded")
 	}
-	ms1.sm.RecordError(http.StatusTooManyRequests, time.Now())
+	ms1.sm.RecordUpstream(http.StatusTooManyRequests, nil, time.Now())
 
 	// selectMinterForSet should skip cooling-down minter-1 and choose minter-2
 	minterID, client, err := bk.selectMinterForSet("default")

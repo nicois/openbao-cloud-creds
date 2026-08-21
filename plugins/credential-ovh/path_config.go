@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -102,7 +103,7 @@ func (b *backend) configPaths() []*framework.Path {
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	region := d.Get(fieldRegion).(string)
 	if _, valid := regionEndpoints[region]; !valid {
-		return logical.ErrorResponse("invalid region %q: must be eu, ca, or us", region), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "invalid region %q: must be eu, ca, or us", region), nil
 	}
 
 	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second

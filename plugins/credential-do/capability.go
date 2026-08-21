@@ -18,9 +18,30 @@ import (
 // fixed at creation, DO refuses to let a token confer privileges its creator
 // lacks, and there is no scope-introspection API — so the only way to learn
 // whether a minter can serve a role is to ask it to. Each probe creates a token
-// with the role's exact scope string and deletes it again. This matters most on
-// DO, the one cloud whose minters must be replaced by hand: nothing else in the
-// plugin would notice that a hand-pasted replacement PAT is under-scoped.
+// with the role's exact scope string and deletes it again.
+//
+// On real DigitalOcean the answer is now known to be "no, for every PAT" (KI-009):
+// token management is fenced off at DO's edge gateway. That makes this probe the
+// plugin's most useful part against real DO rather than its least — it refuses the
+// minter set at WRITE time, with an explanation, instead of letting an operator
+// discover at first issue that the cloud will never cooperate.
+
+// forbiddenMintHint is the one diagnosis an operator cannot reach from DO's own
+// error, which is a bare "You are not authorized to perform this operation".
+//
+// Verified against a real account on 2026-08-21 (KI-009): POST /v2/tokens is
+// refused 403 for a granular PAT *and* for a full-access one, and the refusal
+// comes from DigitalOcean's edge gateway (X-Response-From: Edge-Gateway) rather
+// than from a service weighing the token's privileges — while ordinary endpoints
+// on the very same token are served normally (X-Response-From: service). Token
+// management is therefore closed to bearer-PAT auth as a matter of routing, not
+// of authorization, so no PAT and no scope string can pass this probe. DO's own
+// message invites an operator to go hunting for the missing privilege; this says
+// there isn't one.
+const forbiddenMintHint = "the minter PAT is live but token management is refused at DigitalOcean's " +
+	"edge gateway, which no privilege changes: a full-access PAT is refused here exactly as a scoped " +
+	"one is, and DO's scope catalog has no PAT-management scope to grant. No PAT can mint on DO " +
+	"(KI-009 in docs/known-issues.md); credential-do cannot issue against real DigitalOcean"
 
 // capabilityChecks builds the probes proving each active minter in the set can
 // mint what one stored role asks for. The dedup key is the minter plus the role's
@@ -45,6 +66,9 @@ func (b *backend) probeMint(apiURL string, minter cloudconfig.Minter, roleName, 
 		client := newDOClient(apiURL, minter.Token)
 		resp, status, err := client.CreateToken(ctx, capability.ProbeName(roleName), strings.Split(scopes, ","))
 		if err != nil {
+			if status == http.StatusForbidden {
+				return fmt.Errorf("probe mint returned %d (%w): %s", status, err, forbiddenMintHint)
+			}
 			return fmt.Errorf("probe mint returned %d: %w", status, err)
 		}
 		if delStatus, delErr := client.DeleteToken(ctx, resp.Token.ID); delErr != nil && delStatus != http.StatusNotFound {

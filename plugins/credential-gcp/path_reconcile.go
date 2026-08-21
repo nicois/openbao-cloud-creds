@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/localexpiry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -40,7 +41,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 		Logger: b.Logger(),
 	})
 	if err != nil {
-		return logical.ErrorResponse("reconcile failed: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.Classify(credenvelope.StatusNone, err), "reconcile failed: %v", err), nil
 	}
 
 	emitOrphansFound(len(res.Expired))

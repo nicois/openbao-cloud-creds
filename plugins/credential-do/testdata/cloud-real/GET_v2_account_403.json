@@ -1,0 +1,12 @@
+{
+  "body": {
+    "id": "Forbidden",
+    "message": "You are not authorized to perform this operation"
+  },
+  "content_type": "application/json",
+  "request": {
+    "method": "GET",
+    "path": "/v2/account"
+  },
+  "status": 403
+}

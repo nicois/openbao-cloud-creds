@@ -28,7 +28,7 @@ func (b *backend) healthCheckWorker(ctx context.Context) error {
 	for _, p := range probes {
 		_, err := p.client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 		if err != nil {
-			p.sm.RecordError(classifyAWSError(err), now)
+			p.sm.RecordUpstream(classifyAWSError(err), err, now)
 		} else {
 			p.sm.RecordSuccess(now)
 		}

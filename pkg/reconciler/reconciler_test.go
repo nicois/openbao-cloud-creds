@@ -73,7 +73,7 @@ func TestDetectsOrphans(t *testing.T) {
 		DryRun:            false,
 	}, cloud, registry)
 
-	result, err := r.Run(context.Background(), time.Now())
+	result, err := r.Run(t.Context(), time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestDryRunDoesNotDelete(t *testing.T) {
 		DryRun:            true,
 	}, cloud, registry)
 
-	result, err := r.Run(context.Background(), time.Now())
+	result, err := r.Run(t.Context(), time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestRun_OnlyDeletesListedOrphans(t *testing.T) {
 	}}
 	reg := &fakeRegistry{known: map[string]bool{"known-1": true}}
 	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10}, cloud, reg)
-	res, err := r.Run(context.Background(), time.Now())
+	res, err := r.Run(t.Context(), time.Now())
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestMaxDeletesPerPass(t *testing.T) {
 		DryRun:            false,
 	}, cloud, registry)
 
-	result, err := r.Run(context.Background(), time.Now())
+	result, err := r.Run(t.Context(), time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestRun_DeleteErrorDoesNotAbortPass(t *testing.T) {
 	reg := &fakeRegistry{known: map[string]bool{}}
 	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10}, cloud, reg)
 
-	res, err := r.Run(context.Background(), time.Now())
+	res, err := r.Run(t.Context(), time.Now())
 	if err != nil {
 		t.Fatalf("a per-entity delete failure must not return a pass-level error, got: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestRun_FailsClosedWhenAgeUnconfirmable(t *testing.T) {
 		ConfirmationHold:  1 * time.Hour,
 	}, cloud, reg)
 
-	res, err := r.Run(context.Background(), time.Now())
+	res, err := r.Run(t.Context(), time.Now())
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestRun_DeletesConfirmablyOldOrphan(t *testing.T) {
 	}}
 	reg := &fakeRegistry{known: map[string]bool{}}
 	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10, ConfirmationHold: 1 * time.Hour}, cloud, reg)
-	res, err := r.Run(context.Background(), now)
+	res, err := r.Run(t.Context(), now)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRun_SkipsRecentConfirmableOrphan(t *testing.T) {
 	}}
 	reg := &fakeRegistry{known: map[string]bool{}}
 	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10, ConfirmationHold: 1 * time.Hour}, cloud, reg)
-	res, err := r.Run(context.Background(), now)
+	res, err := r.Run(t.Context(), now)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestRun_CallsKnownIDsExactlyOnce(t *testing.T) {
 	}
 	reg := &fakeRegistry{known: map[string]bool{"a": true}}
 	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10}, cloud, reg)
-	if _, err := r.Run(context.Background(), time.Now()); err != nil {
+	if _, err := r.Run(t.Context(), time.Now()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if reg.callCount != 1 {
@@ -283,7 +283,7 @@ func TestRun_KnownIDsErrorIsFailClosed(t *testing.T) {
 	}
 	reg := &fakeRegistry{err: errors.New("storage unreachable")}
 	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10}, cloud, reg)
-	res, err := r.Run(context.Background(), time.Now())
+	res, err := r.Run(t.Context(), time.Now())
 	if err == nil {
 		t.Fatal("expected Run to return the KnownIDs error (fail-closed), got nil")
 	}

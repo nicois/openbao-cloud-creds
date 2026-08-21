@@ -1,7 +1,6 @@
 package credentialexoscale_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
@@ -18,7 +17,7 @@ func TestReconcile_NeverDeletesForeignEntity(t *testing.T) {
 
 	b, storage := setupConfiguredBackend(t, srv.URL)
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: "creds/test-role", Storage: storage,
 	}); err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
@@ -26,7 +25,7 @@ func TestReconcile_NeverDeletesForeignEntity(t *testing.T) {
 
 	srv.AddRawAPIKey("foreign-1", "someone-elses-key")
 
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
 		Data: map[string]interface{}{"mode": "normal"},
 	})
@@ -60,7 +59,7 @@ func TestPathReconcile_FloorsSubMinHold(t *testing.T) {
 	// Plant a cloud-creds-prefixed upstream orphan NOT tracked in active-tokens/.
 	srv.AddRawAPIKey("orphan-1", "cloud-creds-test-role-orphan")
 
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
 		Data: map[string]interface{}{"mode": "normal", "confirmation_hold": 0},
 	})
@@ -90,7 +89,7 @@ func TestPathReconcile_DefaultHoldSurfaced(t *testing.T) {
 
 	b, storage := setupConfiguredBackend(t, srv.URL)
 
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
 		Data: map[string]interface{}{"mode": "normal"},
 	})
@@ -123,7 +122,7 @@ func TestReconcileEndpoint_DryRun(t *testing.T) {
 			"mode": "dry_run",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}

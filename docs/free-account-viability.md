@@ -1,16 +1,39 @@
 # Can each cloud be exercised for real, on a free account?
 
 **Status:** assessment 2026-08-21. Motivated by [`openbao-integration-gaps.md`](openbao-integration-gaps.md)
-G9: `cloud_real` is a documented build tag that **no file carries**, so the claim
-every cloud fake makes — that it resembles the API it stands in for — is
-currently untested. This document answers two questions:
+G9: `cloud_real` was a documented build tag that **no file carried**, so the claim
+every cloud fake makes — that it resembles the API it stands in for — was untested.
+
+**Update, same day: the DigitalOcean end of this is now built** — a real-account
+probe (`plugins/credential-do/real_cloud_test.go`, `make test-cloud-real-do`) with
+the fail-closed scrubbing recorder described below. Two runs in, it has produced the
+strongest possible argument for this whole layer: **KI-009** — DigitalOcean refuses
+`POST /v2/tokens` for a *full-access* PAT, at its edge gateway, so the reference
+plugin cannot mint against the real cloud. Every other layer in this repo, plus a
+careful read of DO's published spec, had concluded otherwise. It also found the
+health check is 403 for a scoped PAT
+([`do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md),
+[`known-issues.md`](known-issues.md)). The record→replay loop is
+closed for DO end to end: `plugins/credential-do/fake_parity_test.go` holds the DO
+fake to the recorded bodies in ordinary credential-free `go test` (it already caught
+one difference — DO's `"Forbidden"` against the fake's invented `"forbidden"`), and
+a recording that is neither asserted nor declared unassertable-with-a-reason fails.
+**AWS followed the same day and passed** (see its section below): the mint shape and
+session tags accepted, the returned credential verified to authenticate, exact-TTL
+honouring confirmed — and one defect found anyway, **KI-010**. The remaining eight
+clouds, the CI wiring, and generalising the recorder/replay beyond these two are
+still as planned below; each recorder is currently cloud-shaped (DO's keyed on URL
+path with JSON bodies, AWS's on the STS `Action` with XML).
+
+This document answers two questions:
 
 1. For each cloud, can an account be created **free** (or near-free) that holds
    enough privilege to exercise that plugin's minter end to end?
 2. What the CI layer above the in-repo fakes should look like, given that its
    purpose is not "test the cloud" but **prove the fakes are realistic**.
 
-Nothing here is implemented yet. It is the plan and the evidence behind it.
+Two of the ten are now implemented (DigitalOcean, AWS). The rest of this document is
+still the plan and the evidence behind it; the per-cloud sections say which.
 
 > **Confidence is stated per cloud and it matters.** Signup terms, trial credits
 > and which API a trial account may call change frequently and are not always
@@ -41,10 +64,10 @@ by default.
 
 | Cloud | Free/near-free account | Payment method at signup | Cost to run the suite | Verdict | Confidence |
 |---|---|---|---|---|---|
-| **AWS** | yes — permanent free tier | card | **$0** (IAM + STS are unmetered) | **best first target** | high |
+| **AWS** | yes — permanent free tier | card | **$0** (IAM + STS are unmetered) | **DONE 2026-08-21** — probe passes; found KI-010 | high (confirmed) |
 | **GCP** | yes — $300/90d trial, then free tier | card | **$0** (IAM Credentials calls are free) | **viable** | high on cost, medium on post-trial project rights |
 | **Azure** | yes — Entra tenant needs no subscription | card for a *subscription* only | **$0** (app registrations + secrets are Entra-free-tier) | **viable, and cheapest to keep** | medium-high |
-| **DigitalOcean** | account is free; card/PayPal verification | card or PayPal ($5 hold) | **$0** (PATs are free) | **viable, and the highest-value target** | high on account, **the endpoint itself is the unknown** |
+| **DigitalOcean** | account is free; card/PayPal verification | card or PayPal ($5 hold) | **$0** (PATs are free) | **DONE 2026-08-21** — account fine, **plugin blocked** (KI-009: no PAT can mint) | high (confirmed) |
 | **OCI** | yes — Always Free, indefinite | card (verification hold only) | **$0** (auth tokens are free) | account viable, **plugin blocked** (signing is a stub, G8) | high on account |
 | **Exoscale** | trial organisation with credit | card or business verification | **$0** (IAM roles + API keys are free) | probably viable | medium, unverified |
 | **UpCloud** | trial after identity verification | card or ID check | **$0** (account tokens are free) | probably viable | medium, unverified |
@@ -54,11 +77,27 @@ by default.
 
 Nine of ten clouds are reachable for roughly the price of one $10 deposit. The
 tenth (Akamai) is not, and that should be recorded as a permanent gap rather than
-left looking like work nobody got to.
+left looking like work nobody got to. Reachability is not the same as usefulness:
+DigitalOcean's account was reachable and its *plugin* still turned out to be blocked
+upstream (KI-009), which is the outcome this column cannot predict.
 
 ## Per cloud
 
-### AWS — free tier, $0, everything reachable
+### AWS — free tier, $0, everything reachable — **DONE 2026-08-21**
+
+> **Exercised for real.** `make test-cloud-real-aws` now runs against a real account
+> and passes: the capability probe's mint shape is accepted, session tags are
+> accepted, the returned credential authenticates, and STS grants exactly the
+> requested duration (15m→15m, 30m→30m). It also found **KI-010** (a
+> `ValidationError` is reported to clients as `internal` and counted against the
+> minter). Predictions in this section held: $0 spent, nothing to clean up, and the
+> only surprise was in this repo's code rather than in AWS's API.
+>
+> One deviation from the CI plan below: the minter credential is supplied as a
+> **single** `CLOUDREAL_AWS_KEY=access_key_id:secret_access_key`, not as two
+> variables. That is the format a minter's `token` already takes in a minter set, so
+> the operator pastes the same string into both places and there is one thing to
+> rotate rather than a pair that can drift.
 
 IAM and STS are unmetered, so the entire suite (assume-role mints, access-key
 rotation, `GetCallerIdentity` health checks) costs nothing on a permanent free
@@ -67,7 +106,15 @@ tier account, forever — not just during a trial window.
 What the test account needs:
 
 - an IAM user for the minter, with `sts:AssumeRole` on the target role;
-- a target role whose trust policy names that user (`iam_role_arn` on the role);
+- a target role whose trust policy names that user (`iam_role_arn` on the role) and
+  allows **both** `sts:AssumeRole` and `sts:TagSession` — the plugin sends session
+  tags, and a trust policy granting only the former fails at mint with an
+  `AccessDenied` that says nothing about tags. The role needs **no permissions of its
+  own**: `AssumeRole` returns a valid credential regardless, so a zero-permission
+  role exercises the whole plugin with no blast radius. Set its
+  `MaxSessionDuration` to at least the longest role TTL (it defaults to 3600s while
+  the plugin permits 43200s) — see KI-010 for why a lower cap passes every write-time
+  check and then fails every issuance;
 - for rotation: `iam:CreateAccessKey`, `iam:DeleteAccessKey`, `iam:ListAccessKeys`
   scoped to the minter user itself (`arn:aws:iam::<acct>:user/${aws:username}`).
 
@@ -158,6 +205,27 @@ and probe.
 
 **Confidence: high** that the account can be created for ~$0; the point of the
 test is precisely that confidence in the endpoint is *low*.
+
+**Done (2026-08-21), and the answer is no.** The probe was written and run first,
+out of the order suggested below, because it is the cheapest thing to try on an
+account that already exists. It ran twice — once on a granular PAT, then on a
+full-access one — and the second run settled the first bullet above, the finding
+worth the whole exercise: `POST /v2/tokens` is refused for **every** PAT, from
+DigitalOcean's edge gateway rather than from a service, while eleven other endpoints
+on the same token are served normally. There is no mint-capable DO PAT, so
+`credential-do` cannot issue against real DigitalOcean (**KI-009**). The third bullet
+is settled a fortiori (no PAT-management scope, and no PAT access to token management
+at all); the second — request shape, and whether DO would accept an expiry field —
+is now **unanswerable**, since the request never reaches a body parser. The run also
+showed the plugin's health check (`GET /v2/account`) is 403 for a scoped PAT.
+
+This is the outcome that justifies the layer's cost, and it argues for finishing the
+other nine rather than treating DO as a special case: the fakes were checked against
+our own reading of the docs, and on the one cloud where that reading has now been
+tested against reality, it was wrong about the thing that mattered most. Detail and
+the recorded evidence:
+[`do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md),
+"Real-account probe"; consequences for the plugin: [`known-issues.md`](known-issues.md).
 
 ### OCI — account is free, the plugin is what blocks
 
@@ -353,13 +421,23 @@ that.
 
 ### Suggested order of work
 
+**0. DigitalOcean — done ahead of this order** (an account was already to hand;
+the recorder was built alongside it and is reusable as-is). Nothing remains on DO:
+both runs are complete and the finding (KI-009) is pinned by the probe and by
+`fake_parity_test.go`. What *would* be worth revisiting is whether any of the nine
+below turns out to have a comparable gap between what its docs promise and what its
+API grants — which is the whole argument for the list.
+
 1. **AWS + GCP fakes with HTTP endpoint overrides** (G8). This is the biggest
    single win and needs no cloud account: it brings two more clouds into the
    existing `e2e/` layer *and* is a precondition for recording them.
 2. **OCI request signing** (G8, and the prerequisite for any OCI testing at all).
-3. **The recorder + fixture-parity replay suite**, wired up against the fakes
-   first (a fake recording proves the machinery before a real credential is
-   involved).
+3. **Generalise the fixture-parity replay suite.** The recorder and a working
+   replay test exist, but both are DO-shaped
+   (`plugins/credential-do/real_cloud_record_test.go`,
+   `plugins/credential-do/fake_parity_test.go`); lifting the recorder into `pkg/`
+   and giving each plugin a table of recording→fake-state pairs is what makes the
+   next cloud cheap.
 4. **AWS, then Azure, then DigitalOcean** for the first real accounts — cheapest,
    then most permanently free, then highest-value-unknown.
 5. Exoscale / UpCloud / OVH once their trial-rights questions above are answered.
@@ -369,8 +447,8 @@ that.
 ## Cross-references
 
 - [`openbao-integration-gaps.md`](openbao-integration-gaps.md) — G8 (which clouds
-  cannot be driven e2e) and G9 (the unused `cloud_real` tag) are the gaps this
-  plan closes.
+  cannot be driven e2e) and G9 (the `cloud_real` tag, now carried by the DO probe
+  and still open for the other eight clouds) are the gaps this plan closes.
 - [`minter-capability-verification.md`](minter-capability-verification.md) — what
   the probe mints per cloud, i.e. what a real account must permit.
 - [`ttl-semantics.md`](ttl-semantics.md) — which clouds leave a credential alive

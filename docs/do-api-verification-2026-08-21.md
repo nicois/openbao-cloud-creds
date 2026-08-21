@@ -8,13 +8,22 @@ Re-check of the DO assumptions baked into `credential-do` (the reference impleme
 `reference/api/scopes/`, `reference/api/create-personal-access-token/`, and the
 API reference index. No live API calls were made (no credentials used).
 
+**Addendum, same day:** a live probe against a real DO account was added later
+that day (`plugins/credential-do/real_cloud_test.go`, build tag `cloud_real`), and
+run twice — once with a granular PAT, then with a **full-access** one. The
+spec-only reasoning D1–D5 below stands, but its *consequence* is now far sharper
+than "undocumented": `/v2/tokens` refuses personal-access-token authentication
+outright, at DigitalOcean's edge. See
+[Real-account probe](#real-account-probe-2026-08-21) at the end, and **KI-009** in
+[`known-issues.md`](known-issues.md), which is where that conclusion is tracked.
+
 | # | Assumption as documented | Verdict | Impact |
 |---|--------------------------|---------|--------|
-| D1 | `POST /v2/tokens` / `DELETE /v2/tokens/{id}` are public DO API endpoints | **REFUTED** — absent from the public spec; PAT creation is documented as control-panel-only | Docs corrected; the plugin's mint/revoke path is an undocumented dependency |
-| D2 | DO token scopes are coarse (`read`, `write`), account-wide, not per-resource | **STALE** — DO has a fine-grained `<resource>:<verb>` catalog | Roles can be far more tightly scoped than the docs claimed; no code change needed |
-| D3 | No token-management scope exists → minter self-rotation infeasible | **REAFFIRMED** | `minter-sets/<set>/rotate` correctly rejects on DO |
-| D4 | DO Spaces keys cannot be created via public API | **REFUTED** — `/v2/spaces/keys` is now in the public spec with full CRUD | The Spaces deferral's stated blocker is gone; the quota blocker remains |
-| D5 | The plugin's `{name, scopes}` request body is the correct/complete shape | **UNVERIFIED** — the control panel now *requires* an expiry at token creation | Possible required field; possible native TTL. Real-cloud pass (#7) must settle it |
+| D1 | `POST /v2/tokens` / `DELETE /v2/tokens/{id}` are public DO API endpoints | **REFUTED, twice over** — absent from the public spec, PAT creation documented as control-panel-only, and (R1) refused at DO's edge gateway for *any* PAT | The plugin's mint/revoke path **does not work against real DigitalOcean** — KI-009 |
+| D2 | DO token scopes are coarse (`read`, `write`), account-wide, not per-resource | **STALE** — DO has a fine-grained `<resource>:<verb>` catalog | Roles can be far more tightly scoped than the docs claimed; no code change needed — though moot for issuance while D1 holds |
+| D3 | No token-management scope exists → minter self-rotation infeasible | **REAFFIRMED, and overtaken** — no PAT can manage tokens at all (R1), let alone a minted one | `minter-sets/<set>/rotate` correctly rejects on DO, now for a stronger reason than "no scope for it" |
+| D4 | DO Spaces keys cannot be created via public API | **CONTESTED** — in the public spec with full CRUD, but DO's product docs say panel-only (stated three times) and a real account answered **404** | The Spaces deferral's API blocker is **not** cleared after all; the quota blocker (100 buckets / 200 keys per account) stands, and so does an outage-tolerance blocker the audit had not considered |
+| D5 | The plugin's `{name, scopes}` request body is the correct/complete shape | **UNANSWERABLE** — the request is refused before any body is parsed (R1), so no credential this plugin can hold will ever elicit a shape verdict | The `Native TTL: No` assumption stands by default, and cannot be improved on |
 
 ---
 
@@ -47,6 +56,16 @@ documented, and promote DO to the highest-priority target of the real-cloud
 verification pass (deferred item #7). If DO ever changes or fences the endpoint,
 `credential-do` breaks with no deprecation notice — that is the risk being
 accepted, not hidden.
+
+> **Update, hours later (R1).** That risk was not hypothetical and not future: the
+> endpoint **is** fenced, today, for PAT authentication. Promoting DO to the first
+> real-cloud target was the right call and it paid immediately. What the endpoint
+> demonstrably works *for* is DigitalOcean's own control panel, which authenticates
+> with a session rather than a bearer token — a distinction this document could not
+> have drawn from the spec, and one that makes the whole "undocumented but working"
+> framing wrong. The plugin's retention is now argued on different grounds (it is
+> the code-shape reference and the origin of the DO fake), recorded in
+> [`decisions.md`](decisions.md) and KI-009.
 
 **Alternatives considered and rejected:**
 - *OAuth flow tokens* (`doo_v1_`, documented, scopable, expiring) require
@@ -94,9 +113,29 @@ mint-capable. The 2026-06-01 conclusion holds: DO's
 out-of-band. Reinforced, not weakened — the endpoint isn't merely unscopable, it
 isn't public at all.
 
-## D4 — DO Spaces keys ARE now API-issuable
+## D4 — DO Spaces keys: the spec says yes, DO's own docs say no
 
-The public spec now carries a **Spaces Keys** tag:
+> **Corrected later the same day.** This section was written as "DO Spaces keys ARE now
+> API-issuable" on the strength of the public spec alone. That was the same mistake D1 had
+> just been punished for, made in the opposite direction — reading a spec as a statement
+> about what a credential may *do*. DO's product docs
+> (`products/spaces/how-to/manage-access/`, `products/spaces/details/limits/`) state three
+> times that Spaces access keys "can only be created and managed through the DigitalOcean
+> Control Panel" and "cannot currently be created, edited, or deleted using the
+> DigitalOcean API or CLI" — and the real-account probe's unexplained **404** on
+> `/v2/spaces/keys` (below) fits that, not the spec. Two of three sources say no API.
+>
+> The pattern across both DO credential types is now consistent and worth naming: **DO
+> keeps credential management out of the API.** `/v2/tokens` is absent from the spec, works
+> for the control panel, and is fenced from PATs at the edge gateway; `/v2/spaces/keys` is
+> present in the spec while the docs say API callers cannot use it. A spec entry is not an
+> entitlement, in either direction. D4's verdict is **CONTESTED**, and the Spaces "the
+> blocker is gone" conclusion in
+> [`object-storage-credential-audit.md`](object-storage-credential-audit.md) is withdrawn
+> there too.
+
+The public spec carries a **Spaces Keys** tag (accuracy of which is what the note above
+disputes):
 
 | Operation | Endpoint | Required scope |
 |-----------|----------|----------------|
@@ -152,8 +191,125 @@ target, using a disposable account: confirm request/response shape, expiry
 support, fine-grained-scope acceptance, and the `dop_v1_` prefix on minted
 tokens.
 
+> **Done, same day, and it answered a bigger question than the one asked.** None of
+> the four items above can be resolved: the mint request is refused before its body
+> is read (R1). D5 is closed as unanswerable rather than confirmed or refuted.
+
+## Real-account probe (2026-08-21)
+
+**Method.** `plugins/credential-do/real_cloud_test.go` (build tag `cloud_real`,
+run by `make test-cloud-real-do`) against a real, disposable DO account. It drives
+the plugin's **own** `doClient` — not a fresh HTTP client — so that response
+decoding is under test too: a field name the plugin gets wrong would mint
+successfully and hand back an empty credential, which is precisely the bug class a
+fake written from the same reading of the docs cannot catch. Every response is
+written to `plugins/credential-do/testdata/cloud-real/` through a fail-closed
+scrubber (it aborts the test rather than write a file containing a credential).
+A read-only `curl` matrix was used alongside it to classify the failures.
+
+It ran **twice**, and the two runs are what make the finding safe to state.
+
+### Run 1 — a granular (scoped) PAT
+
+The PAT initially available turned out to be scoped, which the probe established
+rather than assumed:
+
+| Call | Status |
+|------|--------|
+| `GET /v2/regions`, `GET /v2/sizes`, `GET /v2/droplets` | **200** |
+| `GET /v2/account` | 403 |
+| `GET /v2/projects`, `GET /v2/tags`, `GET /v2/account/keys` | 403 |
+| `GET /v2/tokens`, `GET /v2/tokens/scopes` | 403 |
+| `POST /v2/tokens` | 403 — `{"id": "Forbidden", "message": "You are not authorized to perform this operation"}` |
+
+Two hundreds alongside the 403s is the whole point of the matrix: it proves the
+token is **live**, which is what makes each 403 an authorization verdict rather
+than an authentication one. Without that discrimination a wall of 403s is
+unreadable, and the probe's first attempt duly mis-attributed its own finding.
+
+This run supported exactly one conclusion — a scoped PAT cannot mint — and the
+probe said so in its own failure text: *"Re-run with a FULL-ACCESS PAT to test the
+endpoint itself; if a full-access PAT also gets 403, the mint path does not work
+headlessly at all."*
+
+### Run 2 — a full-access PAT
+
+| Call | Status | `X-Response-From` |
+|------|--------|-------------------|
+| `GET /v2/account`, `/v2/projects`, `/v2/tags`, `/v2/account/keys`, `/v2/droplets`, `/v2/sizes`, `/v2/images`, `/v2/volumes`, `/v2/kubernetes/clusters`, `/v2/databases`, `/v2/apps` | **200** | `service` |
+| `GET /v2/tokens`, `GET /v2/tokens/scopes` | 403 | **`Edge-Gateway`** |
+| `POST /v2/tokens` | 403 | **`Edge-Gateway`** |
+| the same paths, **no `Authorization` header** | 401 | `Edge-Gateway` |
+
+**R1 — no PAT can mint; `/v2/tokens` is fenced at DO's edge (supersedes the
+earlier reading).** A privileged token reads eleven endpoints and is still refused
+on `/v2/tokens`, so privilege is not the variable. What identifies the mechanism is
+DigitalOcean's own `X-Response-From` header: successful calls are answered by a
+`service`, every `/v2/tokens*` call by `Edge-Gateway`. The refusal is made by DO's
+gateway **before** any service weighs the token — and the unauthenticated 401s on
+those same paths show the gateway authenticates first and then declines the route.
+This is routing, not authorization.
+
+So the intermediate conclusion drawn from run 1 — "a DO minter must be a full-access
+PAT" — is **wrong**, and worth recording as wrong: there is no mint-capable PAT of
+any kind. Tracked as **KI-009**; surfaced to operators as `forbiddenMintHint` on the
+capability probe's 403, because DO's bare "You are not authorized to perform this
+operation" sends them hunting for a privilege that does not exist. What the endpoint
+works for is the control panel, which holds a session rather than a bearer token.
+
+Not tested: OAuth (`doo_v1_`) tokens. They are a different credential class and
+require interactive authorization, so they cannot be minted headlessly regardless —
+already the rejected alternative under D1. Also noted without conclusion:
+`/v2/actions`, `/v2/ssh_keys` and `/v2/spaces/keys` returned 404 on this account,
+which is odd but does not bear on the reasoning above — `/v2/tokens` is *routed and
+refused*, not absent.
+
+**R2 — the health check needs `account:read` (from run 1, still stands).** This
+plugin's health check *is* `GET /v2/account` (`do_client.go`), which a granular PAT
+is forbidden from calling while otherwise perfectly alive; a scoped minter would be
+driven to `AuthFailing` by the recovery state machine on liveness grounds that are
+false. Kept as-is deliberately — see [`decisions.md`](decisions.md), whose argument
+survives R1 intact but on narrower grounds: with no PAT able to mint at all, the DO
+health check is only ever exercised against a full-access token (200) or in tests
+against the fake, and the false-alarm case still cannot arise.
+
+**R3 — D1/D5 are now closed, unfavourably.** The question the probe existed for is
+answered: `POST /v2/tokens` does not accept PATs, so the reference plugin's mint
+path does not work in production. D5's request-shape question (does DO accept an
+expiry field, which would give it a native TTL?) is not merely unanswered but
+**unanswerable with any credential this plugin can hold** — the request never
+reaches a body parser.
+
+The probe therefore changed job, from asking to **pinning**: it now asserts the
+fence (`/v2/account` 200 from `service` as the control, `GET`/`POST` `/v2/tokens`
+403 from `Edge-Gateway`) and *fails as good news* if DO ever allows the mint —
+whereupon it exercises the full success path it has always carried (assert `token.id`
+and `token.access_token` are non-empty, use the credential, `DELETE` it, confirm it
+stops authenticating within 15s, since with no upstream expiry revoke is the only
+bound on a DO credential — [`ttl-semantics.md`](ttl-semantics.md)) and says to
+re-verify D1/D5. The credential-free half of the evidence is checked by
+`plugins/credential-do/fake_parity_test.go` on every ordinary `go test`.
+
+**Fixture parity, first data point.** The error envelope DO returns here is
+`{"id", "message"}` — the shape `pkg/credenvelope/fakes/do.go` already used, so
+the fake was right about the thing that matters. (Strictly this is the *gateway's*
+envelope, not a service's; the fake is held to it anyway, because it is what a real
+minter receives, and the fake stands in for what DO answers rather than for what DO
+documents.) It differed in the literals
+(lowercase `"forbidden"`, a friendlier message); the fake's mint-forbidden body is
+now byte-for-byte DO's, cited to the recording — and held there by
+`plugins/credential-do/fake_parity_test.go`, an ordinary credential-free test that
+drives the fake to the same state and compares bodies. This is the mechanism
+`docs/free-account-viability.md` describes working as intended: one privileged run
+turning into a permanent check on the fake. Recordings the fake is *not* answerable
+for are declared there with reasons rather than left to rot unused: the two `GET`
+403s (reachable in the fake only through its deliberately synthetic injected-error
+knob) and the `/v2/account` 200 (whose body `CheckHealth` discards unread, and which
+is kept as the *control* for R1 — same token, answered by a `service`).
+
 ## Doc sites corrected by this pass
 
+- `docs/known-issues.md` — **KI-009**, where R1's consequence for the plugin is tracked
 - `docs/cloud-credential-research.md` — DO summary row + detailed section (D1, D2), DO Spaces row + section (D4), strategy distribution
 - `docs/object-storage-credential-audit.md` — TL;DR row, "DigitalOcean Spaces" section, build-priority list (D4)
 - `docs/decisions.md` — "Why DO is the reference implementation" (D1)

@@ -15,7 +15,7 @@
 | OVH | Object Storage (S3) | Yes | Yes (`s3Credentials`) | No | **Viable** — ~2/user cap |
 | Vultr | Object Storage | Yes | Yes (`/v2/object-storage`) | No | **Viable but awkward** — 1 key/store, destructive rotation |
 | Linode (Akamai) | Object Storage | Yes | Yes (`/object-storage/keys`) | No | **Strong fit** — bucket-scopable, NEW plugin needed |
-| DigitalOcean | Spaces | Yes | **Yes** (`POST /v2/spaces/keys`) | No | **Viable, quota-bounded** — was "Blocked"; see 2026-08-21 update |
+| DigitalOcean | Spaces | Yes | **Contested** (`POST /v2/spaces/keys` is in the spec; DO's product docs say panel-only; 404 on a real account) | No | **Blocked** — quota, plus API issuance unconfirmed; see 2026-08-21 update |
 
 ## The Aiven Compatibility Contract (the linchpin)
 
@@ -98,17 +98,40 @@ Aiven services consume object-storage credentials as a **rohmu/pghoard config di
 - **Rotation:** No native expiry; clean multi-key issuance enables true JIT and 30d/7d phased rotation.
 - **S3:** `<region>.linodeobjects.com`.
 
-### DigitalOcean Spaces — Viable (quota-bounded) — **revised 2026-08-21**
+### DigitalOcean Spaces — Blocked (quota; API issuance contested) — **revised twice on 2026-08-21**
 
-> **This section originally read "Blocked."** It asserted (from the April 2026 changelog) that Spaces access keys could not be created via public API, and treated the `POST /v2/spaces/keys` call the upstream private project was already making as an undocumented/partner endpoint unsuitable for an open-source plugin. **That is no longer true.** Re-verified against DigitalOcean's current public OpenAPI spec on 2026-08-21: the endpoint is public, fully specified, and scope-gated. The ToS/stability objection is void; the quota objection stands.
+> **Revision 1 (spec pass).** This section originally read "Blocked," asserting (from the
+> April 2026 changelog) that Spaces access keys could not be created via public API. DO's
+> current public OpenAPI spec *does* carry a fully-specified, scope-gated **Spaces Keys**
+> tag, so the section was rewritten to "Viable, quota-bounded."
+>
+> **Revision 2 (later the same day) — that rewrite over-read the spec, and is withdrawn.**
+> Three sources disagree, and the spec is the minority:
+> - DO's **product docs** say, three times, that access keys "can only be created and
+>   managed through the DigitalOcean Control Panel" and "cannot currently be created,
+>   edited, or deleted using the DigitalOcean API or CLI"
+>   (`products/spaces/how-to/manage-access/`, `products/spaces/details/limits/`).
+> - The **real-account probe** got **404** on `/v2/spaces/keys` (noted at the time as odd
+>   and left unexplained — see `do-api-verification-2026-08-21.md`).
+> - The **OpenAPI spec** lists the endpoints.
+>
+> This is the same lesson as KI-009, in the same direction: **presence in a spec is not
+> permission, and absence from a spec is not absence from the API.** DO's `/v2/tokens`
+> works for the control panel while being absent from the spec and fenced from PATs;
+> `/v2/spaces/keys` is *in* the spec while the docs say it doesn't exist for API callers.
+> On DO, credential management appears to be control-panel-only as a matter of policy for
+> **both** credential types. Treat API issuance of Spaces keys as **unconfirmed** until a
+> real-account probe says otherwise, and note that a 404 is consistent with either "not
+> rolled out" or "entitlement-gated," which the probe did not distinguish.
 
-- **Credential:** `POST /v2/spaces/keys` (secret returned once, in `key_create_response.secret_key`); list `GET /v2/spaces/keys`; get `GET /v2/spaces/keys/{access_key}`; modify `PUT`/`PATCH /v2/spaces/keys/{access_key}`; revoke `DELETE /v2/spaces/keys/{access_key}`. Tagged **Spaces Keys** in the public spec.
+- **Credential:** `POST /v2/spaces/keys` (secret returned once, in `key_create_response.secret_key`); list `GET /v2/spaces/keys`; get `GET /v2/spaces/keys/{access_key}`; modify `PUT`/`PATCH /v2/spaces/keys/{access_key}`; revoke `DELETE /v2/spaces/keys/{access_key}`. Tagged **Spaces Keys** in the public spec — but see Revision 2 above: the product docs say this is panel-only and a real account answered 404, so none of these operations should be assumed callable.
 - **Scoping:** Per-bucket `grants: [{bucket, permission}]` with `read` / `readwrite` / `fullaccess`. `fullaccess` cannot be mixed with scoped grants and takes precedence if both are sent. Comparable granularity to Exoscale/Linode, better than OVH's per-user coarseness.
 - **Minter privilege:** dedicated `spaces_key:{read,create_credentials,update,delete}` PAT scopes — so a Spaces minter can be genuinely least-privilege (unlike the `credential-do` PAT minter, whose token-creation capability is unscopable).
 - **Native expiry:** None — consistent with cross-cutting finding #1; the plugin would own the TTL via JIT revoke or phased rotation.
 - **Safety boundary:** settable `name` (so the `cloud-creds-<role>-` owner-prefix scheme works) and a returned `created_at` (so the reconciler's `ConfirmationHold` age check is satisfiable — cf. F1 in `docs/state-assumption-verification-2026-05-31.md`, where missing create timestamps forced Exoscale/Vultr fail-closed).
-- **Quota:** 200 keys/account — **the remaining blocker.** Fine for short-lived JIT issuance (keys live minutes); still fatal for per-customer long-lived isolation at ~100k services, which was the original driver.
-- **Verdict:** No longer blocked on the API. Object storage as a whole remains out of scope for this repo (see below), and Path A (long-lived per-customer keys) remains infeasible on DO for quota reasons. If object-storage roles are ever built, DO Spaces is now a *normal* candidate rather than an excluded one.
+- **Quota:** 200 access keys **and 100 buckets** per *account* (both raisable via support; documented at `products/spaces/details/limits/`). The cap is **per account, not per team** — and buckets cannot be moved between accounts, so team sharding is not a lever for an existing estate. Per-customer isolation is therefore bounded by the *bucket* cap before the key cap, and both are orders of magnitude short of ~100k services.
+- **Availability, not just quota — the disqualifier for the driving use case.** The requirement behind Path A is that *customer workloads keep reading their backups through an OpenBao outage*. Renewal is what needs OpenBao reachable, so a credential whose lifetime is shorter than the worst-case outage window cannot serve an availability-critical path at all. That rules out JIT for backup access on **every** cloud, independent of DO's quota: the only shapes that satisfy it are phased rotation (credential valid until its slot's next scheduled rotation, so an outage defers rotation rather than invalidating access — the OCI strategy) or credentials this repo does not manage at all. On DO specifically, long-lived keys are also un-rotatable by any plugin if API management really is panel-only, which collapses even the rotation option.
+- **Verdict:** Blocked, on two independent grounds now. The API objection is **not** cleared (Revision 2); the quota objection stands and binds at 100 buckets; and the availability requirement rules out short-lived issuance regardless. Object storage as a whole remains out of scope for this repo (see below). If object-storage roles are ever built, DO Spaces is a *worse* candidate than the earlier revision implied — it should be probed before it is designed for.
 
 ## Cross-Cutting Findings
 

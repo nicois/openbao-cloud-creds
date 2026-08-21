@@ -1,7 +1,6 @@
 package credentialaws
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -40,7 +39,7 @@ func newObservabilityBackend(t *testing.T, minters []interface{}, minterExpiryWa
 	config.StorageView = &logical.InmemStorage{}
 	config.Logger = hclog.New(&hclog.LoggerOptions{Output: logBuf, Level: hclog.Warn})
 
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -51,13 +50,13 @@ func newObservabilityBackend(t *testing.T, minters []interface{}, minterExpiryWa
 	if minterExpiryWarnSecs > 0 {
 		cfgData["minter_expiry_warn"] = minterExpiryWarnSecs
 	}
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage, Data: cfgData,
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
 		Data: map[string]interface{}{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
@@ -129,7 +128,7 @@ func TestConfig_MinterExpiryWarnRoundTrip(t *testing.T) {
 		map[string]interface{}{"id": "m1", minterAccessKeyIDKey: "AKIA1", minterSecretAccessKeyKey: "secret1", "never_expires": true},
 	}, 86400)
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: pathConfigKey, Storage: storage,
 	})
 	if err != nil || (resp != nil && resp.IsError()) {

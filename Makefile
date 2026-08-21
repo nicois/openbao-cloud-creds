@@ -3,12 +3,14 @@ MODULE_PREFIX := github.com/nicois/openbao-cloud-creds
 PLUGIN_DIRS := $(patsubst plugins/%/cmd,%,$(wildcard plugins/*/cmd))
 LINT_DIRS := pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/localexpiry pkg/worker pkg/plugintest pkg/telemetry pkg/metricspath conformance $(addprefix plugins/,$(PLUGIN_DIRS))
 
-# The e2e module is entirely behind a build tag, so it is invisible to a lint run
-# that does not pass the tag — lint it separately rather than leaving it unlinted.
-TAGGED_LINT_DIRS := e2e
+# Code behind a build tag is invisible to a lint run that does not pass the tag, so
+# each tagged surface gets its own pass rather than being left unlinted. Format is
+# <dir>:<tag>.
+TAGGED_LINT_TARGETS := e2e:e2e plugins/credential-do:cloud_real plugins/credential-aws:cloud_real
 E2E_BUILD_TAG := e2e
+CLOUD_REAL_BUILD_TAG := cloud_real
 
-.PHONY: build test test-conformance test-e2e lint fmt clean smoke-test
+.PHONY: build test test-conformance test-e2e test-cloud-real-do test-cloud-real-aws lint fmt clean smoke-test
 
 build:
 	go build $(MODULE_PREFIX)/...
@@ -31,8 +33,42 @@ test-conformance:
 test-e2e:
 	cd e2e && go test -tags=$(E2E_BUILD_TAG) -count=1 -v ./...
 
-test-cloud-real:
-	go test -tags=cloud_real ./plugins/credential-do/...
+# Calls the REAL DigitalOcean API with a real PAT, and creates + deletes real
+# personal access tokens on that account. Needs CLOUDREAL_DO_TOKEN; use a
+# dedicated/disposable account (docs/free-account-viability.md). It probes the one
+# assumption no fake can test: that POST /v2/tokens — undocumented, and the whole
+# mint path — works when called with a PAT. Scrubbed responses land in
+# plugins/credential-do/testdata/cloud-real/ as fixtures.
+# CLOUDREAL_DO_TOKEN may come from the environment, from .env.cloud-real (gitignored,
+# read by nothing but this target), or from DIGITALOCEAN_PAT / DIGITALOCEAN_TOKEN —
+# the names a machine with DO tooling on it already has exported.
+test-cloud-real-do:
+	@set -a; [ -f .env.cloud-real ] && . ./.env.cloud-real; set +a; \
+	: $${CLOUDREAL_DO_TOKEN:=$${DIGITALOCEAN_PAT:-$$DIGITALOCEAN_TOKEN}}; \
+	export CLOUDREAL_DO_TOKEN; \
+	test -n "$$CLOUDREAL_DO_TOKEN" || { echo "no DO token (CLOUDREAL_DO_TOKEN, DIGITALOCEAN_PAT, DIGITALOCEAN_TOKEN or .env.cloud-real)"; exit 1; }; \
+	cd plugins/credential-do && go test -tags=$(CLOUD_REAL_BUILD_TAG) -count=1 -v -run TestRealDO ./...
+
+# Calls the REAL AWS STS API with a real IAM user's access key. Needs
+# CLOUDREAL_AWS_KEY (access_key_id:secret_access_key) and CLOUDREAL_AWS_ROLE_ARN (a
+# role the minter may assume); CLOUDREAL_AWS_REGION defaults to us-east-1.
+# Unlike DO, nothing is created that needs deleting: STS sessions cannot be
+# revoked, so every duration is the shortest the assertion allows and they expire
+# on their own. IAM and STS calls are free.
+# The minter needs only sts:AssumeRole on the target role, and the target role's
+# trust policy must name the minter user and allow BOTH sts:AssumeRole and
+# sts:TagSession (the plugin sends session tags). A zero-permission target role is
+# enough — AssumeRole returns a valid credential regardless, so the whole plugin
+# path is exercised with no blast radius.
+# CLOUDREAL_AWS_LOWCAP_ROLE_ARN is optional: set it to a role with a
+# MaxSessionDuration below the role TTL to pin the gap the capability probe cannot
+# see (it asks for AWS's 900s floor). Absent, the gap is declared, not skipped.
+test-cloud-real-aws:
+	@set -a; [ -f .env.cloud-real ] && . ./.env.cloud-real; set +a; \
+	export CLOUDREAL_AWS_KEY CLOUDREAL_AWS_ROLE_ARN CLOUDREAL_AWS_REGION CLOUDREAL_AWS_LOWCAP_ROLE_ARN; \
+	test -n "$$CLOUDREAL_AWS_KEY" || { echo "no AWS minter key (CLOUDREAL_AWS_KEY as access_key_id:secret_access_key, in the environment or .env.cloud-real)"; exit 1; }; \
+	test -n "$$CLOUDREAL_AWS_ROLE_ARN" || { echo "no target role (CLOUDREAL_AWS_ROLE_ARN)"; exit 1; }; \
+	cd plugins/credential-aws && go test -tags=$(CLOUD_REAL_BUILD_TAG) -count=1 -v -run TestRealAWS ./...
 
 # Verifies every plugin builds as a binary and registers + enables in a live
 # OpenBao dev server. Requires `bao` on PATH.
@@ -44,9 +80,10 @@ lint:
 		echo "=== Linting $$dir ==="; \
 		(cd $$dir && golangci-lint run ./...) || exit 1; \
 	done
-	@for dir in $(TAGGED_LINT_DIRS); do \
-		echo "=== Linting $$dir (--build-tags=$(E2E_BUILD_TAG)) ==="; \
-		(cd $$dir && golangci-lint run --build-tags=$(E2E_BUILD_TAG) ./...) || exit 1; \
+	@for target in $(TAGGED_LINT_TARGETS); do \
+		dir=$${target%%:*}; tag=$${target##*:}; \
+		echo "=== Linting $$dir (--build-tags=$$tag) ==="; \
+		(cd $$dir && golangci-lint run --build-tags=$$tag ./...) || exit 1; \
 	done
 
 fmt:

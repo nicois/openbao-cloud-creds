@@ -1,7 +1,6 @@
 package credentialgcp_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -20,7 +19,7 @@ func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Stor
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
@@ -43,7 +42,7 @@ func TestRoleCRUD(t *testing.T) {
 			"minter_set":            "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role create failed: err=%v resp=%v", err, resp)
 	}
@@ -54,7 +53,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/deploy-role",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role read failed: err=%v resp=%v", err, resp)
 	}
@@ -78,7 +77,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role list failed: err=%v resp=%v", err, resp)
 	}
@@ -93,7 +92,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/deploy-role",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role delete failed: err=%v resp=%v", err, resp)
 	}
@@ -104,7 +103,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/deploy-role",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,7 +124,7 @@ func TestRoleValidation_MissingSAEmail(t *testing.T) {
 			"max_ttl":     3600,
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -147,7 +146,7 @@ func TestRoleValidation_InvalidSAEmail(t *testing.T) {
 			"service_account_email": "not-a-valid-email",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -171,7 +170,7 @@ func TestRoleValidation_TTLTooHigh(t *testing.T) {
 			"minter_set":            "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -195,7 +194,7 @@ func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 			"minter_set":            "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

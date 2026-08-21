@@ -1,7 +1,6 @@
 package metricspath_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +25,7 @@ func findPath(t *testing.T, paths []*framework.Path, substr string) *framework.P
 
 func call(t *testing.T, p *framework.Path, op logical.Operation, raw map[string]interface{}) (*logical.Response, error) {
 	t.Helper()
-	return p.Operations[op].Handler()(context.Background(), &logical.Request{}, &framework.FieldData{Raw: raw, Schema: p.Fields})
+	return p.Operations[op].Handler()(t.Context(), &logical.Request{}, &framework.FieldData{Raw: raw, Schema: p.Fields})
 }
 
 func TestPaths_EntityReturnsMergedFields(t *testing.T) {

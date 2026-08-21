@@ -11,6 +11,7 @@ import (
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/metrics"
 )
 
@@ -51,12 +52,12 @@ func entityHandler(accessor func() *metrics.AccessTracker) framework.OperationFu
 	return func(ctx context.Context, _ *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 		tracker := accessor()
 		if tracker == nil {
-			return logical.ErrorResponse("metrics not initialized"), nil
+			return credenvelope.ErrorResponse(credenvelope.ErrInternal, "metrics not initialized"), nil
 		}
 		entityID := d.Get("entity_id").(string)
 		merged, err := tracker.MergeEntity(ctx, entityID, time.Now())
 		if err != nil {
-			return logical.ErrorResponse("metrics query failed: %v", err), nil
+			return credenvelope.ErrorResponse(credenvelope.ErrInternal, "metrics query failed: %v", err), nil
 		}
 		if merged.AccessCount == 0 {
 			return nil, nil
@@ -76,12 +77,12 @@ func staleHandler(accessor func() *metrics.AccessTracker) framework.OperationFun
 	return func(ctx context.Context, _ *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 		tracker := accessor()
 		if tracker == nil {
-			return logical.ErrorResponse("metrics not initialized"), nil
+			return credenvelope.ErrorResponse(credenvelope.ErrInternal, "metrics not initialized"), nil
 		}
 		olderThan := time.Duration(d.Get("older_than").(int)) * time.Second
 		stale, err := tracker.ListStaleEntities(ctx, olderThan, time.Now())
 		if err != nil {
-			return logical.ErrorResponse("stale query failed: %v", err), nil
+			return credenvelope.ErrorResponse(credenvelope.ErrInternal, "stale query failed: %v", err), nil
 		}
 		return logical.ListResponse(stale), nil
 	}

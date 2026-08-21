@@ -1,7 +1,6 @@
 package credentialdo_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
@@ -22,7 +21,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -31,7 +30,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 	}
 
 	// Recovery: next call should succeed (no more injected errors)
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error on retry: %v", err)
 	}
@@ -53,7 +52,7 @@ func TestUpstreamTimeout(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

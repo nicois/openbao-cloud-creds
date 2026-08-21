@@ -32,7 +32,13 @@ type backend struct {
 	workerCancel      context.CancelFunc
 	// baseCtx is the parent context for all worker goroutines; baseCancel is
 	// fired from Clean (backend teardown) so leaked workers cannot outlive the
-	// backend. Worker launch sites use baseCtx rather than context.Background().
+	// backend. Worker launch sites use baseCtx, never context.Background().
+	//
+	// baseCtx is rooted at context.Background() deliberately, and it is the only
+	// such root in the plugin: workers must live as long as the BACKEND, and the
+	// contexts available where they start (Factory's, Initialize's) are REQUEST
+	// contexts that core cancels the moment that request returns — deriving from
+	// one would stop every worker seconds after the mount came up.
 	baseCtx     context.Context
 	baseCancel  context.CancelFunc
 	iamClientFn IAMClientFactory

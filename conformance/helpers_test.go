@@ -1,7 +1,6 @@
 package conformance
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -87,7 +86,7 @@ func plantDisabledRole(t *testing.T, storage logical.Storage) {
 	if err != nil {
 		t.Fatalf("building the disabled role entry failed: %v", err)
 	}
-	if err := storage.Put(context.Background(), entry); err != nil {
+	if err := storage.Put(t.Context(), entry); err != nil {
 		t.Fatalf("planting the disabled role failed: %v", err)
 	}
 }

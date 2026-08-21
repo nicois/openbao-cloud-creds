@@ -1,7 +1,6 @@
 package credentialdo_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -21,7 +20,7 @@ func TestRoleCRUD(t *testing.T) {
 			},
 		},
 	}
-	if resp, err := b.HandleRequest(context.Background(), setReq); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), setReq); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
@@ -37,7 +36,7 @@ func TestRoleCRUD(t *testing.T) {
 			"minter_set":  "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role create failed: err=%v resp=%v", err, resp)
 	}
@@ -48,7 +47,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/snapshot-rw",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role read failed: err=%v resp=%v", err, resp)
 	}
@@ -68,7 +67,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role list failed: err=%v resp=%v", err, resp)
 	}
@@ -83,7 +82,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/snapshot-rw",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role delete failed: err=%v resp=%v", err, resp)
 	}
@@ -94,7 +93,7 @@ func TestRoleCRUD(t *testing.T) {
 		Path:      "roles/snapshot-rw",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,7 +115,7 @@ func TestRoleValidation_TTL(t *testing.T) {
 			},
 		},
 	}
-	if resp, err := b.HandleRequest(context.Background(), setReq); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), setReq); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
@@ -131,7 +130,7 @@ func TestRoleValidation_TTL(t *testing.T) {
 			"minter_set":  "default",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -146,7 +145,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 		Operation: logical.UpdateOperation, Path: "roles/orphan", Storage: storage,
 		Data: map[string]interface{}{"default_ttl": 900, "max_ttl": 3600, "scopes": "read", "minter_set": "nonexistent"},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

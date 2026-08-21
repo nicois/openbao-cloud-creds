@@ -127,11 +127,16 @@ runtime `minter_insufficient_privilege` idea was deliberately not pursued (see
 | `entity_unavailable` | 503 | Upstream entity rotating/retiring | Yes, backoff |
 | `upstream_quota_exceeded` | 429 | Cloud rate limit/quota | Yes, exp backoff + jitter |
 | `upstream_auth_failed` | 502 | Plugin's bootstrap creds rejected | No (operator) — plugin self-heals if transient |
-| `upstream_timeout` | 504 | Upstream API didn't respond | Yes, backoff |
-| `consent_required` | 501 | Cloud requires human consent (OVH legacy) | No |
+| `upstream_timeout` | 504 | Upstream API didn't respond, or the client-side deadline fired | Yes, backoff |
+| `upstream_unavailable` | 503 | Cloud unreachable, or answered 5xx | Yes, backoff |
+| `upstream_request_invalid` | 400 | Cloud rejected the request's content (400/409/422) | No — fix config |
+| `config_invalid` | 400 | Operator input is missing, malformed, or names something that does not exist; also a failed capability probe | No — fix config |
+| `unsupported` | 501 | This cloud cannot do it and never will (e.g. minter rotation on DO/OVH/Vultr/OCI) | No — never |
 | `pool_exhausted` | 503 | All slots simultaneously unavailable | Yes, short backoff |
 | `lease_revoke_failed` | 500 | Couldn't revoke upstream cleanly | Operator alert |
-| `internal` | 500 | Plugin bug | No |
+| `internal` | 500 | Plugin bug, or a failure none of the above describes | No |
+
+> **Revised 2026-08-22.** `consent_required` is **removed**: it was specified here and never emitted by any code path, so no client can have seen it. The five codes above it are new, and `upstream_timeout` is newly *reachable* — it previously required the cloud to answer 408/504, while every plugin's own 30s client timeout produced no status at all and was reported as `internal`. See [`known-issues.md`](known-issues.md) KI-010 and the audit in [`decisions.md`](decisions.md).
 
 ## Per-cloud strategies
 

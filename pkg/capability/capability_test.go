@@ -26,7 +26,7 @@ func TestVerify_RunsEachDistinctCheckOnce(t *testing.T) {
 		okCheck("a", "m1", "role-b", &ran),
 		okCheck("b", "m1", "role-c", &ran),
 	}
-	result, err := Verify(context.Background(), checks)
+	result, err := Verify(t.Context(), checks)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestVerify_FailureNamesMinterAndAllSharingRoles(t *testing.T) {
 		{Key: "a", Minter: "minter-1", Roles: []string{"role-a"}, Run: fail},
 		{Key: "a", Minter: "minter-1", Roles: []string{"role-b"}, Run: fail},
 	}
-	_, err := Verify(context.Background(), checks)
+	_, err := Verify(t.Context(), checks)
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -63,7 +63,7 @@ func TestVerify_UnsupportedIsSkippedNotFailed(t *testing.T) {
 		Key: "a", Minter: "m1", Roles: []string{"role-a"},
 		Run: func(context.Context) error { return ErrUnsupported },
 	}}
-	result, err := Verify(context.Background(), checks)
+	result, err := Verify(t.Context(), checks)
 	if err != nil {
 		t.Fatalf("ErrUnsupported must not fail verification: %v", err)
 	}
@@ -94,7 +94,7 @@ func putRole(t *testing.T, storage logical.Storage, name string, role map[string
 	if err != nil {
 		t.Fatalf("entry build failed: %v", err)
 	}
-	if err := storage.Put(context.Background(), entry); err != nil {
+	if err := storage.Put(t.Context(), entry); err != nil {
 		t.Fatalf("put failed: %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestRolesBoundTo_FiltersBySetAndSkipsDisabled(t *testing.T) {
 	putRole(t, storage, "other-set", map[string]interface{}{"name": "other-set", "minter_set": "beta"})
 	putRole(t, storage, "off", map[string]interface{}{"name": "off", "minter_set": "alpha", "disabled": true})
 
-	bound, err := RolesBoundTo(context.Background(), storage, "alpha")
+	bound, err := RolesBoundTo(t.Context(), storage, "alpha")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

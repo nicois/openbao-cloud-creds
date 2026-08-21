@@ -1,7 +1,6 @@
 package credentialvultr_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
@@ -20,7 +19,7 @@ func TestFullLifecycle(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	issueResp, err := b.HandleRequest(context.Background(), issueReq)
+	issueResp, err := b.HandleRequest(t.Context(), issueReq)
 	if err != nil || issueResp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, issueResp)
 	}
@@ -59,7 +58,7 @@ func TestFullLifecycle(t *testing.T) {
 		Storage:   storage,
 		Secret:    issueResp.Secret,
 	}
-	renewResp, err := b.HandleRequest(context.Background(), renewReq)
+	renewResp, err := b.HandleRequest(t.Context(), renewReq)
 	if err != nil || (renewResp != nil && renewResp.IsError()) {
 		t.Fatalf("renew failed: err=%v resp=%v", err, renewResp)
 	}
@@ -71,7 +70,7 @@ func TestFullLifecycle(t *testing.T) {
 		Storage:   storage,
 		Secret:    issueResp.Secret,
 	}
-	revokeResp, err := b.HandleRequest(context.Background(), revokeReq)
+	revokeResp, err := b.HandleRequest(t.Context(), revokeReq)
 	if err != nil {
 		t.Fatalf("revoke failed: %v", err)
 	}
@@ -80,7 +79,7 @@ func TestFullLifecycle(t *testing.T) {
 	}
 
 	// 4. Issue another to prove plugin still works after revoke
-	issueResp2, err := b.HandleRequest(context.Background(), issueReq)
+	issueResp2, err := b.HandleRequest(t.Context(), issueReq)
 	if err != nil || issueResp2.IsError() {
 		t.Fatalf("second issue failed: err=%v resp=%v", err, issueResp2)
 	}
@@ -95,7 +94,7 @@ func TestFullLifecycle(t *testing.T) {
 		Storage:   storage,
 		Data:      map[string]interface{}{"mode": "dry_run"},
 	}
-	reconcileResp, err := b.HandleRequest(context.Background(), reconcileReq)
+	reconcileResp, err := b.HandleRequest(t.Context(), reconcileReq)
 	if err != nil || (reconcileResp != nil && reconcileResp.IsError()) {
 		t.Fatalf("reconcile failed: err=%v resp=%v", err, reconcileResp)
 	}
@@ -106,7 +105,7 @@ func TestFullLifecycle(t *testing.T) {
 		Path:      "metrics/entity/default/minter-1",
 		Storage:   storage,
 	}
-	metricsResp, err := b.HandleRequest(context.Background(), metricsReq)
+	metricsResp, err := b.HandleRequest(t.Context(), metricsReq)
 	if err != nil {
 		t.Fatalf("metrics query failed: %v", err)
 	}

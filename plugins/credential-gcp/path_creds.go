@@ -68,7 +68,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	accessToken, expiresAt, err := client.GenerateAccessToken(ctx, role.ServiceAccountEmail, role.Scopes, role.DefaultTTL)
 	if err != nil {
 		status := classifyGCPError(err)
-		b.recordMinterError(setName, minterID, status, now)
+		b.recordMinterError(setName, minterID, status, err, now)
 		return b.issuanceError(status, err), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
@@ -248,12 +248,12 @@ func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	}
 }
 
-func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, err error, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if states, ok := b.minterSets[setName]; ok {
 		if ms, ok := states[id]; ok {
-			ms.sm.RecordError(httpStatus, at)
+			ms.sm.RecordUpstream(httpStatus, err, at)
 		}
 	}
 }
@@ -263,26 +263,46 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
 	b.Logger().Warn("upstream credential issuance failed",
 		"cloud", cloudName, "status", httpStatus, "error", err)
-	return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
+	return credenvelope.ErrorResponse(credenvelope.Classify(httpStatus, err),
 		"upstream credential issuance failed")
 }
 
-// classifyGCPError maps GCP API errors to HTTP status codes for the state machine.
+// gcpErrorSignatures maps substrings GCP puts in its error strings to the
+// HTTP status they mean. A table rather than an if-chain because the list grows
+// every time a real run shows a shape we had not seen; first match wins, so
+// specific precedes general.
+var gcpErrorSignatures = []struct {
+	needles []string
+	status  int
+}{
+	{[]string{"PERMISSION_DENIED", "403"}, http.StatusForbidden},
+	{[]string{"UNAUTHENTICATED", "invalid_grant", "401"}, http.StatusUnauthorized},
+	{[]string{"RESOURCE_EXHAUSTED", "429"}, http.StatusTooManyRequests},
+	// The request is wrong and an identical retry cannot succeed.
+	{[]string{"INVALID_ARGUMENT", "FAILED_PRECONDITION", "400"}, http.StatusBadRequest},
+	{[]string{"504"}, http.StatusGatewayTimeout},
+	// The cloud is degraded, not this plugin: retryable, and never `internal`.
+	{[]string{"500", "502", "503"}, http.StatusInternalServerError},
+}
+
+// classifyGCPError maps a GCP error to the HTTP status it represents, or
+// credenvelope.StatusNone when nothing matches — in which case
+// credenvelope.Classify inspects the error itself. Returning a synthetic 500 for
+// "unrecognised" is what used to make ErrUpstreamTimeout unreachable and reported
+// an unreachable cloud as a defect in this plugin.
 func classifyGCPError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
 	errMsg := err.Error()
-	if strings.Contains(errMsg, "403") || strings.Contains(errMsg, "PERMISSION_DENIED") {
-		return http.StatusForbidden
+	for _, signature := range gcpErrorSignatures {
+		for _, needle := range signature.needles {
+			if strings.Contains(errMsg, needle) {
+				return signature.status
+			}
+		}
 	}
-	if strings.Contains(errMsg, "401") || strings.Contains(errMsg, "UNAUTHENTICATED") || strings.Contains(errMsg, "invalid_grant") {
-		return http.StatusUnauthorized
-	}
-	if strings.Contains(errMsg, "429") || strings.Contains(errMsg, "RESOURCE_EXHAUSTED") {
-		return http.StatusTooManyRequests
-	}
-	return http.StatusInternalServerError
+	return credenvelope.StatusNone
 }
 
 // hashTokenPrefix generates a short opaque identifier from the leading

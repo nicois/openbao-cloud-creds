@@ -1,7 +1,6 @@
 package credentialupcloud
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -17,7 +16,7 @@ const (
 // capWriteRole writes a role bound to the default set and returns the response.
 func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Response {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
 		Data: map[string]interface{}{
 			fieldDefaultTTL: 3600, fieldMaxTTL: 86400,
@@ -43,7 +42,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotMint(t *testing.T) {
 	if resp == nil || !resp.IsError() {
 		t.Fatalf("expected the role write to be rejected, got %v", resp)
 	}
-	read, err := bk.HandleRequest(context.Background(), &logical.Request{
+	read, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: capRolePath, Storage: storage,
 	})
 	if err != nil {
@@ -82,7 +81,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
 	before := srv.ProvisionedCount()
 	srv.SetForbidMintForTokenPrefix(capMintedPrefix)
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: "minter-1"},
 	})
@@ -112,7 +111,7 @@ func TestCapability_DisabledSkipsProbe(t *testing.T) {
 	bk, srv, storage := newRotationBackend(t, []interface{}{
 		neverExpiresMinter("minter-1", "ucat_v1_one"),
 	})
-	if resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{
 			fieldUsername: "testuser", fieldAPIURL: srv.URL, fieldVerifyCapability: false,

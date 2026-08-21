@@ -1,7 +1,6 @@
 package credentialoci_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -25,7 +24,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 			"region": "us-ashburn-1",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
@@ -45,7 +44,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 			},
 		},
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
@@ -64,7 +63,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 			"minter_set":      "default",
 		},
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role write failed: err=%v resp=%v", err, resp)
 	}
@@ -80,7 +79,7 @@ func TestCredsRead(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("creds read failed: %v", err)
 	}
@@ -145,7 +144,7 @@ func TestCredsRead_RoleNotFound(t *testing.T) {
 		Path:      "creds/nonexistent",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -156,7 +155,7 @@ func TestCredsRead_RoleNotFound(t *testing.T) {
 
 func TestCredsRead_RoleNotFound_HasErrorCode(t *testing.T) {
 	b, storage := getTestBackend(t)
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: "creds/nope", Storage: storage,
 	})
 	if err != nil {
@@ -182,7 +181,7 @@ func TestCredsRead_MultipleReadsReturnSameSlot(t *testing.T) {
 			Path:      "creds/test-role",
 			Storage:   storage,
 		}
-		resp, err := b.HandleRequest(context.Background(), req)
+		resp, err := b.HandleRequest(t.Context(), req)
 		if err != nil || resp == nil || resp.IsError() {
 			t.Fatalf("creds read %d failed: err=%v resp=%v", i, err, resp)
 		}
@@ -206,7 +205,7 @@ func TestCredsRevoke_IsSoft(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || resp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
 	}
@@ -218,7 +217,7 @@ func TestCredsRevoke_IsSoft(t *testing.T) {
 		Storage:   storage,
 		Secret:    resp.Secret,
 	}
-	revokeResp, err := b.HandleRequest(context.Background(), revokeReq)
+	revokeResp, err := b.HandleRequest(t.Context(), revokeReq)
 	if err != nil {
 		t.Fatalf("revoke failed: %v", err)
 	}
@@ -227,7 +226,7 @@ func TestCredsRevoke_IsSoft(t *testing.T) {
 	}
 
 	// Credential should still be readable (soft revoke doesn't invalidate the slot)
-	resp2, err := b.HandleRequest(context.Background(), req)
+	resp2, err := b.HandleRequest(t.Context(), req)
 	if err != nil || resp2 == nil || resp2.IsError() {
 		t.Fatalf("second read after revoke failed: err=%v resp=%v", err, resp2)
 	}

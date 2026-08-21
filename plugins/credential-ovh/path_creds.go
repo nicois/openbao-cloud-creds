@@ -71,7 +71,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	accessToken, expiresIn, err := client.MintToken(ctx)
 	if err != nil {
 		status := classifyOVHError(err)
-		b.recordMinterError(setName, minterID, status, now)
+		b.recordMinterError(setName, minterID, status, err, now)
 		return b.issuanceError(status, err), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
@@ -222,12 +222,12 @@ func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	}
 }
 
-func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, err error, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if states, ok := b.minterSets[setName]; ok {
 		if ms, ok := states[id]; ok {
-			ms.sm.RecordError(httpStatus, at)
+			ms.sm.RecordUpstream(httpStatus, err, at)
 		}
 	}
 }
@@ -237,26 +237,46 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
 	b.Logger().Warn("upstream credential issuance failed",
 		"cloud", cloudName, "status", httpStatus, "error", err)
-	return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
+	return credenvelope.ErrorResponse(credenvelope.Classify(httpStatus, err),
 		"upstream credential issuance failed")
 }
 
-// classifyOVHError maps OVH OAuth2 errors to HTTP status codes for the state machine.
+// ovhErrorSignatures maps substrings OVH puts in its error strings to the
+// HTTP status they mean. A table rather than an if-chain because the list grows
+// every time a real run shows a shape we had not seen; first match wins, so
+// specific precedes general.
+var ovhErrorSignatures = []struct {
+	needles []string
+	status  int
+}{
+	{[]string{"invalid_client", "401"}, http.StatusUnauthorized},
+	{[]string{"403"}, http.StatusForbidden},
+	{[]string{"429"}, http.StatusTooManyRequests},
+	// The request is wrong and an identical retry cannot succeed.
+	{[]string{"invalid_request", "invalid_scope", "400"}, http.StatusBadRequest},
+	{[]string{"504"}, http.StatusGatewayTimeout},
+	// The cloud is degraded, not this plugin: retryable, and never `internal`.
+	{[]string{"500", "502", "503"}, http.StatusInternalServerError},
+}
+
+// classifyOVHError maps a OVH error to the HTTP status it represents, or
+// credenvelope.StatusNone when nothing matches — in which case
+// credenvelope.Classify inspects the error itself. Returning a synthetic 500 for
+// "unrecognised" is what used to make ErrUpstreamTimeout unreachable and reported
+// an unreachable cloud as a defect in this plugin.
 func classifyOVHError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
 	errMsg := err.Error()
-	if strings.Contains(errMsg, "401") || strings.Contains(errMsg, "invalid_client") {
-		return http.StatusUnauthorized
+	for _, signature := range ovhErrorSignatures {
+		for _, needle := range signature.needles {
+			if strings.Contains(errMsg, needle) {
+				return signature.status
+			}
+		}
 	}
-	if strings.Contains(errMsg, "403") {
-		return http.StatusForbidden
-	}
-	if strings.Contains(errMsg, "429") {
-		return http.StatusTooManyRequests
-	}
-	return http.StatusInternalServerError
+	return credenvelope.StatusNone
 }
 
 // tokenHashPrefixLen is how many leading characters of an access token feed the

@@ -69,7 +69,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	endDateTime := now.Add(role.DefaultTTL)
 	pwResp, httpStatus, err := client.AddPassword(ctx, role.AppObjectID, displayName, endDateTime)
 	if err != nil {
-		b.recordMinterError(setName, minterID, httpStatus, now)
+		b.recordMinterError(setName, minterID, httpStatus, err, now)
 		return b.issuanceError(httpStatus, err), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
@@ -225,7 +225,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	now := time.Now()
 	httpStatus, err := client.RemovePassword(ctx, appObjectID, keyID)
 	if err != nil && httpStatus != http.StatusNotFound {
-		b.recordMinterError(minterSet, minterID, httpStatus, now)
+		b.recordMinterError(minterSet, minterID, httpStatus, err, now)
 		emitLeaseRevokeFailed(roleName)
 		b.Logger().Warn("upstream credential revocation failed",
 			"cloud", cloudName, "status", httpStatus, "error", err)
@@ -353,12 +353,12 @@ func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	}
 }
 
-func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, err error, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if states, ok := b.minterSets[setName]; ok {
 		if ms, ok := states[id]; ok {
-			ms.sm.RecordError(httpStatus, at)
+			ms.sm.RecordUpstream(httpStatus, err, at)
 		}
 	}
 }
@@ -368,6 +368,6 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
 	b.Logger().Warn("upstream credential issuance failed",
 		"cloud", cloudName, "status", httpStatus, "error", err)
-	return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
+	return credenvelope.ErrorResponse(credenvelope.Classify(httpStatus, err),
 		"upstream credential issuance failed")
 }

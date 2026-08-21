@@ -35,7 +35,7 @@ type capSTSRecorder struct {
 }
 
 func (r *capSTSRecorder) assumeRole(keyID string) AssumeRoleFunc {
-	return func(_ context.Context, params *sts.AssumeRoleInput) (*sts.AssumeRoleOutput, error) {
+	return func(ctx context.Context, params *sts.AssumeRoleInput) (*sts.AssumeRoleOutput, error) {
 		r.mu.Lock()
 		r.inputs = append(r.inputs, params)
 		deny := r.denyAll || (r.denyKeyPart != "" && strings.Contains(keyID, r.denyKeyPart))
@@ -43,7 +43,7 @@ func (r *capSTSRecorder) assumeRole(keyID string) AssumeRoleFunc {
 		if deny {
 			return nil, fmt.Errorf("AccessDenied: User: %s is not authorized to perform: sts:AssumeRole", keyID)
 		}
-		return NewFakeSTSClient(nil, nil).AssumeRole(context.Background(), params)
+		return NewFakeSTSClient(nil, nil).AssumeRole(ctx, params)
 	}
 }
 
@@ -90,7 +90,7 @@ func capBackend(t *testing.T, store *fakeIAMStore, minters []interface{}) (*back
 // capWriteRole writes a role bound to the default set and returns the response.
 func capWriteRole(t *testing.T, bk *backend, storage logical.Storage) *logical.Response {
 	t.Helper()
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
 		Data: map[string]interface{}{
 			fieldDefaultTTL: capRoleTTL, fieldMaxTTL: capRoleMaxTTL,
@@ -121,7 +121,7 @@ func TestCapability_RoleWriteRejectedWhenAssumeRoleDenied(t *testing.T) {
 	if rec.count() == 0 {
 		t.Fatal("the role write did not attempt a probe AssumeRole")
 	}
-	read, err := bk.HandleRequest(context.Background(), &logical.Request{
+	read, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: capRolePath, Storage: storage,
 	})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotAssume(t *testing.T) {
 	// rotation's own mint and health check still pass.
 	rec.setDenyKeyPart(successorKeyPrefix)
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
 	})
@@ -214,7 +214,7 @@ func TestCapability_DisabledSkipsProbe(t *testing.T) {
 	bk, rec, storage := capBackend(t, newFakeIAMStore("AKIA1"), []interface{}{
 		neverExpiresMinter(rotMinter1ID, "AKIA1", "secret1"),
 	})
-	if resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{
 			configRegionKey: defaultRegion, fieldVerifyCapability: false,

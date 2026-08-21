@@ -1,7 +1,6 @@
 package plugintest
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -21,7 +20,7 @@ func RunPerturbationSuite(t *testing.T, h Harness) {
 			t.Fatal("issue returned no secret/lease")
 		}
 		h.RewriteDefaultSetWithout(t, b, storage)
-		revResp, revErr := b.HandleRequest(context.Background(), &logical.Request{
+		revResp, revErr := b.HandleRequest(t.Context(), &logical.Request{
 			Operation: logical.RevokeOperation,
 			Path:      h.IssuePath,
 			Storage:   storage,

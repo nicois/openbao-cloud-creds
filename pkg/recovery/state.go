@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 )
 
 type State string
@@ -71,6 +73,27 @@ func (sm *StateMachine) ConsecutiveFailures() int {
 	return sm.consecutiveFailures
 }
 
+// RecordUpstream records the outcome of one upstream attempt, and is the entry
+// point every caller should use: it drops failures that say nothing about this
+// minter's credential before they reach the state machine.
+//
+// The distinction exists because one classification used to serve two consumers.
+// A duration the cloud rejects, or a minter set the operator misnamed, is a fault
+// in the request — but it was counted as a fault against the *credential*, which
+// walked healthy minters toward AuthFailing (the second half of KI-010). Pass the
+// error as well as the status: a client-side timeout has no status by
+// construction, and without the error it is indistinguishable from a plugin bug.
+func (sm *StateMachine) RecordUpstream(httpStatus int, err error, at time.Time) {
+	code := credenvelope.Classify(httpStatus, err)
+	if !credenvelope.IndictsMinter(code) {
+		return
+	}
+	sm.RecordError(credenvelope.HealthStatus(code), at)
+}
+
+// RecordError records a failure against this minter unconditionally. Prefer
+// RecordUpstream, which first asks whether the failure is about the minter at
+// all; this remains for callers that have already made that judgement.
 func (sm *StateMachine) RecordError(httpStatus int, at time.Time) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

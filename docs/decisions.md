@@ -50,13 +50,15 @@ Phased rotation is essentially a pool with rotation discipline, where the discip
 
 DO is the simplest cloud that exercises every load-bearing piece of the design:
 
-- Has a JIT-capable native API (`POST /v2/tokens`) — but see the 2026-08-21 correction below: this endpoint is *undocumented*
-- Has revocation (`DELETE /v2/tokens/{id}`) — likewise undocumented
+- Has a JIT-capable native API (`POST /v2/tokens`) — **refuted twice over**; see the 2026-08-21 corrections below. The endpoint is undocumented *and* refuses PAT authentication (KI-009), so DO cannot in fact mint headlessly
+- Has revocation (`DELETE /v2/tokens/{id}`) — same endpoint family, same refusal
 - Has no native short-TTL primitive (so the plugin owns the TTL contract)
 - The cloud SDK is small
 - Test accounts are cheap
 
 It was chosen as the reference precisely because it owns the full lifecycle (envelope, lease tracking, recovery, reconciler, metrics) with nothing delegated upstream — every load-bearing piece gets exercised.
+
+> **Correction, later on 2026-08-21 (supersedes the correction below):** a real-account probe found `POST /v2/tokens` refused at DigitalOcean's **edge gateway** for a full-access PAT, not merely for a scoped one — the path is not open to bearer-token auth at all (KI-009). So the first bullet is not "overstated", it is false: DO has no headless JIT-capable API. DO stays the reference for the *code shape* and as the origin of the DO fake, and it is no longer presented as production-viable; the reasoning is in [Why `credential-do` stays the reference implementation even though it cannot mint](#why-credential-do-stays-the-reference-implementation-even-though-it-cannot-mint) below.
 
 > **Correction (2026-08-21):** "Has a JIT-capable native API" overstated the case. DO's `POST /v2/tokens` / `DELETE /v2/tokens/{id}` are **not public documented API** — DigitalOcean's public OpenAPI spec has no `/v2/tokens` path and DO documents PAT creation as control-panel-only, so the reference implementation depends on a control-panel-internal endpoint with no stability contract. Notably, `docs/object-storage-credential-audit.md` rejected DO Spaces *for exactly this reason*; the two positions were inconsistent. We keep DO as the reference — the endpoint works, it is what the control panel itself uses, and the documented OAuth alternative needs interactive authorization so cannot mint headlessly — but the dependency is now stated wherever the endpoint appears, and verifying it is the first item of the deferred real-cloud pass (#7). Full findings: [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md).
 
@@ -469,3 +471,194 @@ Above it sits one more layer, planned but unbuilt: real clouds via CI secrets,
 whose purpose is proving the fakes resemble what they stand in for
 (`docs/free-account-viability.md`). The `cloud_real` build tag is currently carried
 by no file, and that is recorded as a gap rather than described as coverage.
+
+## Why DO's health check stays `GET /v2/account` after a scoped PAT failed it
+
+A real-account probe on 2026-08-21 found that a granular (scoped) DO PAT gets 403
+on `GET /v2/account` — the plugin's health check — while `GET /v2/regions` returns
+200. So that health check reports a live credential as dead, and the recovery state
+machine would drive such a minter to `AuthFailing` on false grounds. The obvious
+fix is to probe a scope-free endpoint instead. It was rejected.
+
+The repo's own doctrine is **health ≠ capability**
+(`docs/minter-capability-verification.md`): health proves the credential is live,
+the capability probe proves it may mint. Judged by that doctrine `/v2/account` is
+the wrong endpoint, and `/v2/regions` the right one. But the same probe's second run
+established something stronger (R1, KI-009): `/v2/tokens` is refused at DO's edge
+gateway for *every* PAT, so there is no mint-capable DO PAT to be under-privileged
+in the first place. The false-alarm state the change would fix is unreachable twice
+over — a DO minter that gets past the capability probe against real DO does not
+exist, and against the fake `/v2/account` answers 200.
+
+That leaves a change with no behavioural benefit, which would trade a
+higher-signal endpoint (one that fails when the minter is under-privileged, right
+at the point an operator has pasted the wrong PAT) for a lower-signal one, and
+churn the DO fake and its callers for it. The finding is real and worth having, so
+it is recorded where it helps instead: as `forbiddenMintHint` on the capability
+probe's 403, which is the error an operator with the wrong PAT actually sees, and
+in `docs/do-api-verification-2026-08-21.md` (R1, R2). Should DO ever ship a
+PAT-management scope, least-privilege minters become possible and this decision
+must be revisited — the health endpoint would then need to move.
+
+## Why `credential-do` stays the reference implementation even though it cannot mint
+
+The real-cloud probe established that `POST /v2/tokens` is refused at DigitalOcean's
+edge gateway for any personal access token (KI-009). The plugin's mint path cannot
+work in production, and there is no headless alternative on DO: OAuth tokens need
+interactive authorization, and Spaces keys are a different credential type that this
+repo puts out of scope. Three options were weighed.
+
+**Delete the plugin.** Rejected. Its value to this repo was never DigitalOcean:
+`credential-do` is the structure the other nine plugins follow, and the DO fake it
+was written against is what the conformance and e2e layers exercise most heavily —
+including the two categories (`reload`, `lease`) that exist because bugs were found
+through it. Deleting a working reference and its test infrastructure to register a
+complaint about one cloud's gateway would cost coverage across ten plugins and buy
+nothing.
+
+**Keep it and say nothing.** Rejected outright. An operator would configure a minter
+set, and — because the capability probe defaults on — get a 403 whose message
+("You are not authorized to perform this operation") invites a hunt for a privilege
+that does not exist. That is the failure mode this repo's whole capability doctrine
+was built to prevent.
+
+**Keep it, demote its claim, and make the cloud's refusal legible.** Taken. The
+plugin remains the code-shape reference and the origin of the DO fake; it is no
+longer described anywhere as production-viable. The upstream 403 is translated at
+minter-set/role write time by `forbiddenMintHint`, which states the conclusion DO's
+own error cannot. And the finding is pinned rather than remembered: the probe asserts
+the fence and **fails as good news** if DO ever allows the mint, and
+`fake_parity_test.go` keeps the recorded evidence for it honest in ordinary
+credential-free test runs.
+
+The deeper lesson is about the layer, not the cloud. This repo had already flagged
+the undocumented endpoint as an accepted risk (D1) and reasoned carefully about it
+from the spec — and the spec-based reasoning reached "undocumented but working",
+which was wrong in the way that mattered. Only a real credential against the real
+API distinguished "DO does not document this" from "DO does not permit this", and it
+took two runs and one response header (`X-Response-From`) to do it. Nine clouds
+remain unprobed on that basis
+([`free-account-viability.md`](free-account-viability.md)); this is the argument for
+finishing that work rather than trusting ten fakes that agree with our reading of
+ten sets of docs.
+
+## Why the AWS real-cloud probe injects its recorder through a per-call option
+
+The DO probe records by swapping `doClient.httpClient.Transport`, which works because
+that client is a struct the test package can reach into. AWS's client is an SDK type
+built by `newRealSTSClient`, so the obvious moves were to add a test-only constructor
+taking an `http.Client`, or to widen `STSClient`.
+
+Neither was needed. `STSClient`'s methods already end in
+`optFns ...func(*sts.Options)` — the SDK's per-operation options — because that is
+simply what the AWS SDK's method signature looks like. Passing
+`func(o *sts.Options) { o.HTTPClient = ... }` on each call gives the recorder the wire
+bytes while everything else stays the plugin's: its factory, its credential handling,
+its signing, its decoding. **No production code exists for the test's benefit**, which
+is the property that makes this layer's evidence worth anything — a probe that drives a
+purpose-built seam is testing the seam.
+
+Generalised: prefer a seam production code already has, even an incidental one, over a
+new exported hook. The rule is in [`AGENTS.md`](../AGENTS.md).
+
+## Why KI-010 is documented rather than fixed
+
+The AWS probe found that an STS `ValidationError` reaches clients as
+`error_code: internal` and is recorded as a fault against a healthy minter. The
+tempting one-line fix — add a `ValidationError` branch to `classifyAWSError` returning
+`http.StatusBadRequest` — changes nothing a client can see: `ClassifyUpstream` maps 400
+through `default` to `ErrInternal` as well. Saying what actually happened needs a **new
+`error_code`** (`upstream_request_invalid` or similar), and that is a spec change: the
+techrfc's error model, plus every client pinning `metadata.api_version`. Adding an error
+code to make one plugin's error message nicer, in the same change that introduced the
+test which found it, is how a stable contract stops being stable.
+
+So the finding is pinned instead — `fake_parity_test.go` asserts AWS's envelope shape
+*and* the current (wrong) classification, so a fix must be deliberate and must update
+[`known-issues.md`](known-issues.md) — and the options, including the `iam:GetRole`
+alternative that would close the underlying `MaxSessionDuration` gap at the other end,
+are written down there for whoever decides.
+
+The related judgement: the probe **declares** the `MaxSessionDuration` gap rather than
+skipping it, and accepts an optional `CLOUDREAL_AWS_LOWCAP_ROLE_ARN` to turn the
+declaration into a live assertion. Demonstrating that gap needs a role capped below the
+plugin's ceiling, which the minter deliberately cannot create — its IAM grant is
+assume-only. An uncovered case that prints why it is uncovered is the same discipline as
+`Harness.Skips`; a `t.Skip` would have looked like a pass.
+
+## Why the AWS minter credential is one environment variable, not two
+
+`free-account-viability.md` originally planned `CLOUDREAL_AWS_ACCESS_KEY_ID` +
+`CLOUDREAL_AWS_SECRET_ACCESS_KEY`, mirroring AWS's own convention. The probe takes a
+single `CLOUDREAL_AWS_KEY=access_key_id:secret_access_key` instead, because that is
+already the format a minter's `token` takes inside a minter set
+(`iam_minter_client.go` builds exactly this string for a rotation successor). One
+variable means the operator pastes the same value into the test environment and into
+`minter-sets/<name>`, there is one thing to rotate, and a half-updated pair cannot
+authenticate as one key with another's secret.
+
+## Why adding an `error_code` does not bump `api_version`
+
+Because it cannot, and the attempt would be worse than useless.
+
+An `error_code` travels in the error *string* — `credenvelope.ErrorResponse` returns
+`logical.ErrorResponse("<code>: <message>")` — because OpenBao surfaces only
+`resp.Error()` to a client on an error response and drops `Data` side-channels. So an
+error response carries **no envelope**, and `metadata.api_version` exists only inside an
+envelope, which is only ever built on success. A client cannot read `api_version` off a
+response that carries an `error_code`. Bumping it to announce a new code would announce
+the change on the one class of response where the change never appears, while forcing
+every client to re-pin for a compatible addition.
+
+The rule adopted instead: the vocabulary is **additive**, and a client MUST treat an
+unrecognised code exactly as `internal`. New codes ship in a documented spec revision;
+removing or redefining a code is breaking and does need a bump. `api_version` keeps
+meaning one thing — the envelope's shape — which is what makes it useful.
+
+This also settles the question the audit was asked: there is no "version churn" to
+amortise, so the reason to batch the additions was the cheaper one — each addition costs
+a techrfc edit, a `design.md` table row and a client-side switch arm, and one revision
+covering five real failure modes is kinder than five revisions.
+
+## Why `logical.ErrorResponse` is banned by lint rather than by convention
+
+166 error responses had accumulated with no `error_code` — every config, role,
+minter-set, reconcile and rotate path — while API-002 claimed all error responses
+carried one. Nobody decided that; it happened because `credenvelope.ErrorResponse` and
+`logical.ErrorResponse` look equally reasonable at a call site, and a missing code is
+invisible in review. It does not look like a defect; it looks like a message that
+happens not to have a prefix.
+
+Signature design gets half of it: `credenvelope.ErrorResponse(code ErrorCode, msg
+string, ...)` cannot be called without a code. The other half is removing the
+alternative, so `forbidigo` forbids `logical.ErrorResponse` outside
+`pkg/credenvelope/errors.go`. The contract is now a property of the build.
+
+Considered and rejected: making `ErrorCode` a struct with an unexported field, so an
+arbitrary string literal could not be passed either. It would buy compile-time
+protection against an *invented* code, which is not the failure that happened, at the
+cost of an idiomatic wire-shaped type (constants, `switch`, direct comparison in tests).
+The realistic failure is forgetting the code, and lint plus the signature cover that.
+
+## Why `unsupported` is a code and `upstream_conflict` is not
+
+Both were candidates in the same revision; the test applied was whether a client would
+**act** differently.
+
+`unsupported` earns it. `minter-sets/<set>/rotate` exists on all ten plugins for a
+uniform surface, and four of them reject it permanently (DO, OVH, Vultr, OCI). Tooling
+that walks the clouds needs to tell "this cloud never will" from "you configured it
+wrong" — the first means stop asking, the second means fix input. Reporting both as
+`config_invalid` would send an operator hunting for a setting that does not exist,
+which is exactly the mistake KI-009's `forbiddenMintHint` exists to prevent elsewhere.
+
+`upstream_conflict` (HTTP 409) does not. Entity names are plugin-generated from the role
+and request id, so a genuine conflict is a plugin bug or a quota in disguise — there is
+no "retry with a different name" a client could perform. 409 therefore folds into
+`upstream_request_invalid` with the other content rejections, and if a real 409 ever
+turns up in a real-cloud run, the recording will say what it actually means.
+
+`consent_required` was removed in the same pass: it was specified in `design.md`,
+mapped to 501, and emitted by nothing. Since no code path ever produced it, no client
+can have observed it, so removing it breaks nobody — and leaving it would keep implying
+a behaviour that does not exist.

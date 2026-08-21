@@ -1,7 +1,6 @@
 package credentialexoscale_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
@@ -13,7 +12,7 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	t.Helper()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := credentialexoscale.Factory(context.Background(), config)
+	b, err := credentialexoscale.Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)
 	}
@@ -23,7 +22,7 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	// needing their own fake rewrite config over this.
 	srv := fakes.NewExoscaleServer()
 	t.Cleanup(srv.Close)
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: config.StorageView,
 		Data: map[string]interface{}{"exoscale_api_url": srv.URL},
 	})
@@ -44,7 +43,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Data:      map[string]interface{}{},
 	}
 
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
@@ -55,7 +54,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config read failed: err=%v resp=%v", err, resp)
 	}

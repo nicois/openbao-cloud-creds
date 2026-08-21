@@ -1,7 +1,6 @@
 package credentialoci_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -16,7 +15,7 @@ func TestMetricsEntity(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	_, err := b.HandleRequest(context.Background(), req)
+	_, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("creds read failed: %v", err)
 	}
@@ -27,7 +26,7 @@ func TestMetricsEntity(t *testing.T) {
 		Path:      "metrics/entity/default/minter-1",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), metricsReq)
+	resp, err := b.HandleRequest(t.Context(), metricsReq)
 	if err != nil {
 		t.Fatalf("metrics query failed: %v", err)
 	}
@@ -48,7 +47,7 @@ func TestMetricsStale(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	_, err := b.HandleRequest(context.Background(), req)
+	_, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("creds read failed: %v", err)
 	}
@@ -60,7 +59,7 @@ func TestMetricsStale(t *testing.T) {
 		Storage:   storage,
 		Data:      map[string]interface{}{"older_than": 1},
 	}
-	resp, err := b.HandleRequest(context.Background(), staleReq)
+	resp, err := b.HandleRequest(t.Context(), staleReq)
 	if err != nil {
 		t.Fatalf("stale query failed: %v", err)
 	}

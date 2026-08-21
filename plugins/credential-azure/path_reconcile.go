@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -46,13 +47,13 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 
 	client, err := b.anyHealthyMinter()
 	if err != nil {
-		return logical.ErrorResponse("cannot reconcile: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "cannot reconcile: %v", err), nil
 	}
 
 	// Get all roles to know which app_object_ids to scan
 	appObjectIDs, err := b.getAllAppObjectIDs(ctx, req.Storage)
 	if err != nil {
-		return logical.ErrorResponse("cannot list roles: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "cannot list roles: %v", err), nil
 	}
 
 	lister := &azureCloudLister{client: client, appObjectIDs: appObjectIDs}
@@ -72,7 +73,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 
 	result, err := reconciler.New(cfg, lister, registry).Run(ctx, time.Now())
 	if err != nil {
-		return logical.ErrorResponse("reconcile failed: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.Classify(credenvelope.StatusNone, err), "reconcile failed: %v", err), nil
 	}
 
 	emitOrphansFound(len(result.OrphansFound))

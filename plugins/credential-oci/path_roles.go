@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -114,7 +115,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
 	ociR := &ociRole{
@@ -161,33 +162,33 @@ type roleWriteParams struct {
 // failure; both nil means the parameters are valid.
 func (b *backend) validateRoleWriteParams(ctx context.Context, req *logical.Request, p roleWriteParams) (*logical.Response, error) {
 	if p.userOCID == "" {
-		return logical.ErrorResponse("user_ocid is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "user_ocid is required"), nil
 	}
 
 	if p.minterSet == "" {
-		return logical.ErrorResponse("minter_set is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil
 	}
 	exists, err := b.minterSetExists(ctx, req.Storage, p.minterSet)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return logical.ErrorResponse("minter_set %q does not exist", p.minterSet), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", p.minterSet), nil
 	}
 
 	if p.slotCount < 1 || p.slotCount > maxSlotCount {
-		return logical.ErrorResponse("slot_count must be between 1 and %d", maxSlotCount), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "slot_count must be between 1 and %d", maxSlotCount), nil
 	}
 
 	// Validate rotation period is reasonable
 	if p.rotationPeriod < 1*time.Hour {
-		return logical.ErrorResponse("rotation_period must be at least 1 hour"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "rotation_period must be at least 1 hour"), nil
 	}
 
 	// Validate default_ttl <= rotation_period / slot_count
 	rotationInterval := p.rotationPeriod / time.Duration(p.slotCount)
 	if p.defaultTTL > rotationInterval {
-		return logical.ErrorResponse(
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
 			"default_ttl (%v) must be <= rotation_period/slot_count (%v)",
 			p.defaultTTL, rotationInterval), nil
 	}
@@ -209,7 +210,7 @@ func (b *backend) maybeInitializeSlots(ctx context.Context, req *logical.Request
 		return nil, nil
 	}
 	if err := b.initializeSlots(ctx, req.Storage, ociR); err != nil {
-		return logical.ErrorResponse("role saved but slot initialization failed: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "role saved but slot initialization failed: %v", err), nil
 	}
 	return nil, nil
 }

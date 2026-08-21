@@ -1,7 +1,6 @@
 package credentialazure_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -21,14 +20,14 @@ func TestMinterSetCRUD(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("set write failed: err=%v resp=%v", err, resp)
 	}
 
 	// Read it back
 	req = &logical.Request{Operation: logical.ReadOperation, Path: "minter-sets/backup", Storage: storage}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("set read failed: err=%v resp=%v", err, resp)
 	}
@@ -38,7 +37,7 @@ func TestMinterSetCRUD(t *testing.T) {
 
 	// List
 	req = &logical.Request{Operation: logical.ListOperation, Path: "minter-sets/", Storage: storage}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || resp == nil {
 		t.Fatalf("set list failed: err=%v resp=%v", err, resp)
 	}
@@ -49,11 +48,11 @@ func TestMinterSetCRUD(t *testing.T) {
 
 	// Delete
 	req = &logical.Request{Operation: logical.DeleteOperation, Path: "minter-sets/backup", Storage: storage}
-	if resp, err = b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err = b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("set delete failed: err=%v resp=%v", err, resp)
 	}
 	req = &logical.Request{Operation: logical.ReadOperation, Path: "minter-sets/backup", Storage: storage}
-	if resp, err = b.HandleRequest(context.Background(), req); err != nil {
+	if resp, err = b.HandleRequest(t.Context(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	} else if resp != nil {
 		t.Fatal("expected nil response for deleted set")
@@ -72,7 +71,7 @@ func TestMinterSetValidationRejectsSingleExpiring(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -93,7 +92,7 @@ func TestMinterSetRejectsInvalidTokenFormat(t *testing.T) {
 			},
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

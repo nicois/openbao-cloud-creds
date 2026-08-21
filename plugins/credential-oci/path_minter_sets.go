@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -52,7 +53,7 @@ func (b *backend) minterSetPaths() []*framework.Path {
 // per-slot rotation at rotate-slot/..., which rotates issued credentials, not
 // the minter identities.) Rotate OCI minters out-of-band.
 func (b *backend) pathMinterSetRotate(_ context.Context, _ *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
-	return logical.ErrorResponse("minter rotation is not supported for %s; rotate this minter out-of-band", cloudName), nil
+	return credenvelope.ErrorResponse(credenvelope.ErrUnsupported, "minter rotation is not supported for %s; rotate this minter out-of-band", cloudName), nil
 }
 
 // parseMinters converts the raw "minters" field into cloudconfig.Minters. The
@@ -96,14 +97,14 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
 	if err := cloudconfig.ValidateSetName(name); err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 	minters, err := parseMinters(d)
 	if err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 	if err := cloudconfig.ValidateMinterSet(minters); err != nil {
-		return logical.ErrorResponse("invalid minter set: %v", err), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "invalid minter set: %v", err), nil
 	}
 	set := &cloudconfig.MinterSet{Name: name, Minters: minters}
 	// Prove the candidate minters can mint for the roles already bound to this

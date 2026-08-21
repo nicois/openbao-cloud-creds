@@ -32,13 +32,13 @@ func capBackend(t *testing.T, canMint *atomic.Bool, mints *atomic.Int64, verify 
 		}, nil)
 	})
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
 		Data: map[string]interface{}{"region": "eu", "verify_minter_capability": verify},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capSetPath, Storage: storage,
 		Data: map[string]interface{}{"minters": []interface{}{map[string]interface{}{
 			"id": "minter-1", "client_id": "cid", "client_secret": "secret", "never_expires": true,
@@ -52,7 +52,7 @@ func capBackend(t *testing.T, canMint *atomic.Bool, mints *atomic.Int64, verify 
 // capWriteRole writes a role bound to the default set and returns the response.
 func capWriteRole(t *testing.T, b logical.Backend, storage logical.Storage) *logical.Response {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
 		Data: map[string]interface{}{"default_ttl": 3600, "max_ttl": 3600, "minter_set": "default"},
 	})
@@ -76,7 +76,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotMint(t *testing.T) {
 	if mints.Load() == 0 {
 		t.Fatal("the role write did not attempt a probe mint")
 	}
-	read, err := b.HandleRequest(context.Background(), &logical.Request{
+	read, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: capRolePath, Storage: storage,
 	})
 	if err != nil {

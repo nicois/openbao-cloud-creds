@@ -1,7 +1,6 @@
 package credentialoci_test
 
 import (
-	"context"
 	"testing"
 
 	credentialoci "github.com/nicois/openbao-cloud-creds/plugins/credential-oci"
@@ -17,7 +16,7 @@ func TestRotateSlot_ChangesCredential(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	resp1, err := b.HandleRequest(context.Background(), readReq)
+	resp1, err := b.HandleRequest(t.Context(), readReq)
 	if err != nil || resp1.IsError() {
 		t.Fatalf("first read failed: err=%v resp=%v", err, resp1)
 	}
@@ -31,13 +30,13 @@ func TestRotateSlot_ChangesCredential(t *testing.T) {
 		Path:      "rotate-slot/test-role/0",
 		Storage:   storage,
 	}
-	rotateResp, err := b.HandleRequest(context.Background(), rotateReq)
+	rotateResp, err := b.HandleRequest(t.Context(), rotateReq)
 	if err != nil || rotateResp.IsError() {
 		t.Fatalf("rotate failed: err=%v resp=%v", err, rotateResp)
 	}
 
 	// Read again
-	resp2, err := b.HandleRequest(context.Background(), readReq)
+	resp2, err := b.HandleRequest(t.Context(), readReq)
 	if err != nil || resp2.IsError() {
 		t.Fatalf("second read failed: err=%v resp=%v", err, resp2)
 	}
@@ -63,7 +62,7 @@ func TestRotateSlot_BothSlots(t *testing.T) {
 		Path:      "rotate-slot/test-role/0",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req0)
+	resp, err := b.HandleRequest(t.Context(), req0)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("rotate slot 0 failed: err=%v resp=%v", err, resp)
 	}
@@ -74,7 +73,7 @@ func TestRotateSlot_BothSlots(t *testing.T) {
 		Path:      "rotate-slot/test-role/1",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), req1)
+	resp, err = b.HandleRequest(t.Context(), req1)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("rotate slot 1 failed: err=%v resp=%v", err, resp)
 	}
@@ -85,7 +84,7 @@ func TestRotateSlot_BothSlots(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	readResp, err := b.HandleRequest(context.Background(), readReq)
+	readResp, err := b.HandleRequest(t.Context(), readReq)
 	if err != nil || readResp == nil || readResp.IsError() {
 		t.Fatalf("read after both rotations failed: err=%v resp=%v", err, readResp)
 	}
@@ -104,7 +103,7 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 		Storage:   storage,
 		Data:      map[string]interface{}{},
 	}
-	resp, err := b.HandleRequest(context.Background(), configReq)
+	resp, err := b.HandleRequest(t.Context(), configReq)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
@@ -124,7 +123,7 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 			},
 		},
 	}
-	if resp, err := b.HandleRequest(context.Background(), setReq); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), setReq); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
 
@@ -142,7 +141,7 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 			"minter_set":      "default",
 		},
 	}
-	resp, err = b.HandleRequest(context.Background(), roleReq)
+	resp, err = b.HandleRequest(t.Context(), roleReq)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role write failed: err=%v resp=%v", err, resp)
 	}
@@ -153,7 +152,7 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 		Path:      "roles/init-test",
 		Storage:   storage,
 	}
-	resp, err = b.HandleRequest(context.Background(), readReq)
+	resp, err = b.HandleRequest(t.Context(), readReq)
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("role read failed: err=%v resp=%v", err, resp)
 	}

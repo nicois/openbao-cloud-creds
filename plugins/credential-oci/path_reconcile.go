@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -169,7 +170,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	dryRun := mode == "dry_run"
 
 	if b.anyHealthyMinter() == nil {
-		return logical.ErrorResponse("cannot reconcile: no healthy minter available"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "cannot reconcile: no healthy minter available"), nil
 	}
 
 	roleNames, err := req.Storage.List(ctx, "roles/")

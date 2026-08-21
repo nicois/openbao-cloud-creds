@@ -1,7 +1,6 @@
 package credentialoci_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -16,7 +15,7 @@ func TestReconcile_DryRun(t *testing.T) {
 		Storage:   storage,
 		Data:      map[string]interface{}{"mode": "dry_run"},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}
@@ -41,7 +40,7 @@ func TestReconcile_Normal(t *testing.T) {
 		Storage:   storage,
 		Data:      map[string]interface{}{"mode": "normal"},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}
@@ -63,7 +62,7 @@ func TestReconcile_NoClient(t *testing.T) {
 		Storage:   storage,
 		Data:      map[string]interface{}{"mode": "normal"},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -1,7 +1,6 @@
 package credentialakamai
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -28,7 +27,7 @@ var capRoleAPIAccess = fmt.Sprintf(`{"apis":[{"apiId":%d,"accessLevel":"READ-WRI
 // (nil on success, an error response when the capability probe rejected it).
 func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Response {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
 		Data: map[string]interface{}{
 			fieldDefaultTTL: capRoleTTL, fieldMaxTTL: capRoleMaxTTL,
@@ -56,7 +55,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotGrantRoleAPI(t *testing.T) 
 	if resp == nil || !resp.IsError() {
 		t.Fatalf("expected the role write to be rejected, got %v", resp)
 	}
-	read, err := bk.HandleRequest(context.Background(), &logical.Request{
+	read, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: capRolePath, Storage: storage,
 	})
 	if err != nil {
@@ -100,7 +99,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
 	srv.SetUngrantableAPIID(capForbiddenAPIID)
 	before := srv.ProvisionedCount()
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: "minter-1"},
 	})
@@ -131,7 +130,7 @@ func TestCapability_DisabledSkipsProbe(t *testing.T) {
 	bk, srv, storage := newRotationBackend(t, []interface{}{
 		neverExpiresMinter("minter-1", minter1Token),
 	})
-	if resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{
 			fieldHost: testHost, fieldAPIURL: srv.URL, fieldVerifyCapability: false,

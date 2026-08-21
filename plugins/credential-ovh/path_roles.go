@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -90,31 +91,31 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	// OVH tokens have a fixed 1h lifetime — TTLs must not exceed that
 	if maxTTL > maxOVHTTL {
-		return logical.ErrorResponse("max_ttl must not exceed 3600 seconds (OVH tokens have a fixed 1-hour lifetime)"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "max_ttl must not exceed 3600 seconds (OVH tokens have a fixed 1-hour lifetime)"), nil
 	}
 	if defaultTTL > maxOVHTTL {
-		return logical.ErrorResponse("default_ttl must not exceed 3600 seconds (OVH tokens have a fixed 1-hour lifetime)"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "default_ttl must not exceed 3600 seconds (OVH tokens have a fixed 1-hour lifetime)"), nil
 	}
 
 	// ...nor be shorter than it: OVH cannot mint a shorter-lived token and cannot
 	// revoke one, so a shorter TTL would be unenforceable.
 	if maxTTL < minOVHTTL {
-		return logical.ErrorResponse(ovhShortTTLMsg, "max_ttl"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, ovhShortTTLMsg, "max_ttl"), nil
 	}
 	if defaultTTL < minOVHTTL {
-		return logical.ErrorResponse(ovhShortTTLMsg, "default_ttl"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, ovhShortTTLMsg, "default_ttl"), nil
 	}
 
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
-		return logical.ErrorResponse("minter_set is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil
 	}
 	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return logical.ErrorResponse("minter_set %q does not exist", minterSet), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", minterSet), nil
 	}
 
 	role := &cloudconfig.Role{
@@ -124,7 +125,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MaxTTL:     maxTTL,
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
-		return logical.ErrorResponse(err.Error()), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
 	ovhR := &ovhRole{

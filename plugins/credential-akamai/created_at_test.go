@@ -25,12 +25,12 @@ func TestReconcile_PopulatesCreatedAt(t *testing.T) {
 	defer srv.Close()
 
 	client := newAkamaiClient(srv.URL, testEdgeGridCred())
-	if _, _, err := client.CreateClient(context.Background(), clientPrefix+"role-abc", nil, nil); err != nil {
+	if _, _, err := client.CreateClient(t.Context(), clientPrefix+"role-abc", nil, nil); err != nil {
 		t.Fatalf("seed create: %v", err)
 	}
 
 	lister := &akamaiCloudLister{client: client}
-	ents, err := lister.ListTaggedEntities(context.Background())
+	ents, err := lister.ListTaggedEntities(t.Context())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 				ConfirmationHold:  time.Hour,
 			}, lister, allOrphansRegistry{})
 
-			res, err := rec.Run(context.Background(), now)
+			res, err := rec.Run(t.Context(), now)
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}

@@ -1,7 +1,6 @@
 package credentialovh_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -18,7 +17,7 @@ func TestReconcileEndpoint_DryRun(t *testing.T) {
 			"mode": "dry_run",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}
@@ -39,7 +38,7 @@ func TestReconcileEndpoint_Normal(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	_, err := b.HandleRequest(context.Background(), issueReq)
+	_, err := b.HandleRequest(t.Context(), issueReq)
 	if err != nil {
 		t.Fatalf("issue failed: %v", err)
 	}
@@ -52,7 +51,7 @@ func TestReconcileEndpoint_Normal(t *testing.T) {
 			"mode": "normal",
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}

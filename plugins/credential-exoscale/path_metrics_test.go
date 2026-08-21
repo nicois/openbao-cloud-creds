@@ -1,7 +1,6 @@
 package credentialexoscale_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
@@ -20,7 +19,7 @@ func TestMetricsEntityEndpoint(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	_, err := b.HandleRequest(context.Background(), issueReq)
+	_, err := b.HandleRequest(t.Context(), issueReq)
 	if err != nil {
 		t.Fatalf("issue failed: %v", err)
 	}
@@ -31,7 +30,7 @@ func TestMetricsEntityEndpoint(t *testing.T) {
 		Path:      "metrics/entity/default/minter-1",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("metrics read failed: %v", err)
 	}

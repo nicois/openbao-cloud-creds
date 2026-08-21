@@ -1,7 +1,6 @@
 package credentialoci
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -32,9 +31,9 @@ func TestFakeOCIClient_ConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
-				_, _, _ = f.CreateAuthToken(context.Background(), "user-1", "cloud-creds-x")
+				_, _, _ = f.CreateAuthToken(t.Context(), "user-1", "cloud-creds-x")
 				_ = f.TokenCount()
-				_, _ = f.ListAuthTokens(context.Background(), "user-1")
+				_, _ = f.ListAuthTokens(t.Context(), "user-1")
 			}
 		}()
 	}
@@ -70,18 +69,18 @@ func TestRotationReconcileRace(t *testing.T) {
 	for trial := 0; trial < trials; trial++ {
 		b, storage, fake := newInternalConfiguredBackend(t)
 
-		role, ok := loadRole(context.Background(), storage, "test-role")
+		role, ok := loadRole(t.Context(), storage, "test-role")
 		if !ok {
 			t.Fatal("test-role not found after setup")
 		}
 
 		// Force slot 0 due for rotation: rewrite its NextRotationAt into the past.
-		s0, err := loadSlot(context.Background(), storage, "test-role", 0)
+		s0, err := loadSlot(t.Context(), storage, "test-role", 0)
 		if err != nil || s0 == nil {
 			t.Fatalf("loadSlot(0): err=%v slot=%v", err, s0)
 		}
 		s0.NextRotationAt = time.Now().Add(-time.Hour)
-		if err := saveSlot(context.Background(), storage, "test-role", s0); err != nil {
+		if err := saveSlot(t.Context(), storage, "test-role", s0); err != nil {
 			t.Fatalf("saveSlot(0): %v", err)
 		}
 
@@ -99,7 +98,7 @@ func TestRotationReconcileRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-startGate
-			b.runReconcilePass(context.Background(), storage, roleNames, false)
+			b.runReconcilePass(t.Context(), storage, roleNames, false)
 		}()
 
 		// Rotation goroutine: rotates slot 0 through the LOCKED entry point
@@ -107,7 +106,7 @@ func TestRotationReconcileRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-startGate
-			if err := b.rotateSlot(context.Background(), storage, role, 0); err != nil {
+			if err := b.rotateSlot(t.Context(), storage, role, 0); err != nil {
 				t.Errorf("trial %d: rotateSlot: %v", trial, err)
 			}
 		}()
@@ -119,7 +118,7 @@ func TestRotationReconcileRace(t *testing.T) {
 		// creates a new token and deletes the OLD one, so net upstream count is
 		// unchanged (tokensBefore). If reconcile destroyed the new live token, the
 		// count drops below tokensBefore.
-		newS0, err := loadSlot(context.Background(), storage, "test-role", 0)
+		newS0, err := loadSlot(t.Context(), storage, "test-role", 0)
 		if err != nil || newS0 == nil {
 			t.Fatalf("trial %d: loadSlot(0) after: err=%v slot=%v", trial, err, newS0)
 		}
@@ -155,7 +154,7 @@ func newInternalConfiguredBackend(t *testing.T) (*backend, logical.Storage, *fak
 
 	cfg := logical.TestBackendConfig()
 	cfg.StorageView = &logical.InmemStorage{}
-	lb, err := Factory(context.Background(), cfg)
+	lb, err := Factory(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("Factory: %v", err)
 	}
@@ -171,7 +170,7 @@ func newInternalConfiguredBackend(t *testing.T) (*backend, logical.Storage, *fak
 	b.SetClientFactory(func(string) OCIIAMClient { return fake })
 
 	write := func(path string, data map[string]interface{}) {
-		resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		resp, err := b.HandleRequest(t.Context(), &logical.Request{
 			Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
 		})
 		if err != nil || (resp != nil && resp.IsError()) {

@@ -77,8 +77,12 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 		PlantDisabledProbeRole: plantDisabledRole,
 		DenyMint:               func() { srv.SetForbidCreateForKeyPrefix(exoscaleMinterKeyPrefix) },
 		AllowMint:              func() { srv.SetForbidCreateForKeyPrefix("") },
-		LiveMinterID:           liveMinterID,
-		ReplacementMinterID:    replacementMinterID,
+		FailNextMintWithStatus: func(_ *testing.T, status int) string {
+			srv.SetNextStatus(status)
+			return ""
+		},
+		LiveMinterID:        liveMinterID,
+		ReplacementMinterID: replacementMinterID,
 
 		SeedForeignEntity: func() string {
 			srv.AddRawAPIKey(foreignEntityID, foreignEntityName)

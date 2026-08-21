@@ -20,12 +20,12 @@ func TestReconcile_PopulatesCreatedAt(t *testing.T) {
 	// Seed a cloud-creds-prefixed token via the create path so the fake emits
 	// a created_at on the subsequent list.
 	client := newDOClient(srv.URL, "fake-minter-token")
-	if _, _, err := client.CreateToken(context.Background(), tokenPrefix+"role-abc", []string{"read"}); err != nil {
+	if _, _, err := client.CreateToken(t.Context(), tokenPrefix+"role-abc", []string{"read"}); err != nil {
 		t.Fatalf("seed create: %v", err)
 	}
 
 	lister := &doCloudLister{client: client}
-	ents, err := lister.ListTaggedEntities(context.Background())
+	ents, err := lister.ListTaggedEntities(t.Context())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 				ConfirmationHold:  time.Hour,
 			}, lister, allOrphansRegistry{})
 
-			res, err := rec.Run(context.Background(), now)
+			res, err := rec.Run(t.Context(), now)
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}
@@ -93,7 +93,7 @@ func TestDeleteEntity_404IsSuccess(t *testing.T) {
 	srv := fakes.NewDOServer()
 	defer srv.Close()
 	lister := &doCloudLister{client: newDOClient(srv.URL, "minter-token")}
-	if err := lister.DeleteEntity(context.Background(), "nonexistent-id"); err != nil {
+	if err := lister.DeleteEntity(t.Context(), "nonexistent-id"); err != nil {
 		t.Fatalf("DeleteEntity should treat upstream 404 as success, got: %v", err)
 	}
 }

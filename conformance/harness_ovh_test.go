@@ -77,8 +77,12 @@ func ovhHarness(t *testing.T) plugintest.Harness {
 		PlantDisabledProbeRole: plantDisabledRole,
 		DenyMint:               func() { srv.SetForbidMint(true) },
 		AllowMint:              func() { srv.SetForbidMint(false) },
-		LiveMinterID:           liveMinterID,
-		ReplacementMinterID:    replacementMinterID,
+		FailNextMintWithStatus: func(_ *testing.T, status int) string {
+			srv.SetNextStatus(status)
+			return ""
+		},
+		LiveMinterID:        liveMinterID,
+		ReplacementMinterID: replacementMinterID,
 
 		Skips: map[plugintest.Category]string{
 			plugintest.CategoryReconcilerSafety: "OVH reconcile prunes local tracking entries only " +

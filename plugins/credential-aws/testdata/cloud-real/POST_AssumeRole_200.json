@@ -1,0 +1,8 @@
+{
+  "body": "\u003cAssumeRoleResponse xmlns=\"https://sts.amazonaws.com/doc/2011-06-15/\"\u003e\n  \u003cAssumeRoleResult\u003e\n    \u003cAssumedRoleUser\u003e\n      \u003cAssumedRoleId\u003e{redacted:principal-id}:cloud-creds-cloudreal-probe\u003c/AssumedRoleId\u003e\n      \u003cArn\u003earn:aws:sts::{redacted:account-id}:assumed-role/cloud-creds-probe/cloud-creds-cloudreal-probe\u003c/Arn\u003e\n    \u003c/AssumedRoleUser\u003e\n    \u003cCredentials\u003e\n      \u003cAccessKeyId\u003e{redacted:access-key-id}\u003c/AccessKeyId\u003e\n      \u003cSecretAccessKey\u003e{redacted:40 chars}\u003c/SecretAccessKey\u003e\n      \u003cSessionToken\u003e{redacted:800 chars}\u003c/SessionToken\u003e\n      \u003cExpiration\u003e2026-08-21T13:37:37Z\u003c/Expiration\u003e\n    \u003c/Credentials\u003e\n    \u003cPackedPolicySize\u003e4\u003c/PackedPolicySize\u003e\n  \u003c/AssumeRoleResult\u003e\n  \u003cResponseMetadata\u003e\n    \u003cRequestId\u003e05a400ad-e73b-4ba3-9f12-5e159fc38794\u003c/RequestId\u003e\n  \u003c/ResponseMetadata\u003e\n\u003c/AssumeRoleResponse\u003e\n",
+  "content_type": "text/xml",
+  "request": {
+    "action": "AssumeRole"
+  },
+  "status": 200
+}

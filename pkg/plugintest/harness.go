@@ -16,7 +16,6 @@
 package plugintest
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -45,6 +44,11 @@ const (
 	// CategoryReconcilerSafety covers the owner-tag invariant: the reconciler
 	// must never delete an entity the plugin did not create.
 	CategoryReconcilerSafety Category = "reconciler-safety"
+	// CategoryErrorTaxonomy covers the error_code contract: every error a client
+	// can receive carries a code from the published vocabulary, and the code says
+	// what the client should do. Catches the class KI-010 belongs to — a real
+	// failure mode collapsing into `internal`.
+	CategoryErrorTaxonomy Category = "error-taxonomy"
 )
 
 // Harness is supplied by the conformance table, one per plugin. Fields are
@@ -119,6 +123,16 @@ type Harness struct {
 	LiveMinterID        string
 	ReplacementMinterID string
 
+	// --- Error taxonomy ---
+
+	// FailNextMintWithStatus makes the upstream answer the NEXT mint with the
+	// given HTTP status, so the suite can assert the error_code a client is
+	// handed. Return "" once applied, or a reason why this cloud's fake cannot
+	// produce that status — the reason is printed rather than the case being
+	// silently absent. Optional: a nil field means the forced-status cases are
+	// not asserted for this cloud, which the suite also prints.
+	FailNextMintWithStatus func(t *testing.T, status int) string
+
 	// --- Reconciler safety ---
 
 	// SeedForeignEntity plants an upstream entity whose name does NOT match the
@@ -148,7 +162,7 @@ func newBackend(t *testing.T, h Harness) (logical.Backend, logical.Storage) {
 	t.Helper()
 	cfg := logical.TestBackendConfig()
 	cfg.StorageView = &logical.InmemStorage{}
-	b, err := h.Factory(context.Background(), cfg)
+	b, err := h.Factory(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
@@ -166,7 +180,7 @@ func Reload(t *testing.T, h Harness, storage logical.Storage) logical.Backend {
 	t.Helper()
 	cfg := logical.TestBackendConfig()
 	cfg.StorageView = storage
-	b, err := h.Factory(context.Background(), cfg)
+	b, err := h.Factory(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("reload factory failed: %v", err)
 	}
@@ -178,7 +192,7 @@ func Reload(t *testing.T, h Harness, storage logical.Storage) logical.Backend {
 
 func issue(t *testing.T, b logical.Backend, storage logical.Storage, path string) (*logical.Response, error) {
 	t.Helper()
-	return b.HandleRequest(context.Background(), &logical.Request{
+	return b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation,
 		Path:      path,
 		Storage:   storage,
@@ -189,7 +203,7 @@ func issue(t *testing.T, b logical.Backend, storage logical.Storage, path string
 // Exported so harness constructors don't each re-declare it.
 func Write(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]interface{}) {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
@@ -202,7 +216,7 @@ func Write(t *testing.T, b logical.Backend, storage logical.Storage, path string
 // is the outcome the capability suite asserts on.
 func TryWrite(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]interface{}) *logical.Response {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
 	})
 	if err != nil {
@@ -215,7 +229,7 @@ func TryWrite(t *testing.T, b logical.Backend, storage logical.Storage, path str
 // "absent", which callers assert on.
 func Read(t *testing.T, b logical.Backend, storage logical.Storage, path string) *logical.Response {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: path, Storage: storage,
 	})
 	if err != nil {

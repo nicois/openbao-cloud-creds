@@ -1,0 +1,27 @@
+{
+  "body": {
+    "account": {
+      "droplet_limit": 10,
+      "email": "\u003credacted:email\u003e",
+      "email_verified": true,
+      "floating_ip_limit": 10,
+      "name": "\u003credacted:email\u003e",
+      "reserved_ip_limit": 10,
+      "status": "active",
+      "status_message": "",
+      "team": {
+        "name": "My Team",
+        "uuid": "\u003credacted:uuid\u003e"
+      },
+      "uuid": "\u003credacted:uuid\u003e",
+      "volume_limit": 5000
+    }
+  },
+  "content_type": "application/json; charset=utf-8",
+  "request": {
+    "method": "GET",
+    "path": "/v2/account"
+  },
+  "responded_by": "service",
+  "status": 200
+}

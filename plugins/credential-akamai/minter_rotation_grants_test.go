@@ -1,7 +1,6 @@
 package credentialakamai
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -71,7 +70,7 @@ func TestMinterRotation_SuccessorInheritsIncumbentGrants(t *testing.T) {
 	})
 	srv.SetSelfGrants(selfGrants(srv.IdentityManagementAPIID()))
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: "minter-1"},
 	})
@@ -136,7 +135,7 @@ func TestMinterRotation_AbortsWhenIncumbentGrantsUnreadable(t *testing.T) {
 	client := newAkamaiClient(srv.URL, cred)
 
 	before := srv.ProvisionedCount()
-	_, err = client.RotateMinter(context.Background(), cloudconfig.Minter{
+	_, err = client.RotateMinter(t.Context(), cloudconfig.Minter{
 		ID: "minter-1", NeverExpires: true,
 		RotationParams: map[string]string{usernameKey: testUsername},
 	})

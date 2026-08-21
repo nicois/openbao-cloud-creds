@@ -70,7 +70,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	output, err := sel.client.AssumeRole(ctx, buildAssumeRoleInput(role, roleName, req.ID))
 	if err != nil {
 		status := classifyAWSError(err)
-		b.recordMinterError(sel.setID, sel.minterID, status, now)
+		b.recordMinterError(sel.setID, sel.minterID, status, err, now)
 		return b.issuanceError(status, err), nil
 	}
 	b.recordMinterSuccess(sel.setID, sel.minterID, now)
@@ -337,12 +337,12 @@ func (b *backend) recordMinterSuccess(setName, id string, at time.Time) {
 	}
 }
 
-func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.Time) {
+func (b *backend) recordMinterError(setName, id string, httpStatus int, err error, at time.Time) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if states, ok := b.minterSets[setName]; ok {
 		if ms, ok := states[id]; ok {
-			ms.sm.RecordError(httpStatus, at)
+			ms.sm.RecordUpstream(httpStatus, err, at)
 		}
 	}
 }
@@ -352,24 +352,48 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, at time.
 func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
 	b.Logger().Warn("upstream credential issuance failed",
 		"cloud", cloudName, "status", httpStatus, "error", err)
-	return credenvelope.ErrorResponse(credenvelope.ClassifyUpstream(httpStatus),
+	return credenvelope.ErrorResponse(credenvelope.Classify(httpStatus, err),
 		"upstream credential issuance failed")
 }
 
-// classifyAWSError maps AWS SDK errors to HTTP status codes for state machine.
+// awsErrorSignatures maps substrings AWS puts in its error strings to the HTTP
+// status they mean. A table rather than an if-chain because the list grows every
+// time a real-cloud run shows us a shape we had not seen; first match wins, so
+// specific precedes general.
+var awsErrorSignatures = []struct {
+	needles []string
+	status  int
+}{
+	{[]string{"AccessDenied", "403"}, http.StatusForbidden},
+	{[]string{"ExpiredToken", "InvalidClientTokenId", "401"}, http.StatusUnauthorized},
+	// LimitExceeded is how IAM reports the 2-access-keys-per-user cap: a quota,
+	// not a bug, and rotation depends on telling them apart.
+	{[]string{"Throttling", "LimitExceeded", "429"}, http.StatusTooManyRequests},
+	// AWS labels these <Type>Sender</Type>: the request is wrong and an identical
+	// retry cannot succeed. KI-010 — also how a target role's MaxSessionDuration
+	// being below the role TTL surfaces.
+	{[]string{"ValidationError", "InvalidParameterValue"}, http.StatusBadRequest},
+	{[]string{"504"}, http.StatusGatewayTimeout},
+	// The cloud is degraded, not this plugin: retryable, and never `internal`.
+	{[]string{"500", "502", "503"}, http.StatusInternalServerError},
+}
+
+// classifyAWSError maps an AWS SDK error to the HTTP status it represents, or
+// credenvelope.StatusNone when nothing matches — in which case
+// credenvelope.Classify inspects the error itself. Returning a synthetic 500 for
+// "unrecognised" is what used to make ErrUpstreamTimeout unreachable and reported
+// an unreachable cloud as a defect in this plugin.
 func classifyAWSError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
 	errMsg := err.Error()
-	if strings.Contains(errMsg, "AccessDenied") || strings.Contains(errMsg, "403") {
-		return http.StatusForbidden
+	for _, signature := range awsErrorSignatures {
+		for _, needle := range signature.needles {
+			if strings.Contains(errMsg, needle) {
+				return signature.status
+			}
+		}
 	}
-	if strings.Contains(errMsg, "ExpiredToken") || strings.Contains(errMsg, "InvalidClientTokenId") || strings.Contains(errMsg, "401") {
-		return http.StatusUnauthorized
-	}
-	if strings.Contains(errMsg, "Throttling") || strings.Contains(errMsg, "429") {
-		return http.StatusTooManyRequests
-	}
-	return http.StatusInternalServerError
+	return credenvelope.StatusNone
 }

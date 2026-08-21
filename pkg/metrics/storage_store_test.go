@@ -1,7 +1,6 @@
 package metrics_test
 
 import (
-	"context"
 	"sort"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 )
 
 func TestStorageBackedStore_PutGetRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := metrics.NewStorageBackedStore(&logical.InmemStorage{})
 	if err := s.Put(ctx, "metrics/e/r/node", []byte("hello")); err != nil {
 		t.Fatalf("put: %v", err)
@@ -26,7 +25,7 @@ func TestStorageBackedStore_PutGetRoundTrip(t *testing.T) {
 }
 
 func TestStorageBackedStore_GetMissingReturnsNotFound(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := metrics.NewStorageBackedStore(&logical.InmemStorage{})
 	if _, err := s.Get(ctx, "metrics/absent/r/node"); err == nil {
 		t.Fatal("expected not-found error for absent key, got nil")
@@ -38,7 +37,7 @@ func TestStorageBackedStore_GetMissingReturnsNotFound(t *testing.T) {
 // naive delegate that returns logical.Storage's relative children would
 // return ["e/"] here and break every consumer.
 func TestStorageBackedStore_ListReturnsFullRecursiveKeys(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := metrics.NewStorageBackedStore(&logical.InmemStorage{})
 	put := func(k string) {
 		if err := s.Put(ctx, k, []byte("x")); err != nil {
@@ -75,7 +74,7 @@ func TestStorageBackedStore_ListReturnsFullRecursiveKeys(t *testing.T) {
 // End-to-end: the real consumers (Flush + ListStaleEntities) must work through
 // StorageBackedStore exactly as they do through InMemoryStore.
 func TestStorageBackedStore_ConsumerParity(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := metrics.NewStorageBackedStore(&logical.InmemStorage{})
 	tr := metrics.NewAccessTracker("node1", s)
 

@@ -72,6 +72,16 @@ var suites = []suite{
 		},
 	},
 	{
+		name: CategoryErrorTaxonomy,
+		run:  RunErrorTaxonomySuite,
+		// No extra wiring, so NO cloud can opt out of the contract that its
+		// errors carry codes — the same reasoning as the lease category. The
+		// individual cases that need a knob (a mint refusal, a forced status)
+		// skip themselves with a printed reason, so a cloud missing a knob still
+		// gets the cases that do not need one.
+		requires: func(_ Harness) []string { return nil },
+	},
+	{
 		name: CategoryReconcilerSafety,
 		run:  RunReconcilerSafetySuite,
 		requires: func(h Harness) []string {

@@ -3,9 +3,9 @@ package credentialoci
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strconv"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -37,7 +37,7 @@ func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *f
 
 	slotIndex, err := strconv.Atoi(slotIndexStr)
 	if err != nil {
-		return logical.ErrorResponse("slot_index must be an integer"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "slot_index must be an integer"), nil
 	}
 
 	// Load role
@@ -46,7 +46,7 @@ func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *f
 		return nil, err
 	}
 	if entry == nil {
-		return logical.ErrorResponse("role_not_found: role %q does not exist", roleName), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role_not_found: role %q does not exist", roleName), nil
 	}
 
 	var role ociRole
@@ -55,11 +55,12 @@ func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *f
 	}
 
 	if slotIndex < 0 || slotIndex >= role.SlotCount {
-		return logical.ErrorResponse("slot_index must be between 0 and %d", role.SlotCount-1), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "slot_index must be between 0 and %d", role.SlotCount-1), nil
 	}
 
 	if err := b.rotateSlot(ctx, req.Storage, &role, slotIndex); err != nil {
-		return logical.ErrorResponse(fmt.Sprintf("rotation failed: %v", err)), nil
+		return credenvelope.ErrorResponse(credenvelope.Classify(credenvelope.StatusNone, err),
+			"rotation failed: %v", err), nil
 	}
 
 	// Load the updated slot to return its state

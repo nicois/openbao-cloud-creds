@@ -1,7 +1,6 @@
 package credentialakamai_test
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -25,7 +24,7 @@ func setupConfiguredBackend(t *testing.T, akamaiURL string) (logical.Backend, lo
 			"akamai_api_url": akamaiURL,
 		},
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
@@ -45,7 +44,7 @@ func setupConfiguredBackend(t *testing.T, akamaiURL string) (logical.Backend, lo
 			},
 		},
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write failed: err=%v resp=%v", err, resp)
 	}
@@ -63,7 +62,7 @@ func setupConfiguredBackend(t *testing.T, akamaiURL string) (logical.Backend, lo
 			"minter_set":  "default",
 		},
 	}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role write failed: err=%v resp=%v", err, resp)
 	}
@@ -82,7 +81,7 @@ func TestCredsIssue(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("creds read failed: %v", err)
 	}
@@ -163,20 +162,20 @@ func TestMinterSetIsolation(t *testing.T) {
 			map[string]interface{}{"id": "minter-2", "token": "ct-other:at-other:cs-other", "never_expires": true},
 		}},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("secondary set write: err=%v resp=%v", err, resp)
 	}
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/role2", Storage: storage,
 		Data: map[string]interface{}{"default_ttl": 900, "max_ttl": 3600, "group_id": 200, "api_access": "{}", "minter_set": "secondary"},
 	}
-	if resp, err := b.HandleRequest(context.Background(), req); err != nil || (resp != nil && resp.IsError()) {
+	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role2 write: err=%v resp=%v", err, resp)
 	}
 
 	// role2 must mint via minter-2 and sign with the "secondary" set's triple.
 	req = &logical.Request{Operation: logical.ReadOperation, Path: "creds/role2", Storage: storage}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("role2 issue failed: err=%v resp=%v", err, resp)
 	}
@@ -190,7 +189,7 @@ func TestMinterSetIsolation(t *testing.T) {
 
 	// role (set "default") must sign with the default set's triple.
 	req = &logical.Request{Operation: logical.ReadOperation, Path: "creds/test-role", Storage: storage}
-	resp, err = b.HandleRequest(context.Background(), req)
+	resp, err = b.HandleRequest(t.Context(), req)
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("test-role issue failed: err=%v resp=%v", err, resp)
 	}
@@ -211,7 +210,7 @@ func TestCredsRevoke(t *testing.T) {
 		Path:      "creds/test-role",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || resp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
 	}
@@ -223,7 +222,7 @@ func TestCredsRevoke(t *testing.T) {
 		Storage:   storage,
 		Secret:    resp.Secret,
 	}
-	resp, err = b.HandleRequest(context.Background(), revokeReq)
+	resp, err = b.HandleRequest(t.Context(), revokeReq)
 	if err != nil {
 		t.Fatalf("revoke failed: %v", err)
 	}
@@ -240,7 +239,7 @@ func TestCredsIssue_RoleNotFound(t *testing.T) {
 		Path:      "creds/nonexistent",
 		Storage:   storage,
 	}
-	resp, err := b.HandleRequest(context.Background(), req)
+	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -251,7 +250,7 @@ func TestCredsIssue_RoleNotFound(t *testing.T) {
 
 func TestCredsIssue_RoleNotFound_HasErrorCode(t *testing.T) {
 	b, storage := getTestBackend(t)
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: "creds/nope", Storage: storage,
 	})
 	if err != nil {
@@ -272,7 +271,7 @@ func TestCredsIssue_ClassifiesQuotaError(t *testing.T) {
 	b, storage := setupConfiguredBackend(t, srv.URL)
 	srv.SetNextStatus(http.StatusTooManyRequests) // next create returns 429
 
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: "creds/test-role", Storage: storage,
 	})
 	if err != nil {

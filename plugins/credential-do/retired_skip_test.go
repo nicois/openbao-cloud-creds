@@ -1,7 +1,6 @@
 package credentialdo
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -14,21 +13,21 @@ func TestSelectMinter_SkipsRetired(t *testing.T) {
 	defer srv.Close()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
-	b, err := Factory(context.Background(), config)
+	b, err := Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
 	bk := b.(*backend)
 	storage := config.StorageView
 
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
 		Data: map[string]interface{}{"do_api_url": srv.URL},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config: %v %v", err, resp)
 	}
 	// two never_expires minters, then mark minter-1 retired in-memory
-	if resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
 		Data: map[string]interface{}{"minters": []interface{}{
 			map[string]interface{}{"id": "minter-1", minterTokenKey: "dop_v1_a", "never_expires": true},

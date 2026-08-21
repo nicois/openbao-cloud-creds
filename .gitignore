@@ -15,6 +15,8 @@
 # Local env / secrets
 .env
 .env.local
+# Real-cloud test credentials, sourced by the test-cloud-real-* targets
+.env.cloud-real
 *.pem
 *.key
 credentials.json

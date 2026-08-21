@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -48,7 +49,7 @@ func (g Gate) VerifySet(ctx context.Context, storage logical.Storage, set *cloud
 	}
 	roles, err := RolesBoundTo(ctx, storage, set.Name)
 	if err != nil {
-		return logical.ErrorResponse("could not enumerate the roles bound to minter set %q: %v", set.Name, err)
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "could not enumerate the roles bound to minter set %q: %v", set.Name, err)
 	}
 	var all []Check
 	for i := range roles {
@@ -79,10 +80,10 @@ func (g Gate) VerifyRole(ctx context.Context, storage logical.Storage, setName s
 	}
 	set, err := LoadMinterSet(ctx, storage, setName)
 	if err != nil {
-		return logical.ErrorResponse("could not load minter set %q: %v", setName, err)
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "could not load minter set %q: %v", setName, err)
 	}
 	if set == nil {
-		return logical.ErrorResponse("minter_set %q does not exist", setName)
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", setName)
 	}
 	return g.run(ctx, checks(set, roleJSON))
 }
@@ -94,7 +95,7 @@ func (g Gate) run(ctx context.Context, checks []Check) *logical.Response {
 		if g.Logger != nil {
 			g.Logger.Warn("minter capability verification failed", "cloud", g.Cloud, "error", err)
 		}
-		return logical.ErrorResponse("minter capability verification failed: %v"+skipHint, err)
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter capability verification failed: %v"+skipHint, err)
 	}
 	if g.Logger != nil && (result.Ran > 0 || result.Skipped > 0) {
 		g.Logger.Info("minter capability verified", "cloud", g.Cloud,

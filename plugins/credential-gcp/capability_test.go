@@ -96,7 +96,7 @@ func capBackend(t *testing.T, store *fakeSAKeyStore, minters []interface{}) (*ba
 // capWriteRole writes a role bound to the default set and returns the response.
 func capWriteRole(t *testing.T, bk *backend, storage logical.Storage) *logical.Response {
 	t.Helper()
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
 		Data: map[string]interface{}{
 			fieldDefaultTTL: capRoleTTL, fieldMaxTTL: capRoleTTL,
@@ -127,7 +127,7 @@ func TestCapability_RoleWriteRejectedWhenImpersonationDenied(t *testing.T) {
 	if rec.count() == 0 {
 		t.Fatal("the role write did not attempt a probe generateAccessToken")
 	}
-	read, err := bk.HandleRequest(context.Background(), &logical.Request{
+	read, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: capRolePath, Storage: storage,
 	})
 	if err != nil {
@@ -181,7 +181,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotImpersonate(t *testing.T)
 	// so the rotation's own mint and health check still pass.
 	rec.setDenyJSONPart(successorJSONPrefix)
 
-	resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
 		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
 	})
@@ -213,7 +213,7 @@ func TestCapability_DisabledSkipsProbe(t *testing.T) {
 	bk, rec, storage := capBackend(t, newFakeSAKeyStore(), []interface{}{
 		neverExpiresMinter(rotMinter1ID, capMinterJSON),
 	})
-	if resp, err := bk.HandleRequest(context.Background(), &logical.Request{
+	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{fieldVerifyCapability: false},
 	}); err != nil || (resp != nil && resp.IsError()) {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -61,7 +62,7 @@ func (b *backend) configPaths() []*framework.Path {
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	host := d.Get(fieldHost).(string)
 	if host == "" {
-		return logical.ErrorResponse("host is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "host is required"), nil
 	}
 
 	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second

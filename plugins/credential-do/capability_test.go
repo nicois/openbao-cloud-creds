@@ -1,7 +1,6 @@
 package credentialdo_test
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -20,7 +19,7 @@ func capBackend(t *testing.T, verify bool) (logical.Backend, logical.Storage, *f
 
 	cfg := logical.TestBackendConfig()
 	cfg.StorageView = &logical.InmemStorage{}
-	b, err := credentialdo.Factory(context.Background(), cfg)
+	b, err := credentialdo.Factory(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
@@ -32,7 +31,7 @@ func capBackend(t *testing.T, verify bool) (logical.Backend, logical.Storage, *f
 
 func capWrite(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]interface{}) {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
@@ -42,7 +41,7 @@ func capWrite(t *testing.T, b logical.Backend, storage logical.Storage, path str
 
 func capTryWrite(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]interface{}) *logical.Response {
 	t.Helper()
-	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
 	})
 	if err != nil {
@@ -91,7 +90,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotMint(t *testing.T) {
 
 	// The role must not have been persisted: a rejected write leaves no role
 	// behind for a later read to succeed against.
-	read, err := b.HandleRequest(context.Background(), &logical.Request{
+	read, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: capRolePath, Storage: storage,
 	})
 	if err != nil {
@@ -128,7 +127,7 @@ func TestCapability_SetRewriteRejectedWhenReplacementCannotMint(t *testing.T) {
 	}
 
 	// The previous, working set must survive a rejected replacement.
-	read, err := b.HandleRequest(context.Background(), &logical.Request{
+	read, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation, Path: capSetPath, Storage: storage,
 	})
 	if err != nil || read == nil {
@@ -164,7 +163,7 @@ func TestCapability_DisabledRoleNotProbedOnSetWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("entry build failed: %v", err)
 	}
-	if err := storage.Put(context.Background(), entry); err != nil {
+	if err := storage.Put(t.Context(), entry); err != nil {
 		t.Fatalf("planting disabled role failed: %v", err)
 	}
 

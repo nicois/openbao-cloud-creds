@@ -1,0 +1,13 @@
+{
+  "body": {
+    "id": "Forbidden",
+    "message": "You are not authorized to perform this operation"
+  },
+  "content_type": "application/json",
+  "request": {
+    "method": "GET",
+    "path": "/v2/tokens"
+  },
+  "responded_by": "Edge-Gateway",
+  "status": 403
+}

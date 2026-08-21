@@ -23,12 +23,12 @@ func TestReconcile_PopulatesCreatedAt(t *testing.T) {
 	defer srv.Close()
 
 	client := testAzureClient(srv.URL)
-	if _, _, err := client.AddPassword(context.Background(), fakeAppObjectID, keyPrefix+"role-abc", time.Now().Add(time.Hour)); err != nil {
+	if _, _, err := client.AddPassword(t.Context(), fakeAppObjectID, keyPrefix+"role-abc", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("seed addPassword: %v", err)
 	}
 
 	lister := &azureCloudLister{client: client, appObjectIDs: []string{fakeAppObjectID}}
-	ents, err := lister.ListTaggedEntities(context.Background())
+	ents, err := lister.ListTaggedEntities(t.Context())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 				ConfirmationHold:  time.Hour,
 			}, lister, allOrphansRegistry{})
 
-			res, err := rec.Run(context.Background(), now)
+			res, err := rec.Run(t.Context(), now)
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}

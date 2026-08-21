@@ -1,0 +1,8 @@
+{
+  "body": "\u003cGetCallerIdentityResponse xmlns=\"https://sts.amazonaws.com/doc/2011-06-15/\"\u003e\n  \u003cGetCallerIdentityResult\u003e\n    \u003cArn\u003earn:aws:iam::{redacted:account-id}:user/cloud-creds-minter\u003c/Arn\u003e\n    \u003cUserId\u003e{redacted:principal-id}\u003c/UserId\u003e\n    \u003cAccount\u003e{redacted:account-id}\u003c/Account\u003e\n  \u003c/GetCallerIdentityResult\u003e\n  \u003cResponseMetadata\u003e\n    \u003cRequestId\u003e209205f6-ce28-4fca-b99f-9b16ba8c17d2\u003c/RequestId\u003e\n  \u003c/ResponseMetadata\u003e\n\u003c/GetCallerIdentityResponse\u003e\n",
+  "content_type": "text/xml",
+  "request": {
+    "action": "GetCallerIdentity"
+  },
+  "status": 200
+}

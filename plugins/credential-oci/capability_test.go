@@ -1,7 +1,6 @@
 package credentialoci
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -32,12 +31,12 @@ func TestCapability_OCIProbesAreSkippedNotFailed(t *testing.T) {
 		t.Fatalf("expected one check per active minter, got %d", len(checks))
 	}
 	for i := range checks {
-		if runErr := checks[i].Run(context.Background()); !errors.Is(runErr, capability.ErrUnsupported) {
+		if runErr := checks[i].Run(t.Context()); !errors.Is(runErr, capability.ErrUnsupported) {
 			t.Fatalf("check for %q returned %v, want ErrUnsupported", checks[i].Minter, runErr)
 		}
 	}
 
-	result, verifyErr := capability.Verify(context.Background(), checks)
+	result, verifyErr := capability.Verify(t.Context(), checks)
 	if verifyErr != nil {
 		t.Fatalf("unsupported checks must not fail verification: %v", verifyErr)
 	}

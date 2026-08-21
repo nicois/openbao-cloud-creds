@@ -52,8 +52,11 @@ func assertInitializeRehydrates(t *testing.T, h Harness) {
 	t.Helper()
 	_, storage := newConfiguredBackend(t, h)
 	b2 := Reload(t, h, storage)
-	ctx := context.Background()
-	t.Cleanup(func() { b2.Cleanup(ctx) })
+	// Shutdown must still run once the test's context is cancelled — t.Context()
+	// is already done by the time cleanups execute — so the teardown path gets an
+	// uncancellable derivative rather than the test context.
+	ctx := t.Context()
+	t.Cleanup(func() { b2.Cleanup(context.WithoutCancel(ctx)) })
 	for pass := range 2 {
 		if err := b2.Initialize(ctx, &logical.InitializationRequest{Storage: storage}); err != nil {
 			t.Fatalf("Initialize (pass %d) failed, which would fail the mount: %v", pass, err)

@@ -4,13 +4,35 @@ Issues found during live testing and subsequent audits, each with a precise root
 cause and the fix. KI-001/KI-002 came out of the original multi-cloud spike's
 resilience assessment (against a live raft cluster, UpCloud) and are **RESOLVED**
 (fix + red-baseline regression tests); KI-005, KI-007 and KI-008 are resolved
-likewise. KI-003, KI-004 and KI-006 are accepted, documented risks. Resolved
-entries are kept for the rationale and history.
+likewise, as is KI-010. KI-003, KI-004 and KI-006 are accepted, documented risks.
+Resolved entries are kept for the rationale and history.
 
 KI-007 and KI-008 were both found by the new `e2e/` layer (plugin binaries driven
 through a live OpenBao — see [`openbao-integration-gaps.md`](openbao-integration-gaps.md)),
 which is the point of that layer: neither was visible to any in-process test, and
 KI-008 was visible only because *core* acted on the lease.
+
+**KI-009 is of a different kind from everything above it.** It is not a defect in
+this repo's code but a fact about DigitalOcean, and it is the most consequential
+entry here: it says the reference plugin cannot issue against the real cloud. It
+was found by the real-cloud layer within its first two runs, which is what that
+layer is for.
+
+**KI-010 came from the same layer's second cloud, on its first run.** Where DO's
+finding was about a cloud, AWS's was about this repo's code: the plugin reported a
+caller's invalid request as `internal` and counted it against the minter's health.
+Two clouds in, the real-cloud layer has produced one upstream blocker and one code
+defect, neither reachable from a fake — a fake answers with whatever the plugin's
+authors believed.
+
+**KI-010 is also the entry to read for how a small finding should be handled.**
+Asked to check for other failure modes before spending a spec revision, the audit
+found it was the *mildest* of five instances of the same defect: `upstream_timeout`
+was unreachable, an unreachable cloud read as `internal`, quota errors that were not
+429 read as `internal`, and a mistyped `minter_set` read as `upstream_auth_failed`.
+One revision fixed all of them, and the seventh conformance category
+(`error-taxonomy`) found a sixth instance — OVH's classifier had no 5xx branch —
+within a minute of existing.
 
 ---
 
@@ -398,3 +420,237 @@ trip mean the lease could outlive the credential (OBC-002). Both now derive
 `resp.Secret.TTL` from the upstream expiry, with a one-second floor (a zero TTL
 means "use the mount default" to core, which is never what a near-expiry
 credential wants).
+
+---
+
+## KI-009 — `POST /v2/tokens` is fenced off from PAT auth, so `credential-do` cannot mint against real DigitalOcean — [CONFIRMED-BLOCKER 2026-08-21]
+
+**Status:** confirmed against a real account and **not fixable in this repo**. The
+plugin is retained as the shape reference and for the fakes; it is no longer
+presented as production-viable. See
+[`decisions.md`](decisions.md) ("Why `credential-do` stays the reference
+implementation even though it cannot mint").
+
+**Severity:** Highest here — the reference implementation's hot path does not work
+upstream. Contained, though: it affects one cloud, and the failure is a clean
+`403` at minter-set/role **write** time (the capability probe), not a silent
+mis-issue at read time.
+
+**Symptom.** With a **full-access** DigitalOcean PAT — one that reads
+`/v2/account`, `/v2/projects`, `/v2/droplets`, `/v2/databases`, `/v2/apps`,
+`/v2/kubernetes/clusters` and more, all `200` — every token-management call is
+refused:
+
+| Call | Status | `X-Response-From` |
+|------|--------|-------------------|
+| `GET /v2/account` (and the other reads above) | **200** | `service` |
+| `GET /v2/tokens` | 403 | **`Edge-Gateway`** |
+| `POST /v2/tokens` | 403 | **`Edge-Gateway`** |
+| `GET /v2/tokens/scopes` | 403 | **`Edge-Gateway`** |
+| the same paths **unauthenticated** | 401 | `Edge-Gateway` |
+
+Body in every case: `{"id": "Forbidden", "message": "You are not authorized to
+perform this operation"}`.
+
+**Root cause, and why the header is the whole finding.** A bare 403 is ambiguous:
+it could mean "this credential lacks a privilege", which a differently-privileged
+credential would fix. DigitalOcean states which layer answered in
+`X-Response-From`, and the answers separate cleanly — working calls are answered by
+a `service`, every `/v2/tokens*` call by `Edge-Gateway`. The refusal is therefore
+made by DO's gateway **before** any service weighs the token's privileges: the path
+is not exposed to bearer-PAT authentication at all. The 401s on the same paths when
+unauthenticated show the gateway does authenticate first and then refuses the route,
+so this is routing, not authorization.
+
+Consequently **no PAT can mint** — not a scoped one (which also fails DO's own
+scope-listing call), not a full-access one. This supersedes the intermediate
+conclusion drawn from the first probe run, which had only a scoped PAT to work with
+and read its 403 as a privilege verdict ("a DO minter must be a full-access PAT").
+It isn't; there is no such thing as a mint-capable PAT.
+
+**Consistent with what was already known** and, in hindsight, predicted by it:
+`POST /v2/tokens` is absent from DigitalOcean's public OpenAPI spec, and DO
+documents PAT creation as a control-panel flow (D1 in
+[`do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md)). The
+endpoint is what the control panel itself uses, and the control panel does not
+authenticate with a PAT — it holds a session. The undocumented-dependency risk this
+repo accepted has simply already come true.
+
+**What is affected**
+
+- **Mint** (`doClient.CreateToken`, `path_creds.go`) — the plugin's reason to exist.
+- **Revoke** (`DELETE /v2/tokens/{id}`) — untestable, and moot: nothing is minted.
+- **Reconciler** (`doClient.ListTokens`) — `GET /v2/tokens` is fenced too, so
+  orphan reclamation cannot see upstream state either. Note the owner-tag safety
+  invariant is unharmed: it never deletes what it cannot list.
+- **Health check** (`GET /v2/account`) — unaffected; the one DO call that works.
+- Everything cloud-agnostic — envelope, leases, recovery state machine, minter
+  sets, metrics, conformance, e2e — is unaffected, because the fake stands in for
+  the cloud in all of it.
+
+**No headless alternative exists.** OAuth tokens (`doo_v1_`) are documented and
+scopable but require interactive user authorization, so they cannot be minted by a
+plugin (already recorded as the rejected alternative under D1). Spaces keys are
+S3-style object-storage credentials — a different credential type, out of scope,
+and themselves of doubtful API-issuability (D4 is **contested**: in DO's spec, but
+documented as control-panel-only and 404 on a real account, which makes
+control-panel-only credential management look like DO policy rather than a
+`/v2/tokens` quirk)
+([`object-storage-credential-audit.md`](object-storage-credential-audit.md)). DO
+offers no headless way to issue a short-lived API credential.
+
+**How this is pinned, and what would tell us it changed**
+
+- `plugins/credential-do/real_cloud_test.go` (`make test-cloud-real-do`) asserts
+  the fence: `/v2/account` 200 from `service` as the control, then `GET`/`POST`
+  `/v2/tokens` 403 from `Edge-Gateway`. **A failure there is good news** — the
+  unexpected-`201` path is fully written (assert `token.id` and
+  `token.access_token`, use the credential, delete it, confirm it stops working)
+  and fails with a message saying so, so a world-change is loud instead of
+  silently rotting the plugin further.
+- `plugins/credential-do/fake_parity_test.go` keeps the recorded evidence honest in
+  ordinary credential-free `go test`: the recordings must still show the
+  `service`-vs-`Edge-Gateway` contrast the conclusion rests on.
+- The capability probe (`capability.go`, `forbiddenMintHint`) turns the upstream
+  403 into this diagnosis at minter-set/role write time, because DO's own message
+  sends an operator hunting for a privilege that does not exist.
+
+**Deliberately NOT done**
+
+- **Deleting the plugin.** It is the shape every other plugin follows and the
+  origin of the DO fake, which the conformance and e2e layers depend on. Removing
+  it would delete working, load-bearing test infrastructure to make a point about
+  one cloud.
+- **Faking the fence in `pkg/credenvelope/fakes/do.go`** so the whole suite goes
+  red. The fakes model an upstream that behaves; making the default DO fake refuse
+  every mint would turn ten plugins' worth of cloud-agnostic coverage off to
+  restate one cloud's fact. The fake's `SetForbidCreate` knob already exercises the
+  403 path, and its body is now byte-for-byte DO's.
+- **A `read`-time guard rejecting DO issuance outright.** The capability probe
+  already refuses at write time with an explanation, which is the earlier and more
+  informative place; a second hard-coded refusal would also have to be undone by
+  hand the day DO changes.
+
+## KI-010 — an STS `ValidationError` is reported to clients as `internal`, and counted against the minter (credential-aws) — [RESOLVED 2026-08-22]
+
+**Resolved 2026-08-22**, and the fix is much wider than the finding — auditing the
+whole error vocabulary for the same defect turned up four more instances of it, all
+worse. See "What the audit found" below.
+
+**Status:** found by the AWS real-cloud probe on the day that layer was built. Low
+severity in steady state, misleading exactly when it fired.
+
+**What happens.** `classifyAWSError` (`path_creds.go`) matches error text for
+`AccessDenied`/`403`, `ExpiredToken`/`InvalidClientTokenId`/`401` and
+`Throttling`/`429`, and falls through to `http.StatusInternalServerError` for
+everything else. AWS's `ValidationError` is in that everything-else, so:
+
+- the client receives `error_code: internal` — "the plugin broke, maybe retry" —
+  for a failure AWS itself labels `<Type>Sender</Type>`, i.e. permanent and the
+  caller's fault;
+- the recovery state machine takes a `RecordError` for it, so repeated reads count
+  faults against a minter whose credential is entirely healthy.
+
+Recorded fixture (`plugins/credential-aws/testdata/cloud-real/POST_AssumeRole_400.json`,
+from a real STS call):
+
+```xml
+<Error>
+  <Type>Sender</Type>
+  <Code>ValidationError</Code>
+  <Message>1 validation error detected: Value '43201' at 'durationSeconds' failed
+  to satisfy constraint: Member must have value less than or equal to 43200</Message>
+</Error>
+```
+
+**Why it matters more than a mislabelled error.** This is the *surfacing behaviour*
+of the `MaxSessionDuration` gap. A role TTL is validated against STS's documented
+900s–43200s range at role write, and the capability probe pins its own request to
+the 900s floor (it cannot revoke what it mints), so **neither check can see a target
+IAM role whose `MaxSessionDuration` is below the role's TTL**. That configuration
+passes every write-time gate and then fails every issuance with the response above
+— reported as `internal`, while the minter is slowly marked unhealthy. An operator
+gets the least informative available signal for a purely declarative mistake.
+
+**Why it was not simply fixed.** Mapping `ValidationError` to `400` changes nothing
+client-visible on its own: `ClassifyUpstream` mapped 400 through `default` to
+`ErrInternal` too. Surfacing it honestly needed a **new `error_code`**, which is a
+spec change — so it was recorded rather than made silently, and then done properly.
+
+## What the audit found
+
+Asked to consider other failure modes before touching the vocabulary (so one spec
+revision would do), the sweep found KI-010 was the *mildest* of five instances of the
+same defect — a real failure mode collapsing into `internal`:
+
+1. **`upstream_timeout` was unreachable.** Its only occurrences repo-wide were in its
+   own unit test. Every plugin sets a 30s HTTP client timeout; a client-side timeout
+   carries **no status code** by construction; nothing inspected the error; so the most
+   retryable failure in the system was reported as `internal`. The README and this
+   RFC both advertised it as a code clients could distinguish.
+2. **Cloud unreachable or 5xx → `internal`.** 43 call sites returned status `0` on
+   transport failure. A cloud being down was indistinguishable from a plugin bug.
+   Worse, the three string-matching classifiers (AWS/GCP/OVH) had **no 5xx branch at
+   all** — found by the new conformance category on its first run, against OVH.
+3. **Non-401/403/404/429 4xx → `internal`** — KI-010's own family.
+4. **Quota errors that were not HTTP 429 → `internal`**, so AWS's `LimitExceeded` (the
+   2-key cap rotation depends on) missed `upstream_quota_exceeded`.
+5. **Configuration errors reported as upstream errors** — a mistyped `minter_set` came
+   back as `upstream_auth_failed`, sending the operator to the cloud.
+
+Two further contract defects, neither a classification bug:
+
+6. **`consent_required` was never emitted** by any code path — specified, dead.
+7. **166 write-path error responses carried no `error_code` at all**, while API-002
+   claimed "all error responses include `error_code`".
+
+**Also settled: `api_version` cannot version the error vocabulary.** A code travels in
+the error *string*; an error response carries no envelope; `api_version` exists only
+inside an envelope, i.e. only on success. Bumping it would announce the change on the
+one class of response where the change never appears. So the vocabulary is **additive**
+with a documented rule — clients must treat an unrecognised code as `internal` — and
+`api_version` stays `"2"`, continuing to mean the envelope's shape and nothing else.
+
+## The fix
+
+- **Four new codes**: `upstream_unavailable`, `upstream_request_invalid`,
+  `config_invalid`, `unsupported`. Each earns its place by the test that a client
+  would act differently on it; `upstream_conflict` was considered and declined
+  because entity names are plugin-generated, so a 409 is a plugin bug or a quota.
+- **`credenvelope.Classify(status, err)`** replaces status-only classification: when
+  there is no status it inspects the error, which is what makes `upstream_timeout`
+  reachable at last. The three per-cloud classifiers now return
+  `credenvelope.StatusNone` for "unrecognised" instead of a synthetic 500, and gained
+  5xx, quota and validation signatures (as ordered tables, not if-chains).
+- **`IndictsMinter` splits the two consumers.** One integer used to drive both what
+  the client is told and whether the minter is held responsible; they need different
+  partitions. `StateMachine.RecordUpstream(status, err, at)` is now the single entry
+  point and drops non-credential failures before they reach the state machine, so a
+  caller's bad request can no longer walk a healthy minter toward `AuthFailing`.
+- **Every write path carries a code** (166 call sites), and `logical.ErrorResponse` is
+  **forbidden by lint** outside `pkg/credenvelope` — the contract is now a property of
+  the build rather than of reviewer attention.
+- **`consent_required` removed.** Nothing ever emitted it, so no client can have seen it.
+- **A seventh conformance category, `error-taxonomy`**, over all ten plugins: no cloud
+  can opt out, and the cases needing a knob print why they are unexercised instead of
+  silently skipping.
+
+**What is pinned now**
+
+- `plugins/credential-aws/fake_parity_test.go` asserts AWS's envelope shape
+  (`<Code>ValidationError</Code>`, `<Type>Sender</Type>`) and the current
+  classification, so a change to either is deliberate and tells the reader to update
+  this entry.
+- `plugins/credential-aws/real_cloud_test.go` declares the `MaxSessionDuration` gap
+  rather than skipping it, and takes an optional `CLOUDREAL_AWS_LOWCAP_ROLE_ARN`
+  naming a role capped below the role TTL, which turns the declaration into a live
+  assertion. The minter's IAM grant is deliberately assume-only, so it cannot create
+  that role itself.
+
+**Still open, deliberately: the `MaxSessionDuration` gap itself.** The *reporting* is
+fixed — an operator now gets `upstream_request_invalid` and the minter is left alone —
+but a target role capped below a role's TTL still passes every write-time gate. Closing
+that needs the plugin to read the target role's `MaxSessionDuration` (`iam:GetRole`) at
+role write, which costs another IAM grant on the minter and only works same-account.
+Tracked here rather than fixed; the real-cloud probe declares it and
+`CLOUDREAL_AWS_LOWCAP_ROLE_ARN` turns the declaration into a live assertion.

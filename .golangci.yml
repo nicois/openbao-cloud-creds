@@ -41,6 +41,11 @@ linters:
     - godot
     - predeclared
     - gocritic
+    # Family 5: contract enforcement. An error response without a stable
+    # error_code is invisible in review and indistinguishable from one with a
+    # code until a client tries to switch on it — so the code-less path is
+    # forbidden rather than merely discouraged (API-002).
+    - forbidigo
 
   settings:
     errcheck:
@@ -71,6 +76,20 @@ linters:
       numbers: true
     exhaustive:
       default-signifies-exhaustive: true
+    forbidigo:
+      analyze-types: true
+      forbid:
+        # credenvelope.ErrorResponse takes an ErrorCode as its first argument, so
+        # it cannot be called without one. logical.ErrorResponse can, and was —
+        # at 166 call sites, every config/role/minter-set/reconcile/rotate error
+        # in the repo. Banning it is what makes "every error response carries a
+        # code" a property of the build rather than of reviewer attention.
+        - pattern: '^logical\.ErrorResponse$'
+          msg: >-
+            use credenvelope.ErrorResponse(code, msg, args...) so the response
+            carries a stable error_code (API-002). Pick the code by what a client
+            should DO: config_invalid (operator must fix input), unsupported (this
+            cloud never will), upstream_* (the cloud's answer), internal (our bug).
     dupl:
       threshold: 100
     godox:
@@ -116,3 +135,7 @@ linters:
     rules:
       - path: _test\.go
         linters: [funlen, gocyclo, gocognit, dupl, maintidx, goconst, mnd, revive, cyclop]
+      # credenvelope.ErrorResponse is the one legitimate wrapper around
+      # logical.ErrorResponse; banning it there would ban the fix as well.
+      - path: pkg/credenvelope/errors\.go
+        linters: [forbidigo]
