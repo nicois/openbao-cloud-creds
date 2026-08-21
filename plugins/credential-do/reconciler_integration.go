@@ -46,14 +46,18 @@ type leaseRegistry struct {
 	storage logical.Storage
 }
 
-func (r *leaseRegistry) KnownIDs(ctx context.Context) (map[string]struct{}, error) {
+func (r *leaseRegistry) OwnedIDs(ctx context.Context) (map[string]struct{}, error) {
 	entries, err := r.storage.List(ctx, "active-tokens/")
 	if err != nil {
 		return nil, err
 	}
-	known := make(map[string]struct{}, len(entries))
+	owned := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
-		known[entry] = struct{}{}
+		owned[entry] = struct{}{}
 	}
-	return known, nil
+	// No minter ids to merge: this cloud cannot mint a mint-capable successor
+	// (rotation is rejected), so no minter credential ever carries the owner
+	// prefix the lister selects on. If rotation is ever implemented here, this is
+	// where its RotationParams key must be merged in — see A1.
+	return owned, nil
 }

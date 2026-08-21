@@ -42,3 +42,11 @@ const pathConfig = "config"
 
 // metricNamespace is the leading segment of every metric key this plugin emits.
 const metricNamespace = "cloud_creds"
+
+// Operational interval field names, constified because they appear in the schema,
+// the write handler, the interval validation and the read response.
+const (
+	fieldFlushInterval    = "flush_interval"
+	fieldReconcileCadence = "reconcile_cadence"
+	fieldMinterExpiryWarn = "minter_expiry_warn"
+)

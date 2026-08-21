@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -46,14 +47,23 @@ type leaseRegistry struct {
 	storage logical.Storage
 }
 
-func (r *leaseRegistry) KnownIDs(ctx context.Context) (map[string]struct{}, error) {
+func (r *leaseRegistry) OwnedIDs(ctx context.Context) (map[string]struct{}, error) {
 	entries, err := r.storage.List(ctx, "active-clients/")
 	if err != nil {
 		return nil, err
 	}
-	known := make(map[string]struct{}, len(entries))
+	owned := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
-		known[entry] = struct{}{}
+		owned[entry] = struct{}{}
 	}
-	return known, nil
+	// A rotation successor is owner-prefixed (so the lister selects it) but is
+	// not a lease, so it is invisible to the tracking entries above. Merging the
+	// minter-recorded upstream ids is what makes the owned-set complete; without
+	// it the reconciler deletes the set's own mint-capable credential (A1).
+	// Fail-closed: an error here aborts the pass with zero deletes.
+	minters, err := cloudconfig.MinterUpstreamIDs(ctx, r.storage, fieldClientID)
+	if err != nil {
+		return nil, err
+	}
+	return cloudconfig.MergeOwned(owned, minters), nil
 }

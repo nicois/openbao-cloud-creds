@@ -110,3 +110,11 @@ const nonceBytes = 16
 // leaseShortIDLen is the number of leading lease-ID characters used to build a
 // human-readable upstream API-client name.
 const leaseShortIDLen = 8
+
+// Operational interval field names, constified because they appear in the schema,
+// the write handler, the interval validation and the read response.
+const (
+	fieldFlushInterval    = "flush_interval"
+	fieldReconcileCadence = "reconcile_cadence"
+	fieldMinterExpiryWarn = "minter_expiry_warn"
+)

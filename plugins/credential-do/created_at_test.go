@@ -101,6 +101,6 @@ func TestDeleteEntity_404IsSuccess(t *testing.T) {
 // allOrphansRegistry knows nothing, so every upstream entity is an orphan.
 type allOrphansRegistry struct{}
 
-func (allOrphansRegistry) KnownIDs(context.Context) (map[string]struct{}, error) {
+func (allOrphansRegistry) OwnedIDs(context.Context) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }

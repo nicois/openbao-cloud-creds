@@ -31,6 +31,11 @@ type registration struct {
 	fn       WorkerFunc
 }
 
+// fallbackInterval is used when a registration's interval is non-positive. It is
+// deliberately slow: the situation is a misconfiguration, and a fast fallback
+// would hammer an upstream while looking healthy.
+const fallbackInterval = 15 * time.Minute
+
 type Manager struct {
 	mu      sync.Mutex
 	workers []registration
@@ -93,7 +98,27 @@ func (m *Manager) run(ctx context.Context, w registration) {
 		}
 	}
 
-	ticker := time.NewTicker(w.interval)
+	// Clamp defensively. time.NewTicker panics on a non-positive interval, and
+	// this line is outside invoke's recover, in a bare goroutine — so a persisted
+	// flush_interval=0 killed the plugin PROCESS, taking every mount in the
+	// multiplexed binary with it, durably across restarts because Initialize
+	// re-runs startWorkers (A2 in docs/audit-2026-08-22.md).
+	//
+	// Callers validate at config write, which is where an operator gets told they
+	// are wrong. This is the seam every plugin already funnels through, so the
+	// guard lives here as well: the audit's cross-cutting finding was that guards
+	// get applied at one site and not generalised.
+	interval := w.interval
+	if interval <= 0 {
+		interval = fallbackInterval
+		if m.errHandler != nil {
+			m.errHandler(w.name, fmt.Errorf(
+				"non-positive interval %s is not runnable; falling back to %s. A worker interval must be "+
+					"positive — fix the config field that produced it", w.interval, interval))
+		}
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {

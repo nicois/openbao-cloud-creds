@@ -20,17 +20,17 @@ func (b *backend) configPaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Akamai API host (e.g., akab-xxxx.luna.akamaiapis.net)",
 				},
-				"flush_interval": {
+				fieldFlushInterval: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultFlushIntervalSeconds,
 					Description: "Metrics flush interval in seconds",
 				},
-				"reconcile_cadence": {
+				fieldReconcileCadence: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultReconcileCadenceSeconds,
 					Description: "Reconciliation cadence in seconds",
 				},
-				"minter_expiry_warn": {
+				fieldMinterExpiryWarn: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultMinterExpiryWarnSeconds,
 					Description: "Warn in logs when an expiring minter is within this many seconds of expiry",
@@ -65,10 +65,22 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "host is required"), nil
 	}
 
-	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second
-	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
-	minterExpiryWarn := time.Duration(d.Get("minter_expiry_warn").(int)) * time.Second
+	flushInterval := time.Duration(d.Get(fieldFlushInterval).(int)) * time.Second
+	reconcileCadence := time.Duration(d.Get(fieldReconcileCadence).(int)) * time.Second
+	minterExpiryWarn := time.Duration(d.Get(fieldMinterExpiryWarn).(int)) * time.Second
 	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
+
+	// Reject a non-positive interval here, where the operator finds out. A zero
+	// flush_interval used to panic the plugin process and crash-loop every mount
+	// in the binary (A2); worker.Register now clamps too, but silently.
+	if err := cloudconfig.ValidateIntervals(map[string]time.Duration{
+		fieldFlushInterval:     flushInterval,
+		fieldReconcileCadence:  reconcileCadence,
+		fieldMinterExpiryWarn:  minterExpiryWarn,
+		fieldMinterRetireGrace: minterRetireGrace,
+	}); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 	verifyCapability := d.Get(fieldVerifyCapability).(bool)
 
 	cfg := &cloudconfig.PluginConfig{
@@ -171,9 +183,9 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 	return &logical.Response{
 		Data: map[string]interface{}{
 			fieldCloud:             cfg.Cloud,
-			"flush_interval":       int(cfg.FlushInterval.Seconds()),
-			"reconcile_cadence":    int(cfg.ReconcileCadence.Seconds()),
-			"minter_expiry_warn":   int(cfg.MinterExpiryWarn.Seconds()),
+			fieldFlushInterval:     int(cfg.FlushInterval.Seconds()),
+			fieldReconcileCadence:  int(cfg.ReconcileCadence.Seconds()),
+			fieldMinterExpiryWarn:  int(cfg.MinterExpiryWarn.Seconds()),
 			fieldMinterRetireGrace: int(cfg.MinterRetireGrace.Seconds()),
 			fieldVerifyCapability:  cfg.CapabilityVerificationEnabled(),
 		},

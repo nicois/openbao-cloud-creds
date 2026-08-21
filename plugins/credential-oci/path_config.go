@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -54,17 +55,17 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     defaultRegion,
 					Description: "OCI region (e.g., us-ashburn-1)",
 				},
-				"flush_interval": {
+				fieldFlushInterval: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultFlushIntervalSeconds,
 					Description: "Metrics flush interval in seconds",
 				},
-				"reconcile_cadence": {
+				fieldReconcileCadence: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultReconcileCadenceSeconds,
 					Description: "Reconciliation cadence in seconds",
 				},
-				"minter_expiry_warn": {
+				fieldMinterExpiryWarn: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultMinterExpiryWarnSeconds,
 					Description: "Warn in logs when an expiring minter is within this many seconds of expiry",
@@ -79,7 +80,7 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     true,
 					Description: "Prove a minter can mint (throwaway mint-and-delete probe) at minter-set write and role write; set false only where a probe mint is unacceptable",
 				},
-				"rotation_check_interval": {
+				fieldRotationCheckInterval: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRotationCheckIntervalSeconds,
 					Description: "How often the rotation worker checks for slots needing rotation (seconds)",
@@ -94,9 +95,9 @@ func (b *backend) configPaths() []*framework.Path {
 }
 
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	flushInterval := time.Duration(d.Get("flush_interval").(int)) * time.Second
-	reconcileCadence := time.Duration(d.Get("reconcile_cadence").(int)) * time.Second
-	minterExpiryWarn := time.Duration(d.Get("minter_expiry_warn").(int)) * time.Second
+	flushInterval := time.Duration(d.Get(fieldFlushInterval).(int)) * time.Second
+	reconcileCadence := time.Duration(d.Get(fieldReconcileCadence).(int)) * time.Second
+	minterExpiryWarn := time.Duration(d.Get(fieldMinterExpiryWarn).(int)) * time.Second
 	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
 	verifyCapability := d.Get(fieldVerifyCapability).(bool)
 
@@ -121,7 +122,20 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	}
 
 	// Store rotation_check_interval separately
-	rotationCheckInterval := time.Duration(d.Get("rotation_check_interval").(int)) * time.Second
+	rotationCheckInterval := time.Duration(d.Get(fieldRotationCheckInterval).(int)) * time.Second
+
+	// Reject a non-positive interval here, where the operator finds out. A zero
+	// flush_interval used to panic the plugin process and crash-loop every mount
+	// in the binary (A2); worker.Register now clamps too, but silently.
+	if err := cloudconfig.ValidateIntervals(map[string]time.Duration{
+		fieldFlushInterval:         flushInterval,
+		fieldReconcileCadence:      reconcileCadence,
+		fieldMinterExpiryWarn:      minterExpiryWarn,
+		fieldMinterRetireGrace:     minterRetireGrace,
+		fieldRotationCheckInterval: rotationCheckInterval,
+	}); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 	rEntry, err := logical.StorageEntryJSON(configRotationCheckKey, rotationCheckInterval)
 	if err != nil {
 		return nil, err
@@ -222,14 +236,14 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			fieldCloud:                cfg.Cloud,
-			"region":                  region,
-			"flush_interval":          int(cfg.FlushInterval.Seconds()),
-			"reconcile_cadence":       int(cfg.ReconcileCadence.Seconds()),
-			"minter_expiry_warn":      int(cfg.MinterExpiryWarn.Seconds()),
-			fieldMinterRetireGrace:    int(cfg.MinterRetireGrace.Seconds()),
-			fieldVerifyCapability:     cfg.CapabilityVerificationEnabled(),
-			"rotation_check_interval": rotationCheckInterval,
+			fieldCloud:                 cfg.Cloud,
+			"region":                   region,
+			fieldFlushInterval:         int(cfg.FlushInterval.Seconds()),
+			fieldReconcileCadence:      int(cfg.ReconcileCadence.Seconds()),
+			fieldMinterExpiryWarn:      int(cfg.MinterExpiryWarn.Seconds()),
+			fieldMinterRetireGrace:     int(cfg.MinterRetireGrace.Seconds()),
+			fieldVerifyCapability:      cfg.CapabilityVerificationEnabled(),
+			fieldRotationCheckInterval: rotationCheckInterval,
 		},
 	}, nil
 }

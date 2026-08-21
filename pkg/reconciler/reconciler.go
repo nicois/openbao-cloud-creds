@@ -31,13 +31,21 @@ type CloudLister interface {
 	DeleteEntity(ctx context.Context, id string) error
 }
 
-// Registry enumerates the lease IDs this node knows about. Run calls KnownIDs
-// once per pass and membership-checks in memory (O(N), not a List-per-entity
-// O(N^2) scan). Returning an error aborts the pass WITHOUT deleting anything:
-// an incomplete known-set could misclassify a live credential as an orphan, so
-// the safe response to "cannot enumerate known leases" is to delete nothing.
+// Registry enumerates every upstream ID this mount OWNS — not merely the ones a
+// lease references. Run calls OwnedIDs once per pass and membership-checks in
+// memory (O(N), not a List-per-entity O(N^2) scan). Returning an error aborts the
+// pass WITHOUT deleting anything: an incomplete owned-set could misclassify a
+// live credential as an orphan, so the safe response to "cannot enumerate what we
+// own" is to delete nothing.
+//
+// The method is named for ownership rather than for leases deliberately. It was
+// called OwnedIDs and returned lease-tracked IDs only, which meant a rotation
+// successor — owner-prefixed, so selected by the lister's filter, but not a lease
+// — was classified as an orphan and deleted, destroying the set's only
+// mint-capable credential (A1 in docs/audit-2026-08-22.md). Any implementation
+// must include minter-owned IDs; see cloudconfig.MinterUpstreamIDs.
 type Registry interface {
-	KnownIDs(ctx context.Context) (map[string]struct{}, error)
+	OwnedIDs(ctx context.Context) (map[string]struct{}, error)
 }
 
 // MinConfirmationHold is the floor for an operator-requested confirmation hold
@@ -88,16 +96,16 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 
 	result := &Result{}
 
-	known, kerr := r.registry.KnownIDs(ctx)
-	if kerr != nil {
-		// Fail closed: without a complete known-set we cannot safely decide
+	owned, oerr := r.registry.OwnedIDs(ctx)
+	if oerr != nil {
+		// Fail closed: without a complete owned-set we cannot safely decide
 		// what is an orphan, so abort the pass rather than risk deleting a
 		// live credential.
-		return nil, kerr
+		return nil, oerr
 	}
 
 	for _, entity := range entities {
-		if _, ok := known[entity.ID]; ok {
+		if _, ok := owned[entity.ID]; ok {
 			continue
 		}
 

@@ -46,7 +46,7 @@ type fakeRegistry struct {
 	err       error
 }
 
-func (f *fakeRegistry) KnownIDs(_ context.Context) (map[string]struct{}, error) {
+func (f *fakeRegistry) OwnedIDs(_ context.Context) (map[string]struct{}, error) {
 	f.callCount++
 	if f.err != nil {
 		return nil, f.err
@@ -257,7 +257,7 @@ func TestMinConfirmationHold(t *testing.T) {
 	}
 }
 
-func TestRun_CallsKnownIDsExactlyOnce(t *testing.T) {
+func TestRun_CallsOwnedIDsExactlyOnce(t *testing.T) {
 	cloud := &fakeCloudLister{
 		entities: []reconciler.UpstreamEntity{
 			{ID: "a", Name: "cloud-creds-r-1"},
@@ -271,11 +271,11 @@ func TestRun_CallsKnownIDsExactlyOnce(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if reg.callCount != 1 {
-		t.Fatalf("KnownIDs called %d times, want exactly 1 (O(N), not O(N^2))", reg.callCount)
+		t.Fatalf("OwnedIDs called %d times, want exactly 1 (O(N), not O(N^2))", reg.callCount)
 	}
 }
 
-func TestRun_KnownIDsErrorIsFailClosed(t *testing.T) {
+func TestRun_OwnedIDsErrorIsFailClosed(t *testing.T) {
 	cloud := &fakeCloudLister{
 		entities: []reconciler.UpstreamEntity{
 			{ID: "orphan-1", Name: "cloud-creds-r-1"},
@@ -285,7 +285,7 @@ func TestRun_KnownIDsErrorIsFailClosed(t *testing.T) {
 	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 10}, cloud, reg)
 	res, err := r.Run(t.Context(), time.Now())
 	if err == nil {
-		t.Fatal("expected Run to return the KnownIDs error (fail-closed), got nil")
+		t.Fatal("expected Run to return the OwnedIDs error (fail-closed), got nil")
 	}
 	if res != nil && res.Deleted != 0 {
 		t.Fatalf("fail-closed must delete nothing, deleted %d", res.Deleted)
