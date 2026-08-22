@@ -75,7 +75,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	}
 	b.mu.RUnlock()
 
-	result, err := reconciler.New(cfg, lister, registry).Run(ctx, time.Now())
+	result, err := reconciler.New(cfg, lister, registry).WithLogger(cloudName, b.Logger()).Run(ctx, time.Now())
 	if err != nil {
 		return credenvelope.ErrorResponse(credenvelope.Classify(credenvelope.StatusNone, err), "reconcile failed: %v", err), nil
 	}

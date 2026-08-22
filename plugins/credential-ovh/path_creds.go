@@ -14,6 +14,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -75,7 +76,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	if err != nil {
 		status := classifyOVHError(err)
 		b.recordMinterError(setName, minterID, status, err, now)
-		return b.issuanceError(status, err), nil
+		return b.issuanceError(status, err, telemetry.IssuanceAttempt{
+			Cloud: cloudName, Role: roleName, MinterSet: setName, MinterID: minterID,
+			RequestID: req.ID,
+		}), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
@@ -238,9 +242,8 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, err erro
 
 // issuanceError logs the raw upstream failure (operator-only) and returns a
 // classified, body-free error response for the client (audit2 #4,#5).
-func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
-	b.Logger().Warn("upstream credential issuance failed",
-		"cloud", cloudName, "status", httpStatus, "error", err)
+func (b *backend) issuanceError(httpStatus int, err error, attempt telemetry.IssuanceAttempt) *logical.Response {
+	b.Logger().Warn("upstream credential issuance failed", attempt.LogFields(httpStatus, err)...)
 	return credenvelope.ErrorResponse(credenvelope.Classify(httpStatus, err),
 		"upstream credential issuance failed")
 }

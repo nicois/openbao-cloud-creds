@@ -102,6 +102,6 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		DryRun:            false,
 	}
 
-	_, err = reconciler.New(cfg, lister, registry).Run(ctx, time.Now())
+	_, err = reconciler.New(cfg, lister, registry).WithLogger(cloudName, b.Logger()).Run(ctx, time.Now())
 	return err
 }

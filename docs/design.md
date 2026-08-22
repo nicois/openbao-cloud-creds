@@ -359,6 +359,23 @@ This plugin does not implement caller authentication or authorization. Operators
 
 ## Prometheus metrics surface
 
+> **Metrics require a builtin build (2026-08-22).** Everything below describes
+> emitters that exist and are correct, but in the **documented deployment** — each
+> plugin registered as an external plugin process — they reach nothing. `pkg/telemetry`
+> emits through go-metrics' package-level globals, whose default sink is
+> `BlackholeSink` until something calls `NewGlobal`; the plugin runs in its own OS
+> process, `logical.BackendConfig` carries no sink, and `sdk/v2/plugin` has no metrics
+> plumbing. OpenBao instruments plugins from the **core** side, around the RPC
+> (`sdk/database/dbplugin/middleware.go` is the pattern), so a secrets-engine plugin
+> cannot publish to `/v1/sys/metrics` at all. If these `Factory`s are compiled into a
+> custom OpenBao build as builtins, core's global sink applies and the metrics work.
+>
+> Consequently the operator-facing signals that must work regardless — reconciler
+> deletions, issuance failures, rate-limit state — are **structured log lines**, which
+> do reach core over the plugin RPC. Do not write an alert against a metric named here
+> without first confirming your deployment can see it. A12 in
+> [`audit-2026-08-22.md`](audit-2026-08-22.md).
+
 Emitted via OpenBao's telemetry stanza:
 
 ```

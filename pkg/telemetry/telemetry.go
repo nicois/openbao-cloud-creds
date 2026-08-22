@@ -70,3 +70,35 @@ func (e Emitter) WorkerError(worker string, _ error) {
 		{Name: labelWorker, Value: worker},
 	})
 }
+
+// IssuanceAttempt identifies one credential-issuance attempt for logging.
+//
+// It exists because the issuance-failure log line named only the cloud, the status
+// and the error — so on a mount with many roles an operator learned that "something
+// on this cloud got a 403" and nothing more, though the role, set, minter and
+// request id were all in scope at the call site (A26 in
+// docs/audit-2026-08-22.md). Passed as one value rather than four parameters so the
+// failure helper stays within the argument limit, and defined once here rather than
+// nine times so the field NAMES cannot drift between clouds — an operator grepping
+// `minter_id=` should find every cloud.
+type IssuanceAttempt struct {
+	Cloud     string
+	Role      string
+	MinterSet string
+	MinterID  string
+	RequestID string
+}
+
+// LogFields renders the attempt as structured log key/values, with the upstream
+// status and error appended.
+func (a IssuanceAttempt) LogFields(status int, err error) []interface{} {
+	return []interface{}{
+		labelCloud, a.Cloud,
+		"role", a.Role,
+		"minter_set", a.MinterSet,
+		"minter_id", a.MinterID,
+		"request_id", a.RequestID,
+		"status", status,
+		"error", err,
+	}
+}

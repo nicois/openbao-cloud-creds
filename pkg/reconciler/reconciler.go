@@ -3,6 +3,8 @@ package reconciler
 import (
 	"context"
 	"time"
+
+	"github.com/hashicorp/go-hclog"
 )
 
 type UpstreamEntity struct {
@@ -75,9 +77,25 @@ type Result struct {
 }
 
 type reconciler struct {
-	config   Config
-	cloud    CloudLister
-	registry Registry
+	config    Config
+	cloud     CloudLister
+	registry  Registry
+	logger    hclog.Logger
+	cloudName string
+}
+
+// WithLogger attaches the logger that makes a pass auditable.
+//
+// The package had no logger at all, Result.Deleted was a bare count, and all six
+// deleting plugins discarded the Result — so "what did the reconciler delete, and
+// when" was unanswerable from any source. The pass is timer-driven, so no OpenBao
+// request exists and no audit device can record it either; a structured log line is
+// the only channel there is, and metrics are not one (A6, A12 in
+// docs/audit-2026-08-22.md).
+func (r *reconciler) WithLogger(cloud string, logger hclog.Logger) *reconciler {
+	r.logger = logger
+	r.cloudName = cloud
+	return r
 }
 
 func New(cfg Config, cloud CloudLister, registry Registry) *reconciler {
@@ -133,10 +151,50 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 
 		if err := r.cloud.DeleteEntity(ctx, entity.ID); err != nil {
 			result.Errors = append(result.Errors, entity.ID)
+			r.warn("reconciler: deleting an orphaned upstream credential failed",
+				"id", entity.ID, "name", entity.Name, "error", err)
 			continue
 		}
 		result.Deleted++
+		// One line per deletion, naming what was deleted and why it qualified. This
+		// is the audit trail for automated destruction of a cloud credential.
+		r.info("reconciler: deleted an orphaned upstream credential",
+			"id", entity.ID, "name", entity.Name,
+			"created_at", entity.CreatedAt, "reason", "not owned by any lease or minter")
 	}
 
+	r.summarise(result)
 	return result, nil
+}
+
+// summarise records the outcome of a pass, including the two conditions that were
+// previously invisible: hitting the per-pass delete cap (orphans are accumulating
+// faster than they are reclaimed) and per-entity delete failures.
+func (r *reconciler) summarise(result *Result) {
+	if result.HitLimit {
+		r.warn("reconciler: hit the per-pass delete limit; orphans remain",
+			"deleted", result.Deleted, "orphans_found", len(result.OrphansFound),
+			"limit", r.config.MaxDeletesPerPass)
+	}
+	if len(result.Errors) > 0 {
+		r.warn("reconciler: some orphan deletions failed and will be retried next pass",
+			"failed", len(result.Errors), "deleted", result.Deleted)
+	}
+	if result.Deleted > 0 || len(result.OrphansFound) > 0 {
+		r.info("reconciler: pass complete",
+			"orphans_found", len(result.OrphansFound), "deleted", result.Deleted,
+			"dry_run", r.config.DryRun)
+	}
+}
+
+func (r *reconciler) info(msg string, args ...interface{}) {
+	if r.logger != nil {
+		r.logger.Info(msg, append([]interface{}{"cloud", r.cloudName}, args...)...)
+	}
+}
+
+func (r *reconciler) warn(msg string, args ...interface{}) {
+	if r.logger != nil {
+		r.logger.Warn(msg, append([]interface{}{"cloud", r.cloudName}, args...)...)
+	}
 }

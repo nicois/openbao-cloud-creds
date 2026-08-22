@@ -9,6 +9,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -38,25 +39,39 @@ func (b *backend) secretExoscale() *framework.Secret {
 	}
 }
 
+// loadIssuableRole fetches a role and reports why issuance cannot proceed. Split
+// out so pathCredsRead stays within the function-length limit after the issuance
+// log line gained the fields an operator needs (A26); credential-do has had the
+// same helper for the same reason.
+//
+// Exactly one of role/errResp is non-nil when err is nil.
+func (b *backend) loadIssuableRole(ctx context.Context, req *logical.Request, roleName string,
+) (*exoscaleRole, *logical.Response, error) {
+	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
+	if err != nil {
+		return nil, nil, err
+	}
+	if entry == nil {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound,
+			"role %q does not exist", roleName), nil
+	}
+	var role exoscaleRole
+	if err := json.Unmarshal(entry.Value, &role); err != nil {
+		return nil, nil, err
+	}
+	if role.Disabled {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled,
+			"role %q is disabled", roleName), nil
+	}
+	return &role, nil, nil
+}
+
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
 
-	// Load role from storage
-	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
-	if err != nil {
-		return nil, err
-	}
-	if entry == nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
-	}
-
-	var role exoscaleRole
-	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, err
-	}
-
-	if role.Disabled {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	role, errResp, err := b.loadIssuableRole(ctx, req, roleName)
+	if err != nil || errResp != nil {
+		return errResp, err
 	}
 
 	now := time.Now()
@@ -77,7 +92,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	keyResp, httpStatus, err := client.CreateAPIKey(ctx, keyName, role.RoleID)
 	if err != nil {
 		b.recordMinterError(setName, minterID, httpStatus, err, now)
-		return b.issuanceError(httpStatus, err), nil
+		return b.issuanceError(httpStatus, err, telemetry.IssuanceAttempt{
+			Cloud: cloudName, Role: roleName, MinterSet: setName, MinterID: minterID,
+			RequestID: req.ID,
+		}), nil
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
@@ -322,9 +340,8 @@ func (b *backend) recordMinterError(setName, id string, httpStatus int, err erro
 
 // issuanceError logs the raw upstream failure (operator-only) and returns a
 // classified, body-free error response for the client (audit2 #4,#5).
-func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
-	b.Logger().Warn("upstream credential issuance failed",
-		"cloud", cloudName, "status", httpStatus, "error", err)
+func (b *backend) issuanceError(httpStatus int, err error, attempt telemetry.IssuanceAttempt) *logical.Response {
+	b.Logger().Warn("upstream credential issuance failed", attempt.LogFields(httpStatus, err)...)
 	return credenvelope.ErrorResponse(credenvelope.Classify(httpStatus, err),
 		"upstream credential issuance failed")
 }
