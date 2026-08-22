@@ -65,9 +65,21 @@ const (
 const metricNamespace = "cloud_creds"
 
 // maxSessionNameLen is the maximum length of an STS RoleSessionName. AWS caps
-// session names at 64 characters (alphanumeric plus =,.@-_); longer names are
-// truncated before the AssumeRole call.
+// session names at 64 characters; a longer name is fitted (not tail-truncated)
+// before the AssumeRole call — see sessionNameFor.
 const maxSessionNameLen = 64
+
+// sessionNameExtraChars is the non-alphanumeric part of AWS's session-name
+// character class (`[\w+=,.@-]`).
+const sessionNameExtraChars = "+=,.@-_"
+
+// sessionRequestIDKeepLen is how much of the request id survives into a session
+// name that will not otherwise fit. Thirteen characters of an OpenBao request id
+// is the first twelve hex digits of its UUID plus the following hyphen: enough to
+// distinguish leases, and still a literal substring of the id the audit device
+// records, so a session name in CloudTrail can be grepped straight back to the
+// request that caused it.
+const sessionRequestIDKeepLen = 13
 
 // Operational interval field names, constified because they appear in the schema,
 // the write handler, the interval validation and the read response.

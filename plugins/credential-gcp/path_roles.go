@@ -13,7 +13,16 @@ import (
 )
 
 const (
-	defaultScope = "https://www.googleapis.com/auth/cloud-platform"
+	// fullAccessScope is Google's catch-all OAuth2 scope: it grants everything the
+	// impersonated service account can do. It used to be the DEFAULT for a role's
+	// `scopes`, which made "no opinion about privilege" mean "all of it" on the one
+	// axis this plugin can narrow — GCP access tokens carry no other restriction, so
+	// the scope list IS the privilege boundary here (A29).
+	//
+	// It is still perfectly legal to ask for, and it is named rather than inlined so
+	// the rejection message below can point at it. What is gone is getting it by
+	// saying nothing.
+	fullAccessScope = "https://www.googleapis.com/auth/cloud-platform"
 
 	// maxGCPTTL is the absolute ceiling on generateAccessToken's `lifetime`
 	// (12h, and only with the credential-lifetime-extension org policy; 1h
@@ -57,9 +66,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Description: "Target service account email to impersonate (e.g. my-sa@project.iam.gserviceaccount.com)",
 				},
 				fieldScopes: {
-					Type:        framework.TypeCommaStringSlice,
-					Default:     []string{defaultScope},
-					Description: "OAuth2 scopes for the generated access token",
+					Type: framework.TypeCommaStringSlice,
+					Description: "OAuth2 scopes for the generated access token (required; " +
+						"the scope list is this cloud's only privilege boundary, so there is " +
+						"no default)",
 				},
 				fieldMinterSet: {
 					Type:        framework.TypeString,
@@ -142,7 +152,10 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		scopes = scopesRaw.([]string)
 	}
 	if len(scopes) == 0 {
-		scopes = []string{defaultScope}
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"scopes is required: an impersonated access token's scope list is the only privilege "+
+				"boundary this cloud offers, so a role must state it. Pass %q explicitly to grant "+
+				"everything the target service account can do", fullAccessScope), nil
 	}
 
 	gcpR := &gcpRole{

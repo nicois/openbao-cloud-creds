@@ -80,6 +80,48 @@ func CredentialName(instanceID, role, requestID string) string {
 	return Prefix(instanceID) + role + "-" + requestID
 }
 
+// FitName assembles prefix + middle + "-" + suffix inside maxLen characters,
+// shortening the MIDDLE rather than the tail. maxLen <= 0 means unbounded.
+//
+// Which end gets cut is the whole point. Several clouds cap a credential name
+// (AWS: 64 for a RoleSessionName), and the natural `prefix + role + "-" + id`
+// then overflows for perfectly ordinary role names. Truncating that from the
+// right removes the discriminator — the request id — so every lease of a
+// long-named role ends up sharing one upstream name, which destroys per-lease
+// attribution in the cloud's own audit log exactly where it matters most. Cutting
+// the middle instead keeps the mount prefix (ownership) and the discriminator
+// (attribution), and loses only some characters of a role name that is also
+// recorded in the lease, the envelope and this plugin's logs.
+//
+// Two long role names sharing a truncated form therefore produce names
+// distinguished only by the suffix. That is intended: the suffix is the unique
+// part, and role identity is carried elsewhere.
+func FitName(prefix, middle, suffix string, maxLen int) string {
+	assembled := prefix + middle + "-" + suffix
+	if maxLen <= 0 || len(assembled) <= maxLen {
+		return assembled
+	}
+	// One character of middle plus its separator has to fit for the middle to be
+	// worth keeping at all.
+	if budget := maxLen - len(prefix) - len(suffix) - 1; budget > 0 {
+		return prefix + middle[:budget] + "-" + suffix
+	}
+	// No room for any of the middle: drop it and its separator. The prefix and the
+	// suffix are the two parts with a job to do.
+	if len(prefix)+len(suffix) <= maxLen {
+		return prefix + suffix
+	}
+	// The caller's suffix cannot fit alongside the prefix, so it is the caller's
+	// suffix that is too long for its own cloud — shorten it there rather than
+	// here, where the choice of what to lose is not ours to make. The prefix is
+	// never cut while any alternative exists: a name that loses it is a name this
+	// mount's reconciler no longer recognises as its own.
+	if maxLen > len(prefix) {
+		return prefix + suffix[:maxLen-len(prefix)]
+	}
+	return prefix[:maxLen]
+}
+
 // Owns reports whether an upstream entity name belongs to THIS mount.
 //
 // Deliberately not "does it look like ours": a name carrying the base prefix but a

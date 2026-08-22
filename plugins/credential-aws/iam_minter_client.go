@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -85,6 +86,23 @@ type iamErrorResponse struct {
 	} `xml:"Error"`
 }
 
+// iamAPIError is a parsed IAM error, carrying AWS's error Code as a field.
+//
+// It exists so isNoSuchEntity can match on the Code rather than by searching the
+// error's text. The text includes AWS's Message, which quotes the request — so an
+// access key id or a user name containing "NoSuchEntity" made a FAILED delete look
+// like an already-deleted key, and the retired-sweep then dropped its tracking
+// while the long-lived key stayed alive upstream (A29).
+type iamAPIError struct {
+	Action  string
+	Code    string
+	Message string
+}
+
+func (e *iamAPIError) Error() string {
+	return fmt.Sprintf("iam %s failed (%s): %s", e.Action, e.Code, e.Message)
+}
+
 // createAccessKeyResult maps the CreateAccessKey XML response.
 type createAccessKeyResult struct {
 	AccessKey struct {
@@ -101,8 +119,8 @@ type listAccessKeysResult struct {
 }
 
 // do signs and sends a single IAM query-API POST and returns the body bytes. On
-// a non-2xx it parses the XML error and returns an error whose message includes
-// the IAM error Code (so callers can match errNoSuchEntity).
+// a non-2xx it parses the XML error into an *iamAPIError, so callers match AWS's
+// error Code as a field rather than searching the message.
 func (c *realIAMMinterClient) do(ctx context.Context, action string, extra url.Values) ([]byte, error) {
 	form := url.Values{}
 	form.Set("Action", action)
@@ -139,7 +157,7 @@ func (c *realIAMMinterClient) do(ctx context.Context, action string, extra url.V
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		var e iamErrorResponse
 		if xmlErr := xml.Unmarshal(raw, &e); xmlErr == nil && e.Error.Code != "" {
-			return nil, fmt.Errorf("iam %s failed (%s): %s", action, e.Error.Code, e.Error.Message)
+			return nil, &iamAPIError{Action: action, Code: e.Error.Code, Message: e.Error.Message}
 		}
 		return nil, fmt.Errorf("iam %s failed (status %d)", action, resp.StatusCode)
 	}
@@ -184,8 +202,12 @@ func (c *realIAMMinterClient) ListAccessKeyIDs(ctx context.Context) ([]string, e
 
 // isNoSuchEntity reports whether err is an IAM NoSuchEntity (the key is already
 // gone). Used by the retired-sweep to treat an already-deleted key as success.
+//
+// Matching is on the parsed error Code, which AWS controls, and not on the error
+// text, which quotes the request — see iamAPIError.
 func isNoSuchEntity(err error) bool {
-	return err != nil && strings.Contains(err.Error(), errNoSuchEntity)
+	var apiErr *iamAPIError
+	return errors.As(err, &apiErr) && apiErr.Code == errNoSuchEntity
 }
 
 // maxAccessKeysPerUser is the IAM hard limit on access keys per user. The

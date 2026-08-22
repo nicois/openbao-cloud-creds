@@ -33,7 +33,6 @@ func TestRoleCRUD(t *testing.T) {
 		Data: map[string]interface{}{
 			"default_ttl": 900,
 			"max_ttl":     3600,
-			"scopes":      "read,write",
 			"minter_set":  "default",
 		},
 	}
@@ -55,8 +54,10 @@ func TestRoleCRUD(t *testing.T) {
 	if resp.Data["name"] != "snapshot-rw" {
 		t.Fatalf("unexpected name: %v", resp.Data["name"])
 	}
-	if resp.Data["scopes"] != "read,write" {
-		t.Fatalf("unexpected scopes: %v", resp.Data["scopes"])
+	// UpCloud has no per-token scoping, so a role must not report a scope it cannot
+	// enforce: `scopes` is not a field here and must not appear in a role read (A29).
+	if _, present := resp.Data["scopes"]; present {
+		t.Fatalf("role read reports a scopes field UpCloud cannot enforce: %v", resp.Data)
 	}
 	if resp.Data["minter_set"] != "default" {
 		t.Fatalf("unexpected minter_set: %v", resp.Data["minter_set"])
@@ -127,7 +128,6 @@ func TestRoleValidation_TTL(t *testing.T) {
 		Data: map[string]interface{}{
 			"default_ttl": 7200,
 			"max_ttl":     3600,
-			"scopes":      "read",
 			"minter_set":  "default",
 		},
 	}
@@ -164,7 +164,6 @@ func TestRoleValidation_TTLTooHigh(t *testing.T) {
 				Data: map[string]interface{}{
 					"default_ttl": tc.defaultTTL,
 					"max_ttl":     tc.maxTTL,
-					"scopes":      "read",
 					"minter_set":  "default",
 				},
 			})
@@ -185,7 +184,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 	b, storage := getTestBackend(t)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/orphan", Storage: storage,
-		Data: map[string]interface{}{"default_ttl": 900, "max_ttl": 3600, "scopes": "read", "minter_set": "nonexistent"},
+		Data: map[string]interface{}{"default_ttl": 900, "max_ttl": 3600, "minter_set": "nonexistent"},
 	}
 	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {

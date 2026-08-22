@@ -97,10 +97,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		TTLSeconds:   int(role.DefaultTTL.Seconds()),
 		Renewable:    false, // expires_in is fixed at mint — see pathCredsRenew
 		CredentialID: tokenResp.ID,
-		Scope:        role.Scopes,
-		IssuedBy:     "cloud-creds-upcloud/v0.1",
-		MinterSet:    setName,
-		MinterID:     minterID,
+		// UpCloud has no per-token scoping: this token can do whatever the minter's
+		// account can. Saying so is the honest answer; the role used to carry a
+		// `scopes` field that was reported here and never sent upstream (A29).
+		Scope:     scopeAccountWide,
+		IssuedBy:  "cloud-creds-upcloud/v0.1",
+		MinterSet: setName,
+		MinterID:  minterID,
 	})
 
 	// Track active token for reconciler

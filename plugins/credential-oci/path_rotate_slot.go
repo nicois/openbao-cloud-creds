@@ -68,6 +68,16 @@ func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *f
 	if err != nil {
 		return credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err), nil
 	}
+	// loadSlot reports an absent slot as (nil, nil), which happens if the role — and
+	// with it every slot — is deleted between the rotation and this read. Reading
+	// updated.TokenID unchecked panicked the handler (A29). The rotation itself
+	// succeeded, so this is not an error the operator can act on beyond knowing the
+	// slot is gone.
+	if updated == nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrEntityUnavailable,
+			"slot %d of role %q rotated, but the slot no longer exists — the role was most likely "+
+				"deleted concurrently", slotIndex, roleName), nil
+	}
 
 	return &logical.Response{
 		Data: map[string]interface{}{

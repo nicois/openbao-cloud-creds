@@ -1,10 +1,17 @@
 package credentialgcp_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
+
+// testRoleScope is a single narrow OAuth2 scope. Roles must state their scopes —
+// there is no default, because on GCP the scope list is the whole privilege
+// boundary and defaulting it meant defaulting to everything (A29).
+const testRoleScope = "https://www.googleapis.com/auth/devstorage.read_only"
 
 // writeDefaultMinterSet creates a "default" minter set so roles can bind to it.
 func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Storage) {
@@ -144,6 +151,7 @@ func TestRoleValidation_InvalidSAEmail(t *testing.T) {
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "not-a-valid-email",
+			"scopes":                testRoleScope,
 		},
 	}
 	resp, err := b.HandleRequest(t.Context(), req)
@@ -167,6 +175,7 @@ func TestRoleValidation_TTLTooHigh(t *testing.T) {
 			"default_ttl":           3600,
 			"max_ttl":               86400, // above 43200s maximum
 			"service_account_email": "sa@my-project.iam.gserviceaccount.com",
+			"scopes":                testRoleScope,
 			"minter_set":            "default",
 		},
 	}
@@ -191,6 +200,7 @@ func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 			"default_ttl":           7200,
 			"max_ttl":               3600,
 			"service_account_email": "sa@my-project.iam.gserviceaccount.com",
+			"scopes":                testRoleScope,
 			"minter_set":            "default",
 		},
 	}
@@ -200,5 +210,37 @@ func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 	}
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected error for default_ttl > max_ttl")
+	}
+}
+
+// TestRoleValidation_RequiresScopes: an impersonated access token carries no other
+// privilege restriction, so a role's scope list IS the privilege boundary on this
+// cloud. It used to default to cloud-platform, which meant an operator who said
+// nothing about privilege silently got all of it (A29).
+func TestRoleValidation_RequiresScopes(t *testing.T) {
+	b, storage := getTestBackend(t)
+	writeDefaultMinterSet(t, b, storage)
+
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "roles/unscoped",
+		Storage:   storage,
+		Data: map[string]interface{}{
+			"default_ttl":           3600,
+			"max_ttl":               3600,
+			"service_account_email": "deploy-sa@my-project.iam.gserviceaccount.com",
+			"minter_set":            "default",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("a role with no scopes was accepted; it would issue tokens with full "+
+			"cloud-platform access: %v", resp)
+	}
+	if msg := resp.Data["error"]; !strings.Contains(fmt.Sprint(msg), "cloud-platform") {
+		t.Errorf("the rejection should name the scope an operator must ask for explicitly if they "+
+			"really do want everything, got: %v", msg)
 	}
 }

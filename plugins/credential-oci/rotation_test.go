@@ -1,6 +1,8 @@
 package credentialoci_test
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
 
 	credentialoci "github.com/nicois/openbao-cloud-creds/plugins/credential-oci"
@@ -172,5 +174,46 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 		if s["token_id"] == nil || s["token_id"] == "" {
 			t.Fatalf("slot %d should have token_id", i)
 		}
+	}
+}
+
+// vanishingSlotStorage makes a slot disappear midway through a rotation: the
+// first read of it succeeds, so the rotation itself proceeds normally, and every
+// read after that reports the key absent. That is what a role delete racing a
+// rotate-slot call looks like from inside the handler.
+//
+// loadSlot reports absence as (nil, nil), and pathRotateSlot dereferenced the
+// result unchecked — so this race panicked the handler, taking the mount's plugin
+// process with it rather than failing one request (A29).
+type vanishingSlotStorage struct {
+	logical.Storage
+	key   string
+	reads *atomic.Int32
+}
+
+func (s vanishingSlotStorage) Get(ctx context.Context, key string) (*logical.StorageEntry, error) {
+	if key == s.key && s.reads.Add(1) > 1 {
+		return nil, nil
+	}
+	return s.Storage.Get(ctx, key)
+}
+
+func TestRotateSlot_SlotDeletedConcurrently(t *testing.T) {
+	b, storage := setupConfiguredBackend(t)
+
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "rotate-slot/test-role/0",
+		Storage: vanishingSlotStorage{
+			Storage: storage, key: "slots/test-role/0", reads: &atomic.Int32{},
+		},
+	})
+	// The handler must answer, not panic. A panic in a plugin process is not a
+	// failed request: it takes the mount down with it.
+	if err != nil {
+		t.Fatalf("rotate returned a transport error rather than a response: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("a rotation whose slot no longer exists reported success: %v", resp)
 	}
 }

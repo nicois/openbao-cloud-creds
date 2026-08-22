@@ -104,6 +104,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "sa@test-project.iam.gserviceaccount.com",
+			"scopes":                testRoleScope,
 		},
 	}
 	resp, err := b.HandleRequest(t.Context(), req)
@@ -123,6 +124,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "sa@test-project.iam.gserviceaccount.com",
+			"scopes":                testRoleScope,
 			"minter_set":            "does-not-exist",
 		},
 	}
@@ -185,6 +187,7 @@ func TestMinterSetIsolation(t *testing.T) {
 		Data: map[string]interface{}{
 			"default_ttl": 3600, "max_ttl": 3600,
 			"service_account_email": "target-sa@test-project.iam.gserviceaccount.com",
+			"scopes":                testRoleScope,
 			"minter_set":            "secondary",
 		},
 	}

@@ -74,6 +74,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "target-sa@test-project.iam.gserviceaccount.com",
+			"scopes":                testRoleScope,
 			"minter_set":            "default",
 		},
 	}

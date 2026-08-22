@@ -20,7 +20,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Re
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
 		Data: map[string]interface{}{
 			fieldDefaultTTL: 3600, fieldMaxTTL: 86400,
-			fieldScopes: "read", fieldMinterSet: defaultSetName,
+			fieldMinterSet: defaultSetName,
 		},
 	})
 	if err != nil {

@@ -131,8 +131,14 @@ func signServiceAccountJWT(key *serviceAccountKey) (jwt, tokenURI string, err er
 
 	now := time.Now()
 	claims := map[string]interface{}{
-		"iss":   key.ClientEmail,
-		"scope": defaultScope,
+		"iss": key.ClientEmail,
+		// The MINTER's own assertion scope, which is a different question from a
+		// role's scopes: this is the breadth of the minter service account's own
+		// token, and it has to cover iamcredentials (to impersonate) and IAM (to
+		// manage its own keys for rotation). A role's scopes, by contrast, bound
+		// what the credential we hand a caller can do, and are required rather
+		// than defaulted — see fullAccessScope in path_roles.go.
+		"scope": fullAccessScope,
 		"aud":   tokenURI,
 		"iat":   now.Unix(),
 		"exp":   now.Add(time.Hour).Unix(),

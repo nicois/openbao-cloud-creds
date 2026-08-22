@@ -30,11 +30,17 @@ const (
 		"token's expires_in at that value and would reject the mint request"
 )
 
+// upcloudRole has no scopes field, deliberately. It used to declare, store, echo
+// and put one in the response envelope while createTokenRequest had no scope field
+// at all — so an operator could narrow a role's `scopes`, see the narrowing read
+// back to them and reported in every issued credential's metadata, and receive a
+// token carrying the minter account's FULL permissions. UpCloud's token API has no
+// scope concept; a token inherits the account. Misreporting privilege is worse than
+// not offering it, so the field is gone and the envelope says `account` (A29).
 type upcloudRole struct {
 	Name       string        `json:"name"`
 	DefaultTTL time.Duration `json:"default_ttl"`
 	MaxTTL     time.Duration `json:"max_ttl"`
-	Scopes     string        `json:"scopes"`
 	MinterSet  string        `json:"minter_set"`
 	Disabled   bool          `json:"disabled,omitempty"`
 }
@@ -57,10 +63,6 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum lease TTL",
-				},
-				fieldScopes: {
-					Type:        framework.TypeString,
-					Description: "Comma-separated UpCloud token scopes",
 				},
 				fieldMinterSet: {
 					Type:        framework.TypeString,
@@ -86,8 +88,6 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	name := d.Get(fieldName).(string)
 	defaultTTL := time.Duration(d.Get(fieldDefaultTTL).(int)) * time.Second
 	maxTTL := time.Duration(d.Get(fieldMaxTTL).(int)) * time.Second
-	scopes := d.Get(fieldScopes).(string)
-
 	// UpCloud rejects an expires_in above 8760h; catch it here rather than at mint.
 	if maxTTL > maxUpCloudTTL {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, upcloudLongTTLMsg, "max_ttl"), nil
@@ -113,9 +113,6 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		Cloud:      cloudName,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
-		CloudConfig: map[string]interface{}{
-			fieldScopes: scopes,
-		},
 	}
 	if err := cloudconfig.ValidateRole(role); err != nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
@@ -125,7 +122,6 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		Name:       name,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
-		Scopes:     scopes,
 		MinterSet:  minterSet,
 	}
 
@@ -166,7 +162,6 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 			fieldName:       role.Name,
 			fieldDefaultTTL: int(role.DefaultTTL.Seconds()),
 			fieldMaxTTL:     int(role.MaxTTL.Seconds()),
-			fieldScopes:     role.Scopes,
 			fieldMinterSet:  role.MinterSet,
 		},
 	}, nil

@@ -218,7 +218,15 @@ var probeSeq atomic.Uint64
 // orphans by construction — which is the point, and which is also why the prefix has
 // to be instance-scoped (A19 in docs/audit-2026-08-22.md).
 func ProbeName(ownerPrefix, role string) string {
-	return ownerPrefix + role + "-probe-" +
+	return ownerPrefix + role + "-" + ProbeSuffix()
+}
+
+// ProbeSuffix is the unique, self-identifying tail of a probe name, exposed
+// separately for clouds that cap a credential name and must therefore assemble
+// the name themselves (see ownertag.FitName, which shortens the role rather than
+// this suffix — truncating the tail would make two concurrent probes collide).
+func ProbeSuffix() string {
+	return "probe-" +
 		strconv.FormatInt(time.Now().UnixNano(), 36) +
 		strconv.FormatUint(probeSeq.Add(1), 36)
 }

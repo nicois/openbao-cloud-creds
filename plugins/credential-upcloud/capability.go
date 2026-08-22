@@ -24,9 +24,8 @@ import (
 // probe creates a token and deletes it, which is the only way to establish the
 // mint right.
 //
-// UpCloud tokens carry no per-role scoping upstream (a role's `scopes` field is
-// reported in the envelope, not sent to UpCloud), so the mint request is the same
-// for every role and dedupes to one probe per minter.
+// UpCloud tokens carry no per-role scoping upstream at all, so the mint request is
+// the same for every role and dedupes to one probe per minter.
 
 // probeExpiresIn is the lifetime given to a probe token. It is deleted
 // immediately; the value only has to be short enough to be harmless if the

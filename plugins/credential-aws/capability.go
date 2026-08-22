@@ -98,11 +98,10 @@ func (b *backend) probeMint(minter cloudconfig.Minter, role *awsRole) func(conte
 // then pins the session name to a probe name and the duration to the floor.
 func probeAssumeRoleInput(ownerPrefix string, role *awsRole) *sts.AssumeRoleInput {
 	input := buildAssumeRoleInput(ownerPrefix, role, role.Name, "")
-	sessionName := capability.ProbeName(ownerPrefix, role.Name)
-	if len(sessionName) > maxSessionNameLen {
-		sessionName = sessionName[:maxSessionNameLen]
-	}
-	input.RoleSessionName = aws.String(sessionName)
+	// Fitted the same way an issuance session name is: the probe suffix is what
+	// makes two concurrent probes distinct, so it is the role name that gives way.
+	input.RoleSessionName = aws.String(
+		ownertag.FitName(ownerPrefix, sanitiseSessionName(role.Name), capability.ProbeSuffix(), maxSessionNameLen))
 	duration := int32(probeDurationSeconds)
 	input.DurationSeconds = &duration
 	return input

@@ -86,7 +86,7 @@ func (c *fakeIAMMinterClient) DeleteAccessKey(_ context.Context, accessKeyID str
 	c.store.mu.Lock()
 	defer c.store.mu.Unlock()
 	if _, ok := c.store.keys[accessKeyID]; !ok {
-		return fmt.Errorf("iam DeleteAccessKey failed (%s): no such key", errNoSuchEntity)
+		return &iamAPIError{Action: "DeleteAccessKey", Code: errNoSuchEntity, Message: "no such key"}
 	}
 	delete(c.store.keys, accessKeyID)
 	return nil
@@ -448,7 +448,7 @@ func (c *failHealthIAMClient) DeleteAccessKey(_ context.Context, accessKeyID str
 	c.store.mu.Lock()
 	defer c.store.mu.Unlock()
 	if _, ok := c.store.keys[accessKeyID]; !ok {
-		return fmt.Errorf("iam DeleteAccessKey failed (%s): no such key", errNoSuchEntity)
+		return &iamAPIError{Action: "DeleteAccessKey", Code: errNoSuchEntity, Message: "no such key"}
 	}
 	delete(c.store.keys, accessKeyID)
 	return nil

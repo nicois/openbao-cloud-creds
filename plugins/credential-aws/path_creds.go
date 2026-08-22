@@ -114,16 +114,50 @@ type credsResponseArgs struct {
 	now      time.Time
 }
 
+// sessionNameFor builds the RoleSessionName for one issuance: this mount's owner
+// prefix, the role, and enough of the request id to tell one lease's session from
+// the next in CloudTrail.
+//
+// It used to be `prefix + role + "-" + reqID` truncated from the right at 64. With
+// the instance id in the prefix (A19) that overflows for EVERY role name, so the
+// request id was always partially cut and, from about 34 characters of role name,
+// gone entirely — every lease of that role sharing one session name, which is the
+// one thing a session name exists to prevent (A29).
+func sessionNameFor(ownerPrefix, roleName, reqID string) string {
+	role := sanitiseSessionName(roleName)
+	id := sanitiseSessionName(reqID)
+	// Shorten the request id BEFORE fitting. A whole UUID plus the owner prefix is
+	// already over AWS's cap by itself, so leaving it at full length would make
+	// FitName drop the role name from every session name we emit.
+	if len(ownerPrefix)+len(role)+1+len(id) > maxSessionNameLen && len(id) > sessionRequestIDKeepLen {
+		id = id[:sessionRequestIDKeepLen]
+	}
+	return ownertag.FitName(ownerPrefix, role, id, maxSessionNameLen)
+}
+
+// sanitiseSessionName maps anything outside AWS's session-name character class to
+// a hyphen. AWS rejects the whole AssumeRole on an illegal character, so a role
+// name a cloud-agnostic API accepted must not be able to fail issuance here.
+func sanitiseSessionName(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		case strings.ContainsRune(sessionNameExtraChars, r):
+			return r
+		default:
+			return '-'
+		}
+	}, s)
+}
+
 // buildAssumeRoleInput assembles the STS AssumeRoleInput for a role, including
-// the truncated session name, optional session tags, and optional external ID.
+// the fitted session name, optional session tags, and optional external ID.
 func buildAssumeRoleInput(ownerPrefix string, role *awsRole, roleName, reqID string) *sts.AssumeRoleInput {
 	// The session name is this cloud's owner tag: it is what CloudTrail shows and what
-	// distinguishes this mount's sessions from another mount's (A19).
-	sessionName := ownerPrefix + roleName + "-" + reqID
-	// AWS session name max 64 chars, alphanumeric + =,.@-_
-	if len(sessionName) > maxSessionNameLen {
-		sessionName = sessionName[:maxSessionNameLen]
-	}
+	// distinguishes this mount's sessions from another mount's (A19), and the request
+	// id is what distinguishes one lease from the next.
+	sessionName := sessionNameFor(ownerPrefix, roleName, reqID)
 
 	durationSeconds := int32(role.DefaultTTL.Seconds())
 	input := &sts.AssumeRoleInput{
