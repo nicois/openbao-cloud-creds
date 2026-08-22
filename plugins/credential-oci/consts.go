@@ -57,3 +57,10 @@ const (
 	fieldMinterExpiryWarn      = "minter_expiry_warn"
 	fieldRotationCheckInterval = "rotation_check_interval"
 )
+
+// Reconcile modes. Constified because they appear in the schema description, the
+// mode validation and the response.
+const (
+	modeNormal = "normal"
+	modeDryRun = "dry_run"
+)

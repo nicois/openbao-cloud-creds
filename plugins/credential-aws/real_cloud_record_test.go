@@ -57,6 +57,7 @@ const (
 func redactIdentifiers(value string) string {
 	value = accessKeyShaped.ReplaceAllString(value, fmt.Sprintf(redactedIdentifierFormat, "access-key-id"))
 	value = principalShaped.ReplaceAllString(value, fmt.Sprintf(redactedIdentifierFormat, "principal-id"))
+	value = uuidShaped.ReplaceAllString(value, fmt.Sprintf(redactedIdentifierFormat, "request-id"))
 	return accountShaped.ReplaceAllString(value, fmt.Sprintf(redactedIdentifierFormat, "account-id"))
 }
 
@@ -200,6 +201,7 @@ func (rt *recordingTransport) refuseOnLeak(action string, encoded []byte) {
 		"AWS account id": accountShaped,
 		"access key id":  accessKeyShaped,
 		"principal id":   principalShaped,
+		"request id":     uuidShaped,
 	} {
 		if match := shape.Find(encoded); match != nil {
 			rt.t.Fatalf("REFUSING TO WRITE %s: a %s survived redaction (%q). Recordings are committed "+

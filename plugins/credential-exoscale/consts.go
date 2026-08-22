@@ -91,3 +91,10 @@ const (
 	fieldReconcileCadence = "reconcile_cadence"
 	fieldMinterExpiryWarn = "minter_expiry_warn"
 )
+
+// Reconcile modes. Constified because they appear in the schema description, the
+// mode validation and the response.
+const (
+	modeNormal = "normal"
+	modeDryRun = "dry_run"
+)

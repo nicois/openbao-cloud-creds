@@ -69,7 +69,14 @@ var redactKeys = map[string]bool{
 // of a response we have not seen.
 var (
 	emailShaped = regexp.MustCompile(`[\w.+%-]+@[\w-]+\.[\w.-]+`)
-	uuidShaped  = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	// No \b anchors: in a recording the UUID sits inside JSON-escaped XML
+	// (`\u003e24027357-...`), and `\u003e` ENDS in a word character, so a leading
+	// word boundary never matches and the rule silently found nothing. Copied from
+	// the DO recorder, where UUIDs sit in quoted JSON values and the anchors did
+	// work — a guard carried across without checking it still applies, which is the
+	// audit's own cross-cutting finding happening inside the fix for it.
+	// Over-matching is the safe direction for a scrubber.
+	uuidShaped = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 )
 
 // redactedIdentifier replaces an account identifier. Unlike a credential it keeps
@@ -156,6 +163,12 @@ func (rt *recordingTransport) write(req *http.Request, resp *http.Response, body
 	if bytes.Contains(encoded, []byte(doTokenPrefix)) {
 		rt.t.Fatalf("REFUSING TO WRITE %s %s: the bytes contain %q, so something token-shaped is "+
 			"unredacted", req.Method, req.URL.Path, doTokenPrefix)
+	}
+	if match := uuidShaped.Find(encoded); match != nil {
+		rt.t.Fatalf("REFUSING TO WRITE %s %s: a UUID survived redaction (%q). redactIdentifiers "+
+			"replaces UUIDs in JSON string VALUES, but a request path is written raw — so a "+
+			"DELETE /v2/tokens/<uuid> recording would have committed it (A29).",
+			req.Method, req.URL.Path, match)
 	}
 	if match := emailShaped.Find(encoded); match != nil {
 		rt.t.Fatalf("REFUSING TO WRITE %s %s: an email address survived redaction (%d chars). "+

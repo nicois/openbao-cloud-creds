@@ -1,5 +1,5 @@
 {
-  "body": "\u003cErrorResponse xmlns=\"https://sts.amazonaws.com/doc/2011-06-15/\"\u003e\n  \u003cError\u003e\n    \u003cType\u003eSender\u003c/Type\u003e\n    \u003cCode\u003eValidationError\u003c/Code\u003e\n    \u003cMessage\u003e1 validation error detected: Value '43201' at 'durationSeconds' failed to satisfy constraint: Member must have value less than or equal to 43200\u003c/Message\u003e\n  \u003c/Error\u003e\n  \u003cRequestId\u003e7e9d3d6a-40eb-4766-bb22-9923d6388ad9\u003c/RequestId\u003e\n\u003c/ErrorResponse\u003e\n",
+  "body": "\u003cErrorResponse xmlns=\"https://sts.amazonaws.com/doc/2011-06-15/\"\u003e\n  \u003cError\u003e\n    \u003cType\u003eSender\u003c/Type\u003e\n    \u003cCode\u003eValidationError\u003c/Code\u003e\n    \u003cMessage\u003e1 validation error detected: Value '43201' at 'durationSeconds' failed to satisfy constraint: Member must have value less than or equal to 43200\u003c/Message\u003e\n  \u003c/Error\u003e\n  \u003cRequestId\u003e{redacted:request-id}\u003c/RequestId\u003e\n\u003c/ErrorResponse\u003e\n",
   "content_type": "text/xml",
   "request": {
     "action": "AssumeRole"

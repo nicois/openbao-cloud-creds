@@ -62,6 +62,19 @@ var (
 	accessKeyShaped = regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`)
 	// principalShaped covers IAM user (AIDA) and role (AROA) unique ids.
 	principalShaped = regexp.MustCompile(`\b(?:AIDA|AROA)[0-9A-Z]{17,}\b`)
+	// uuidShaped catches AWS request ids. The DO recorder has had this rule since
+	// an email address reached a committed fixture; the AWS recorder did not, so
+	// three real request ids were committed to a public repo (A29 in
+	// docs/audit-2026-08-22.md). A request id is not a credential, but it is
+	// operational detail about a real account and it is not what a fixture is for.
+	// No \b anchors: in a recording the UUID sits inside JSON-escaped XML
+	// (`\u003e24027357-...`), and `\u003e` ENDS in a word character, so a leading
+	// word boundary never matches and the rule silently found nothing. Copied from
+	// the DO recorder, where UUIDs sit in quoted JSON values and the anchors did
+	// work — a guard carried across without checking it still applies, which is the
+	// audit's own cross-cutting finding happening inside the fix for it.
+	// Over-matching is the safe direction for a scrubber.
+	uuidShaped = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 )
 
 // secretElements are the XML elements whose text content is a credential in the
@@ -162,6 +175,7 @@ func assertNoIdentifiers(t *testing.T, name, body string) {
 		"AWS account id": accountShaped,
 		"access key id":  accessKeyShaped,
 		"principal id":   principalShaped,
+		"request id":     uuidShaped,
 	} {
 		if match := shape.FindString(body); match != "" {
 			t.Errorf("%s leaks a %s (%q). Recordings are committed to a public repo; extend the "+

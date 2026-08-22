@@ -2,6 +2,7 @@ package credentialaws
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,6 +17,9 @@ type STSClient interface {
 	GetCallerIdentity(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
 }
 
+// httpTimeout caps an STS call, matching the other nine plugins.
+const httpTimeout = 30 * time.Second
+
 // newRealSTSClient creates a real AWS STS client using static credentials.
 func newRealSTSClient(accessKeyID, secretAccessKey, region, endpoint string) STSClient {
 	opts := func(o *sts.Options) {
@@ -26,6 +30,10 @@ func newRealSTSClient(accessKeyID, secretAccessKey, region, endpoint string) STS
 		if endpoint != "" {
 			o.BaseEndpoint = aws.String(endpoint)
 		}
+		// Every other plugin caps its client at 30s; this one had no timeout at
+		// all, so a response or body read could hang indefinitely — reachable from
+		// the health-check worker, whose context carries no deadline (A29).
+		o.HTTPClient = &http.Client{Timeout: httpTimeout}
 	}
 	return sts.New(sts.Options{}, opts)
 }

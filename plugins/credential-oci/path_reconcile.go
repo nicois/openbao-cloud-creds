@@ -167,7 +167,17 @@ func (p *reconcilePass) reconcileRoleTokens(ctx context.Context, client OCIIAMCl
 
 func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	mode := d.Get("mode").(string)
-	dryRun := mode == "dry_run"
+	// mode used to be compared for equality with no validation, so "dryrun",
+	// "dry-run" and "DRY_RUN" all ran a LIVE destructive pass and the response then
+	// reported dry_run=false after the fact (A29 in docs/audit-2026-08-22.md). An
+	// unrecognised mode on a destructive endpoint must be refused, not guessed.
+	switch mode {
+	case modeNormal, modeDryRun:
+	default:
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"mode must be %q or %q, got %q", modeNormal, modeDryRun, mode), nil
+	}
+	dryRun := mode == modeDryRun
 
 	if b.anyHealthyMinter() == nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "cannot reconcile: no healthy minter available"), nil
