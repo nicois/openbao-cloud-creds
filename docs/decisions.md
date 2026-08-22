@@ -777,3 +777,62 @@ because it genuinely needs a person: we cannot identify the upstream credential,
 the owner-tag reconciler will only reclaim it once its own tracking entry is gone.
 The alternative — keeping the lease as a marker of the problem — keeps a marker
 nobody reads and a retry loop nobody wants, and still leaks the credential.
+
+## Why the credential shape is named in the envelope and pinnable on the request
+
+The `credential` block is deliberately cloud-specific — an AWS session is three
+fields, EdgeGrid is four, a GCP token is two — so a client had exactly one way to know
+what it was about to parse: knowing which cloud it had asked, and hard-coding the
+shape. That holds until a cloud serves a *second* shape, and clouds do. AWS SES over
+SMTP needs `{username, password}`: the SMTP password is a deterministic HMAC
+derivation from an IAM secret and the region (no API call, nothing extra stored), but
+SMTP `AUTH` carries only two values and an STS session credential is a *triple* — there
+is nowhere to put the session token. So SES-over-SMTP cannot be served by the same
+AssumeRole path as everything else on that cloud, and the moment it exists "which
+cloud" stops determining "which shape".
+
+Two things follow, and the second is the one worth the API change.
+
+**The envelope states the shape** (`metadata.credential_kind`), so an unpinned reader
+still learns what it received instead of inferring it.
+
+**The client may pin the shape it can parse** (`credential_kind=<kind>` on a credential
+read), and a mismatch is a specific, non-retryable-as-is error. That inverts the
+compatibility problem: adding a shape becomes *additive*, because an older client
+either keeps receiving the shape it asked for or receives an error naming both shapes —
+never a payload it silently misparses. Without the pin, adding a shape to a cloud is a
+breaking change for every client of that cloud, whether or not the operator meant it to
+be.
+
+Decisions inside that:
+
+- **The pin is optional, not required.** Omitting it serves the read (and reports the
+  kind), which is how a human explores with `bao read` and how every client written
+  before this existed keeps working. Requiring it would buy a guarantee nobody asked
+  for and make the ergonomic path the one people work around. A pin is a client
+  *capability declaration*, and a client that has none makes no claim.
+- **It is checked before the role is loaded or anything is minted.** A caller that
+  cannot parse the answer must not cost an upstream credential, and on the four clouds
+  whose credentials have no natural expiry a minted-then-discarded credential is a leak
+  the reconciler has to clean up. The conformance and e2e cases both assert the upstream
+  count is unchanged on a refused pin, because "refuse after minting" would pass a
+  naive test.
+- **It earns a new `error_code`.** The rule here is that a code exists only if a client
+  would act differently, and this is the one refusal a client can resolve *without an
+  operator*: a library that can parse two shapes retries asking for the other.
+  Everything else in the "do not retry, fix config" bucket needs a human.
+- **A kind names a payload, not a cloud.** GCP and OVH both emit
+  `{access_token, token_type}` and both declare `oauth2_bearer`, so pinning it is a
+  statement about parsing rather than about geography. That is enforced by a test over
+  the registry — two clouds sharing a kind must declare identical key sets — because it
+  is a claim about ten separate plugins. Where a shape is genuinely cloud-specific the
+  name says so; inventing a generic name for EdgeGrid's quadruple would describe nothing.
+- **The served kind is a per-plugin constant today, not a role field.** Each cloud
+  serves one shape, so a constant is the honest encoding, and the comment at each site
+  says it becomes a function of the role when a cloud gains a second. The enforcement
+  point is already in the right place, so that change stays local.
+
+What this does NOT decide is whether SES-over-SMTP gets built. It needs a long-lived
+IAM key, which is a phased-rotation problem (the OCI strategy) rather than a JIT one —
+see the SES note in that section. The shape mechanism is worth having regardless,
+because it is the thing that has to exist *before* a second shape, not after.

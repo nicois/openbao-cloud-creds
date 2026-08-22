@@ -26,6 +26,12 @@ func (b *backend) credsPaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
+				fieldCredentialKind: {
+					Type: framework.TypeString,
+					Description: "Optional: the credential shape the caller can parse. " +
+						"A mismatch is refused with credential_kind_unsupported instead of " +
+						"returning a payload the caller cannot read",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{Callback: b.pathCredsRead},
@@ -50,6 +56,12 @@ func (b *backend) secretAzure() *framework.Secret {
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
+
+	// Checked first, and before any mint — see RequireCredentialKind for why.
+	if errResp := credenvelope.RequireCredentialKind(
+		d.Get(fieldCredentialKind).(string), servedCredentialKind); errResp != nil {
+		return errResp, nil
+	}
 
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
@@ -173,11 +185,12 @@ func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
 		Renewable:    false, // endDateTime is fixed at mint — see pathCredsRenew
 		CredentialID: a.pwResp.KeyID,
 		// The secret belongs to this app registration.
-		Scope:     a.role.AppObjectID,
-		ScopeKind: credenvelope.ScopeKindIdentity,
-		IssuedBy:  "cloud-creds-azure/v0.1",
-		MinterSet: a.setName,
-		MinterID:  a.minterID,
+		Scope:          a.role.AppObjectID,
+		ScopeKind:      credenvelope.ScopeKindIdentity,
+		CredentialKind: servedCredentialKind,
+		IssuedBy:       "cloud-creds-azure/v0.1",
+		MinterSet:      a.setName,
+		MinterID:       a.minterID,
 	})
 }
 

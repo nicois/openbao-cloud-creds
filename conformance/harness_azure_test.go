@@ -55,6 +55,7 @@ func azureHarness(t *testing.T) plugintest.Harness {
 		},
 		IssuePath:              issuePath,
 		CredentialKeys:         []string{"client_id", "client_secret", "tenant_id"},
+		CredentialKind:         "azure_client_secret",
 		OptionalCredentialKeys: []string{"subscription_id"},
 		ScopeKind:              "identity",
 		SecretType:             "azure_client_secret",

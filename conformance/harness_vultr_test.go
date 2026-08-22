@@ -46,6 +46,7 @@ func vultrHarness(t *testing.T) plugintest.Harness {
 		},
 		IssuePath:             issuePath,
 		CredentialKeys:        []string{"api_key"},
+		CredentialKind:        "bearer_token",
 		ScopeKind:             "acl",
 		SecretType:            "vultr_user",
 		LeaseInternalDataKeys: []string{"upstream_user_id", "role", "minter_set", "minter_id"},

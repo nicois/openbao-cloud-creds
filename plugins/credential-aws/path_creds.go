@@ -34,6 +34,12 @@ func (b *backend) credsPaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
+				fieldCredentialKind: {
+					Type: framework.TypeString,
+					Description: "Optional: the credential shape the caller can parse. " +
+						"A mismatch is refused with credential_kind_unsupported instead of " +
+						"returning a payload the caller cannot read",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{Callback: b.pathCredsRead},
@@ -59,6 +65,12 @@ func (b *backend) secretAWS() *framework.Secret {
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
+
+	// Checked first, and before any mint — see RequireCredentialKind for why.
+	if errResp := credenvelope.RequireCredentialKind(
+		d.Get(fieldCredentialKind).(string), servedCredentialKind); errResp != nil {
+		return errResp, nil
+	}
 
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
@@ -223,11 +235,12 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		Renewable:    false,
 		CredentialID: accessKeyID,
 		// The session ASSUMES this IAM role; its permissions are the role's.
-		Scope:     args.role.IAMRoleARN,
-		ScopeKind: credenvelope.ScopeKindRole,
-		IssuedBy:  "cloud-creds-aws/v0.1",
-		MinterSet: args.sel.setID,
-		MinterID:  args.sel.minterID,
+		Scope:          args.role.IAMRoleARN,
+		ScopeKind:      credenvelope.ScopeKindRole,
+		CredentialKind: servedCredentialKind,
+		IssuedBy:       "cloud-creds-aws/v0.1",
+		MinterSet:      args.sel.setID,
+		MinterID:       args.sel.minterID,
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)

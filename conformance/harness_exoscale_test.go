@@ -52,6 +52,7 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 		},
 		IssuePath:             issuePath,
 		CredentialKeys:        []string{"key", "secret"},
+		CredentialKind:        "key_secret",
 		ScopeKind:             "role",
 		SecretType:            "exoscale_api_key",
 		LeaseInternalDataKeys: []string{"upstream_key_id", "role", "minter_set", "minter_id"},

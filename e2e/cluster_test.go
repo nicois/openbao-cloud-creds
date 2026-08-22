@@ -233,6 +233,34 @@ func (c *cluster) read(path string) *api.Secret {
 	return secret
 }
 
+// readWithData is a read carrying query parameters. It exists for credential_kind:
+// a pin is passed on a READ, so it travels as a query parameter through OpenBao's
+// HTTP layer and the plugin RPC boundary before reaching framework.FieldData — a path
+// no in-process test exercises, because those call the handler with a Data map
+// directly (docs/openbao-integration-gaps.md).
+func (c *cluster) readWithData(path string, data map[string][]string) *api.Secret {
+	c.t.Helper()
+	secret, err := c.client.Logical().ReadWithData(path, data)
+	if err != nil {
+		c.t.Fatalf("read %s with %v failed: %v\nlog:\n%s", path, data, err, c.logTail())
+	}
+	if secret == nil {
+		c.t.Fatalf("read %s with %v returned no secret", path, data)
+	}
+	return secret
+}
+
+// readExpectingError is for the requests that MUST be refused. It returns the error
+// so the caller can assert on the code the client actually receives.
+func (c *cluster) readExpectingError(path string, data map[string][]string) error {
+	c.t.Helper()
+	secret, err := c.client.Logical().ReadWithData(path, data)
+	if err == nil {
+		c.t.Fatalf("read %s with %v was expected to fail; it returned %v", path, data, secret)
+	}
+	return err
+}
+
 func (c *cluster) logTail() string {
 	info, err := os.Stat(c.logPath)
 	if err != nil {

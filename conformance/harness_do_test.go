@@ -43,6 +43,7 @@ func doHarness(t *testing.T) plugintest.Harness {
 		},
 		IssuePath:             issuePath,
 		CredentialKeys:        []string{"token", "scopes"},
+		CredentialKind:        "scoped_token",
 		ScopeKind:             "scopes",
 		SecretType:            "do_token",
 		LeaseInternalDataKeys: []string{"upstream_token_id", "role", "minter_set", "minter_id"},

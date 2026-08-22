@@ -26,6 +26,12 @@ func (b *backend) credsPaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
+				fieldCredentialKind: {
+					Type: framework.TypeString,
+					Description: "Optional: the credential shape the caller can parse. " +
+						"A mismatch is refused with credential_kind_unsupported instead of " +
+						"returning a payload the caller cannot read",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{Callback: b.pathCredsRead},
@@ -50,6 +56,12 @@ func (b *backend) secretGCP() *framework.Secret {
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
+
+	// Checked first, and before any mint — see RequireCredentialKind for why.
+	if errResp := credenvelope.RequireCredentialKind(
+		d.Get(fieldCredentialKind).(string), servedCredentialKind); errResp != nil {
+		return errResp, nil
+	}
 
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
@@ -83,18 +95,8 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	ttlSeconds := int(time.Until(expiresAt).Seconds())
 
-	// GCP and OVH issue OAuth2 access tokens, which carry NO upstream identifier —
-	// unlike the other eight clouds, whose credential_id is the cloud's own id. This
-	// used to be an unsalted SHA-256 of the token's own first 16 characters, which was
-	// worse than useless: it correlates with nothing in any cloud's records, two
-	// credentials sharing a prefix collide, and it published a digest of secret
-	// material as an identifier (A29 in docs/audit-2026-08-22.md).
-	//
-	// The request id is used instead. It is not a cloud identifier and does not pretend
-	// to be one — cloud-side correlation on these two clouds goes through the target
-	// entity plus the time window — but it does join this credential to the OpenBao
-	// audit device and to this plugin's own log lines, which is a question that can
-	// actually be answered.
+	// This cloud's token carries no upstream id, so the request id stands in — see
+	// OpaqueCredentialID for why, and for what it does and does not claim to identify.
 	credentialID := credenvelope.OpaqueCredentialID(req.ID)
 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
@@ -109,11 +111,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		Renewable:    false,
 		CredentialID: credentialID,
 		// The token impersonates this service account; role scopes narrow it further.
-		Scope:     role.ServiceAccountEmail,
-		ScopeKind: credenvelope.ScopeKindIdentity,
-		IssuedBy:  "cloud-creds-gcp/v0.1",
-		MinterSet: setName,
-		MinterID:  minterID,
+		Scope:          role.ServiceAccountEmail,
+		ScopeKind:      credenvelope.ScopeKindIdentity,
+		CredentialKind: servedCredentialKind,
+		IssuedBy:       "cloud-creds-gcp/v0.1",
+		MinterSet:      setName,
+		MinterID:       minterID,
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)

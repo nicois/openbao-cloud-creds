@@ -24,6 +24,12 @@ func (b *backend) credsPaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
+				fieldCredentialKind: {
+					Type: framework.TypeString,
+					Description: "Optional: the credential shape the caller can parse. " +
+						"A mismatch is refused with credential_kind_unsupported instead of " +
+						"returning a payload the caller cannot read",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{Callback: b.pathCredsRead},
@@ -48,6 +54,12 @@ func (b *backend) secretUpCloud() *framework.Secret {
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
+
+	// Checked first, and before any mint — see RequireCredentialKind for why.
+	if errResp := credenvelope.RequireCredentialKind(
+		d.Get(fieldCredentialKind).(string), servedCredentialKind); errResp != nil {
+		return errResp, nil
+	}
 
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
@@ -82,6 +94,29 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
+	return b.buildCredsResponse(ctx, req, credsResponseArgs{
+		role: role, roleName: roleName, sel: sel, token: tokenResp, now: now,
+	}), nil
+}
+
+// credsResponseArgs bundles the inputs to buildCredsResponse, so splitting the handler
+// does not mean threading six parameters through it.
+type credsResponseArgs struct {
+	role     *upcloudRole
+	roleName string
+	sel      selectedMinter
+	token    *tokenResponse
+	now      time.Time
+}
+
+// buildCredsResponse assembles the envelope, records the tracking entry and returns the
+// lease. Split from the mint so the handler reads as decide-then-mint and this reads as
+// report-what-was-minted.
+func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, args credsResponseArgs) *logical.Response {
+	role, roleName, now := args.role, args.roleName, args.now
+	setName, minterID, client := args.sel.setID, args.sel.minterID, args.sel.client
+	tokenResp := args.token
+
 	emitLeaseIssued(roleName)
 
 	expiresAt := upstreamExpiry(tokenResp.ExpiresAt, now, role.DefaultTTL)
@@ -101,11 +136,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		// account can. Saying so is the honest answer; the role used to carry a
 		// `scopes` field that was reported here and never sent upstream (A29).
 		// UpCloud's token API takes no scope, ACL or role parameter.
-		Scope:     "",
-		ScopeKind: credenvelope.ScopeKindAccount,
-		IssuedBy:  "cloud-creds-upcloud/v0.1",
-		MinterSet: setName,
-		MinterID:  minterID,
+		Scope:          "",
+		ScopeKind:      credenvelope.ScopeKindAccount,
+		CredentialKind: servedCredentialKind,
+		IssuedBy:       "cloud-creds-upcloud/v0.1",
+		MinterSet:      setName,
+		MinterID:       minterID,
 	})
 
 	// Track active token for reconciler
@@ -123,7 +159,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 			b.Logger().Error("failed to persist active-token record; revoked upstream credential",
 				"token_id", tokenResp.ID, "error", err)
 			return credenvelope.ErrorResponse(credenvelope.ErrInternal,
-				"failed to persist credential tracking record"), nil
+				"failed to persist credential tracking record")
 		}
 	}
 
@@ -136,7 +172,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	resp.Secret.TTL = role.DefaultTTL
 	resp.Secret.MaxTTL = role.MaxTTL
 
-	return resp, nil
+	return resp
 }
 
 func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {

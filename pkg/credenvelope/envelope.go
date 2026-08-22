@@ -9,7 +9,11 @@ import "time"
 //	v2 added minter_set / minter_id provenance to metadata.
 //	v3 added metadata.scope_kind, because metadata.scope alone meant ten different
 //	   things and a client had no way to tell which (see ScopeKind).
-const APIVersion = "3"
+//	v4 added metadata.credential_kind, which names the SHAPE of the credential block
+//	   (see CredentialKind). It is intended to be the LAST breaking envelope change
+//	   of this sort: once a client can pin the shape it parses, a new shape is
+//	   additive rather than breaking.
+const APIVersion = "4"
 
 // ScopeKind says how to READ metadata.scope. It exists because `scope` was one
 // field name carrying ten different meanings — a fine-grained scope list on DO, an
@@ -71,9 +75,12 @@ type Metadata struct {
 	// ScopeKind is ScopeKindAccount.
 	Scope string `json:"scope"`
 	// ScopeKind says how to read Scope. Added in api_version 3.
-	ScopeKind  ScopeKind `json:"scope_kind"`
-	IssuedBy   string    `json:"issued_by"`
-	APIVersion string    `json:"api_version"`
+	ScopeKind ScopeKind `json:"scope_kind"`
+	// CredentialKind names the shape of the Credential block, so a client knows what
+	// it is parsing without inferring it from the cloud. Added in api_version 4.
+	CredentialKind CredentialKind `json:"credential_kind"`
+	IssuedBy       string         `json:"issued_by"`
+	APIVersion     string         `json:"api_version"`
 	// MinterSet and MinterID record which minting credential issued this
 	// credential, for audit provenance.
 	MinterSet string `json:"minter_set"`
@@ -95,18 +102,19 @@ type Envelope struct {
 
 // EnvelopeParams collects the inputs needed to construct an Envelope.
 type EnvelopeParams struct {
-	Cloud        string
-	Role         string
-	Credential   map[string]interface{}
-	ExpiresAt    time.Time
-	TTLSeconds   int
-	Renewable    bool
-	CredentialID string
-	Scope        string
-	ScopeKind    ScopeKind
-	IssuedBy     string
-	MinterSet    string
-	MinterID     string
+	Cloud          string
+	Role           string
+	Credential     map[string]interface{}
+	ExpiresAt      time.Time
+	TTLSeconds     int
+	Renewable      bool
+	CredentialID   string
+	Scope          string
+	ScopeKind      ScopeKind
+	CredentialKind CredentialKind
+	IssuedBy       string
+	MinterSet      string
+	MinterID       string
 }
 
 // NewEnvelope constructs an Envelope from the given parameters, stamping the
@@ -121,12 +129,13 @@ func NewEnvelope(p EnvelopeParams) *Envelope {
 		Renewable:    p.Renewable,
 		CredentialID: p.CredentialID,
 		Metadata: Metadata{
-			Scope:      p.Scope,
-			ScopeKind:  p.ScopeKind,
-			IssuedBy:   p.IssuedBy,
-			APIVersion: APIVersion,
-			MinterSet:  p.MinterSet,
-			MinterID:   p.MinterID,
+			Scope:          p.Scope,
+			ScopeKind:      p.ScopeKind,
+			CredentialKind: p.CredentialKind,
+			IssuedBy:       p.IssuedBy,
+			APIVersion:     APIVersion,
+			MinterSet:      p.MinterSet,
+			MinterID:       p.MinterID,
 		},
 	}
 }
@@ -143,12 +152,13 @@ func (e *Envelope) ToMap() map[string]interface{} {
 		"renewable":     e.Renewable,
 		"credential_id": e.CredentialID,
 		"metadata": map[string]interface{}{
-			"scope":       e.Metadata.Scope,
-			"scope_kind":  string(e.Metadata.ScopeKind),
-			"issued_by":   e.Metadata.IssuedBy,
-			"api_version": e.Metadata.APIVersion,
-			"minter_set":  e.Metadata.MinterSet,
-			"minter_id":   e.Metadata.MinterID,
+			"scope":           e.Metadata.Scope,
+			"scope_kind":      string(e.Metadata.ScopeKind),
+			"credential_kind": string(e.Metadata.CredentialKind),
+			"issued_by":       e.Metadata.IssuedBy,
+			"api_version":     e.Metadata.APIVersion,
+			"minter_set":      e.Metadata.MinterSet,
+			"minter_id":       e.Metadata.MinterID,
 		},
 	}
 }

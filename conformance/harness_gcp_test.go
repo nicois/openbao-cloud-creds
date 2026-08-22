@@ -73,6 +73,7 @@ func gcpHarness(t *testing.T) plugintest.Harness {
 		},
 		IssuePath:             issuePath,
 		CredentialKeys:        []string{"access_token", "token_type"},
+		CredentialKind:        "oauth2_bearer",
 		ScopeKind:             "identity",
 		SecretType:            "gcp_access_token",
 		LeaseInternalDataKeys: []string{"credential_id", "role", "minter_set", "minter_id"},

@@ -132,10 +132,17 @@ runtime `minter_insufficient_privilege` idea was deliberately not pursued (see
 | `upstream_request_invalid` | 400 | Cloud rejected the request's content (400/409/422) | No — fix config |
 | `config_invalid` | 400 | Operator input is missing, malformed, or names something that does not exist; also a failed capability probe | No — fix config |
 | `unsupported` | 501 | This cloud cannot do it and never will (e.g. minter rotation on DO/OVH/Vultr/OCI) | No — never |
+| `credential_kind_unsupported` | 400 | The caller pinned a `credential_kind` this role does not serve, or one this binary does not know | **Yes, asking for a different shape** — the one refusal a client can resolve without an operator |
 | `pool_exhausted` | 503 | All slots simultaneously unavailable | Yes, short backoff |
 | `lease_revoke_failed` | 500 | Couldn't revoke upstream cleanly | Operator alert |
 | `internal` | 500 | Plugin bug, or a failure none of the above describes | No |
 
+> **Revised 2026-08-23.** `credential_kind_unsupported` added with `metadata.credential_kind`
+> (api_version 4). It passes the "a client would act differently" test in a way no other
+> code does: a library that can parse two shapes retries asking for the other one, where
+> every other `do not retry, fix config` code needs a human. Adding it is additive and needs
+> no version bump — the bump is for the *envelope* field, not the code.
+>
 > **Revised 2026-08-22.** `consent_required` is **removed**: it was specified here and never emitted by any code path, so no client can have seen it. The five codes above it are new, and `upstream_timeout` is newly *reachable* — it previously required the cloud to answer 408/504, while every plugin's own 30s client timeout produced no status at all and was reported as `internal`. See [`known-issues.md`](known-issues.md) KI-010 and the audit in [`decisions.md`](decisions.md).
 
 ## Per-cloud strategies

@@ -53,6 +53,7 @@ func ovhHarness(t *testing.T) plugintest.Harness {
 		},
 		IssuePath:             issuePath,
 		CredentialKeys:        []string{"access_token", "token_type"},
+		CredentialKind:        "oauth2_bearer",
 		ScopeKind:             "account",
 		SecretType:            "ovh_access_token",
 		LeaseInternalDataKeys: []string{"credential_id", "role", "minter_set", "minter_id"},

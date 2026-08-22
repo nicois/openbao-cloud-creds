@@ -47,6 +47,7 @@ func upcloudHarness(t *testing.T) plugintest.Harness {
 		},
 		IssuePath:             issuePath,
 		CredentialKeys:        []string{"username", "password"},
+		CredentialKind:        "basic_auth",
 		ScopeKind:             "account",
 		SecretType:            "upcloud_token",
 		LeaseInternalDataKeys: []string{"upstream_token_id", "role", "minter_set", "minter_id"},

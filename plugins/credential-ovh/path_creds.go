@@ -27,6 +27,12 @@ func (b *backend) credsPaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the role",
 				},
+				fieldCredentialKind: {
+					Type: framework.TypeString,
+					Description: "Optional: the credential shape the caller can parse. " +
+						"A mismatch is refused with credential_kind_unsupported instead of " +
+						"returning a payload the caller cannot read",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{Callback: b.pathCredsRead},
@@ -51,6 +57,12 @@ func (b *backend) secretOVH() *framework.Secret {
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
+
+	// Checked first, and before any mint — see RequireCredentialKind for why.
+	if errResp := credenvelope.RequireCredentialKind(
+		d.Get(fieldCredentialKind).(string), servedCredentialKind); errResp != nil {
+		return errResp, nil
+	}
 
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
@@ -82,23 +94,38 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
+	return b.buildCredsResponse(ctx, req, credsResponseArgs{
+		role: role, roleName: roleName, sel: sel, accessToken: accessToken,
+		expiresIn: expiresIn, now: now,
+	}), nil
+}
+
+// credsResponseArgs bundles the inputs to buildCredsResponse, so splitting the handler
+// does not mean threading seven parameters through it.
+type credsResponseArgs struct {
+	role        *ovhRole
+	roleName    string
+	sel         selectedMinter
+	accessToken string
+	expiresIn   int
+	now         time.Time
+}
+
+// buildCredsResponse assembles the envelope, records the tracking entry and returns the
+// lease. Split from the mint so the handler reads as decide-then-mint and this reads as
+// report-what-was-minted.
+func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, args credsResponseArgs) *logical.Response {
+	role, roleName, now := args.role, args.roleName, args.now
+	setName, minterID := args.sel.setID, args.sel.minterID
+	accessToken, expiresIn := args.accessToken, args.expiresIn
+
 	emitLeaseIssued(roleName)
 
 	expiresAt := now.Add(time.Duration(expiresIn) * time.Second)
 	ttlSeconds := expiresIn
 
-	// GCP and OVH issue OAuth2 access tokens, which carry NO upstream identifier —
-	// unlike the other eight clouds, whose credential_id is the cloud's own id. This
-	// used to be an unsalted SHA-256 of the token's own first 16 characters, which was
-	// worse than useless: it correlates with nothing in any cloud's records, two
-	// credentials sharing a prefix collide, and it published a digest of secret
-	// material as an identifier (A29 in docs/audit-2026-08-22.md).
-	//
-	// The request id is used instead. It is not a cloud identifier and does not pretend
-	// to be one — cloud-side correlation on these two clouds goes through the target
-	// entity plus the time window — but it does join this credential to the OpenBao
-	// audit device and to this plugin's own log lines, which is a question that can
-	// actually be answered.
+	// This cloud's token carries no upstream id, so the request id stands in — see
+	// OpaqueCredentialID for why, and for what it does and does not claim to identify.
 	credentialID := credenvelope.OpaqueCredentialID(req.ID)
 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
@@ -112,12 +139,15 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		TTLSeconds:   ttlSeconds,
 		Renewable:    false,
 		CredentialID: credentialID,
-		// OVH tokens carry the whole account's privilege; there is no per-token scoping, and `scope` was the literal string "all", which read like a value rather than an absence.
-		Scope:     "",
-		ScopeKind: credenvelope.ScopeKindAccount,
-		IssuedBy:  "cloud-creds-ovh/v0.1",
-		MinterSet: setName,
-		MinterID:  minterID,
+		// OVH tokens carry the whole account's privilege: there is no per-token scoping.
+		// `scope` was the literal string "all", which read like a value rather than the
+		// absence of one.
+		Scope:          "",
+		ScopeKind:      credenvelope.ScopeKindAccount,
+		CredentialKind: servedCredentialKind,
+		IssuedBy:       "cloud-creds-ovh/v0.1",
+		MinterSet:      setName,
+		MinterID:       minterID,
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)
@@ -148,7 +178,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	resp.Secret.TTL = role.DefaultTTL
 	resp.Secret.MaxTTL = role.MaxTTL
 
-	return resp, nil
+	return resp
 }
 
 // pathCredsRevoke is a no-op for OVH access tokens — they expire naturally.

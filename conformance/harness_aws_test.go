@@ -66,6 +66,7 @@ func awsHarness(t *testing.T) plugintest.Harness {
 		},
 		IssuePath:             issuePath,
 		CredentialKeys:        []string{"access_key_id", "secret_access_key", "session_token"},
+		CredentialKind:        "sigv4_session",
 		ScopeKind:             "role",
 		SecretType:            "aws_sts_credentials",
 		LeaseInternalDataKeys: []string{"access_key_id", "role", "minter_set", "minter_id"},

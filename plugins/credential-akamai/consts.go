@@ -1,6 +1,10 @@
 package credentialakamai
 
-import "time"
+import (
+	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+)
 
 // cloudName is the cloud identifier used in stored config, response envelopes,
 // and the "cloud" metric label.
@@ -140,3 +144,17 @@ const (
 	fieldMintersKey = "minters"
 	neverExpiresKey = "never_expires"
 )
+
+// servedCredentialKind is the shape of the `credential` block this plugin emits, and
+// what a client may pin with `credential_kind` on a credential read.
+//
+// A constant because this cloud serves exactly one shape today. When a cloud gains a
+// second — AWS SES over SMTP is the live example, since the SMTP protocol has nowhere
+// to put a session token — this becomes a function of the ROLE, and the pin check
+// below is already the place that enforces it.
+const servedCredentialKind = credenvelope.KindEdgeGrid
+
+// fieldCredentialKind is the optional request field a client uses to pin the shape it
+// can parse. Omitting it still works and still tells the client what it got, in
+// metadata.credential_kind.
+const fieldCredentialKind = "credential_kind"

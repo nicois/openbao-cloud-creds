@@ -19,6 +19,12 @@ func (b *backend) credsPaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: descRoleName,
 				},
+				fieldCredentialKind: {
+					Type: framework.TypeString,
+					Description: "Optional: the credential shape the caller can parse. " +
+						"A mismatch is refused with credential_kind_unsupported instead of " +
+						"returning a payload the caller cannot read",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{Callback: b.pathCredsRead},
@@ -43,6 +49,12 @@ func (b *backend) secretOCI() *framework.Secret {
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
+
+	// Checked first, and before any mint — see RequireCredentialKind for why.
+	if errResp := credenvelope.RequireCredentialKind(
+		d.Get(fieldCredentialKind).(string), servedCredentialKind); errResp != nil {
+		return errResp, nil
+	}
 
 	// Load role from storage
 	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
@@ -107,11 +119,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		Renewable:    false,
 		CredentialID: best.TokenID,
 		// The auth token belongs to this OCI user.
-		Scope:     role.UserOCID,
-		ScopeKind: credenvelope.ScopeKindIdentity,
-		IssuedBy:  "cloud-creds-oci/v0.1",
-		MinterSet: best.MinterSet,
-		MinterID:  best.MinterID,
+		Scope:          role.UserOCID,
+		ScopeKind:      credenvelope.ScopeKindIdentity,
+		CredentialKind: servedCredentialKind,
+		IssuedBy:       "cloud-creds-oci/v0.1",
+		MinterSet:      best.MinterSet,
+		MinterID:       best.MinterID,
 	})
 
 	resp := b.Secret("oci_auth_token").Response(env.ToMap(), map[string]interface{}{

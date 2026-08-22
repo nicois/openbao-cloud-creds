@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,98 @@ func RunLeaseContractSuite(t *testing.T, h Harness) {
 	})
 	t.Run("CredentialBlockIsTheDeclaredShape", func(t *testing.T) { assertCredentialBlock(t, h) })
 	t.Run("ScopeKindIsFromTheClosedVocabulary", func(t *testing.T) { assertScopeKind(t, h) })
+	t.Run("CredentialKindIsDeclaredAndPinnable", func(t *testing.T) { assertCredentialKind(t, h) })
+}
+
+// assertCredentialKind covers the shape contract from both ends: the envelope names
+// the shape it is returning, and a client may PIN the shape it can parse.
+//
+// Pinning is what makes a new credential shape additive instead of breaking. A cloud
+// can grow a second shape — AWS SES over SMTP needs `{username, password}` from a
+// static key, because SMTP has nowhere to put a session token — and an older client
+// keeps working, because it keeps getting the shape it asked for or an error it can
+// act on, never a payload it silently misparses (A28 follow-up).
+//
+// The mismatch case also asserts that NOTHING was minted, which is the property that
+// makes the refusal cheap rather than wasteful: the pin is checked before the role is
+// loaded, so a caller that cannot parse the answer never causes an upstream mint it
+// will then throw away.
+func assertCredentialKind(t *testing.T, h Harness) {
+	t.Helper()
+	if h.CredentialKind == "" {
+		t.Fatalf("%s: the harness declares no CredentialKind, so a client has no way to know what "+
+			"shape it is parsing except by hard-coding the cloud", h.Cloud)
+	}
+	b, storage := newConfiguredBackend(t, h)
+
+	resp, err := issue(t, b, storage, h.IssuePath)
+	if err != nil || resp == nil || resp.IsError() {
+		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
+	}
+	metadata, ok := resp.Data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("envelope metadata is %T, want an object", resp.Data["metadata"])
+	}
+	kind, _ := metadata["credential_kind"].(string)
+	if kind != h.CredentialKind {
+		t.Fatalf("metadata.credential_kind is %q, declared %q", kind, h.CredentialKind)
+	}
+	if !credenvelope.ValidCredentialKind(credenvelope.CredentialKind(kind)) {
+		t.Fatalf("credential_kind %q is not in the closed vocabulary %v",
+			kind, credenvelope.AllCredentialKinds())
+	}
+
+	t.Run("MatchingPinIsServed", func(t *testing.T) {
+		pinned := issueWithKind(t, b, storage, h.IssuePath, h.CredentialKind)
+		if pinned == nil || pinned.IsError() {
+			t.Fatalf("a client pinning the shape this role actually serves was refused: %v", pinned)
+		}
+	})
+
+	t.Run("MismatchedPinIsRefusedWithoutMinting", func(t *testing.T) {
+		other := otherKind(h.CredentialKind)
+		before := h.ProvisionedCount()
+
+		refused := issueWithKind(t, b, storage, h.IssuePath, other)
+		if refused == nil || !refused.IsError() {
+			t.Fatalf("a client pinning %q was served this role's %q payload anyway: %v — silently "+
+				"handing a client a shape it did not ask for is the failure pinning exists to prevent",
+				other, h.CredentialKind, refused)
+		}
+		if got := refused.Error().Error(); !strings.Contains(got, string(credenvelope.ErrCredentialKindUnsupported)) {
+			t.Errorf("the refusal should carry %q so a client that can parse another shape knows to "+
+				"ask for it, got: %v", credenvelope.ErrCredentialKindUnsupported, got)
+		}
+		if after := h.ProvisionedCount(); after != before {
+			t.Errorf("upstream count went %d -> %d on a refused pin: a credential was minted for a "+
+				"caller that could not have used it", before, after)
+		}
+	})
+}
+
+// otherKind returns any kind from the vocabulary that is not the one given, so the
+// mismatch case does not need per-cloud data to know what to ask for wrongly.
+func otherKind(kind string) string {
+	for _, k := range credenvelope.AllCredentialKinds() {
+		if string(k) != kind {
+			return string(k)
+		}
+	}
+	return ""
+}
+
+func issueWithKind(t *testing.T, b logical.Backend, storage logical.Storage, path, kind string) *logical.Response {
+	t.Helper()
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.ReadOperation,
+		Path:      path,
+		Storage:   storage,
+		Data:      map[string]interface{}{"credential_kind": kind},
+	})
+	if err != nil {
+		t.Fatalf("credential read with credential_kind=%q errored: %v", kind, err)
+	}
+	return resp
 }
 
 // assertCredentialBlock pins the part of the payload a client actually consumes.

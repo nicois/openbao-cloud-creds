@@ -43,6 +43,8 @@ func runCase(t *testing.T, c *cluster, p e2ePlugin) {
 	want++
 	assertUpstream(t, tc, want)
 
+	want = assertCredentialKindPin(t, c, tc, mount, first, want)
+
 	assertLeaseIsTracked(t, c, first.LeaseID)
 	assertRenewContract(t, c, tc, first.LeaseID)
 
@@ -115,6 +117,11 @@ func assertEnvelope(t *testing.T, tc e2eCase, secret *api.Secret) {
 	metadata := nested(t, data, "metadata")
 	if got := str(t, metadata, "api_version"); got != credenvelope.APIVersion {
 		t.Errorf("envelope api_version is %q, want %q", got, credenvelope.APIVersion)
+	}
+	kind := str(t, metadata, "credential_kind")
+	if !credenvelope.ValidCredentialKind(credenvelope.CredentialKind(kind)) {
+		t.Errorf("envelope metadata.credential_kind is %q, which is not in the closed vocabulary %v: "+
+			"a client cannot know what shape it is parsing", kind, credenvelope.AllCredentialKinds())
 	}
 	if got := str(t, metadata, "minter_set"); got != defaultSet {
 		t.Errorf("envelope metadata.minter_set is %q, want %q", got, defaultSet)
@@ -230,4 +237,43 @@ func assertUpstream(t *testing.T, tc e2eCase, want int) {
 		time.Sleep(pollInterval)
 	}
 	t.Errorf("the fake holds %d credentials, want %d", got, want)
+}
+
+// assertCredentialKindPin drives the shape pin over real HTTP, which is the half of
+// the contract conformance structurally cannot reach: the pin is a query parameter on
+// a READ, so it has to survive OpenBao's HTTP layer and the plugin RPC boundary before
+// it becomes framework.FieldData. An in-process test calls the handler with a Data map
+// and would pass whether or not that plumbing works.
+//
+// Returns the updated upstream count, since a served read mints and a refused one must
+// not.
+func assertCredentialKindPin(t *testing.T, c *cluster, tc e2eCase, mount string,
+	issued *api.Secret, want int,
+) int {
+	t.Helper()
+	kind := str(t, nested(t, issued.Data, "metadata"), "credential_kind")
+
+	// Pinning what this role serves must be served — and must be the same shape.
+	pinned := c.readWithData(mount+"/"+issuePath, map[string][]string{"credential_kind": {kind}})
+	want++
+	if got := str(t, nested(t, pinned.Data, "metadata"), "credential_kind"); got != kind {
+		t.Errorf("a read pinned to %q returned credential_kind %q", kind, got)
+	}
+	assertUpstream(t, tc, want)
+
+	// Pinning a shape this role does not serve must be refused, with the code a client
+	// can act on, and WITHOUT minting: a caller that cannot parse the answer must not
+	// cost an upstream credential.
+	wrong := "basic_auth"
+	if kind == wrong {
+		wrong = "oauth2_bearer"
+	}
+	err := c.readExpectingError(mount+"/"+issuePath, map[string][]string{"credential_kind": {wrong}})
+	if !strings.Contains(err.Error(), string(credenvelope.ErrCredentialKindUnsupported)) {
+		t.Errorf("a refused pin reported %v, which does not carry %q — a client that can parse "+
+			"another shape has no way to know it should ask for one",
+			err, credenvelope.ErrCredentialKindUnsupported)
+	}
+	assertUpstream(t, tc, want)
+	return want
 }

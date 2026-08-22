@@ -177,6 +177,12 @@ type Harness struct {
 	// OptionalCredentialKeys may be present (Azure's subscription_id is set only when
 	// the role names one).
 	OptionalCredentialKeys []string
+	// CredentialKind is the metadata.credential_kind this cloud reports, from the
+	// closed vocabulary in pkg/credenvelope. It names the SHAPE of the credential
+	// block, so a client can pin the shape it is able to parse instead of inferring it
+	// from which cloud it asked.
+	CredentialKind string
+
 	// ScopeKind is the metadata.scope_kind this cloud reports, from the closed
 	// vocabulary in pkg/credenvelope. It tells a client how to read metadata.scope,
 	// which used to be one field name carrying ten different meanings.

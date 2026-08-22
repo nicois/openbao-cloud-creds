@@ -27,7 +27,7 @@ plugins/<x>/*_test  only what is true of <x> alone.
 | Category | What it protects |
 |---|---|
 | `reload` | config written by `pathConfigWrite` is re-read by `Factory`, `InitializeFunc` rehydrates + starts workers idempotently (KI-001, KI-007), and a persisted minter set that is invalid or from a newer schema is refused rather than loaded fail-open (A29, A30) |
-| `lease` | the response envelope and the lease core acts on agree — renewability and TTL — `internal_data` survives JSON (KI-008), and the declared `SecretType`/`LeaseInternalDataKeys`/`CredentialKeys`/`ScopeKind` are what the plugin actually emits (A28, A30) |
+| `lease` | the response envelope and the lease core acts on agree — renewability and TTL — `internal_data` survives JSON (KI-008), the declared `SecretType`/`LeaseInternalDataKeys`/`CredentialKeys`/`ScopeKind`/`CredentialKind` are what the plugin actually emits, and a caller may PIN the credential shape it can parse — a mismatch is refused before anything is minted (A28, A30) |
 | `perturbation` | a lease survives its minter disappearing mid-life (KI-002 class) |
 | `revoke` | revoke is idempotent; a second revoke is a clean no-op; and a revoke that *cannot* succeed (an `internal_data` key a newer binary renamed) releases the lease instead of retrying forever |
 | `capability` | the mint-then-delete probe rejects an incapable minter at *write* time, leaves no residue, respects `verify_minter_capability=false`, skips disabled roles, reuses a recent verdict rather than re-minting, and is refused while the cloud is throttling us (A29) |

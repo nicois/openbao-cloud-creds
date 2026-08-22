@@ -58,9 +58,21 @@ bao write cloud-creds/<cloud>/minter-sets/<set> minters=...             # one or
 bao write cloud-creds/<cloud>/roles/<role> minter_set=<set> <role fields>
 ```
 
-Minters live in named **minter sets**, not in `config`. Every role is bound to a required `minter_set` and mints only from that set's credentials — the isolation boundary for least-privilege and audit provenance. Each issued credential records its `minter_set` and `minter_id` in the response envelope metadata (`api_version` 2). Each set must independently satisfy the minter-validation rule (at least one `never_expires` minter, or at least two with ≥7-day expiry separation) — evaluated over the set's **active** (non-retired) minters.
+Minters live in named **minter sets**, not in `config`. Every role is bound to a required `minter_set` and mints only from that set's credentials — the isolation boundary for least-privilege and audit provenance. Each issued credential records its `minter_set` and `minter_id` in the response envelope metadata (`api_version` 4). Each set must independently satisfy the minter-validation rule (at least one `never_expires` minter, or at least two with ≥7-day expiry separation) — evaluated over the set's **active** (non-retired) minters.
 
 The `config` endpoint's operational fields include `reconcile_cadence`, `max_deletes_per_pass`, `minter_expiry_warn` (the near-expiry warning threshold, default 7 days), `minter_retire_grace` (how long a rotated-out minter stays usable before deletion, default 7 days — see below), `verify_minter_capability` (default **true** — see below), and `capability_cache_ttl` (how long a successful capability probe stands in for a fresh one, default 1h; 0 re-probes on every write). `minter_retire_grace` is **refused** on DO/OVH/Vultr/OCI, where minters cannot self-rotate and nothing is ever retired.
+
+### The credential shape is named, and a client can pin it
+
+The `credential` block is cloud-specific by nature — an AWS session is three fields, Akamai's EdgeGrid credential is four, a GCP token is two — so every response names its shape in `metadata.credential_kind` (`sigv4_session`, `oauth2_bearer`, `basic_auth`, `bearer_token`, `scoped_token`, `key_secret`, `azure_client_secret`, `edgegrid`, `oci_auth_token`). A client may **pin** the shape it is able to parse:
+
+```bash
+bao read cloud-creds/aws/creds/deploy credential_kind=sigv4_session
+```
+
+If the role serves a different shape the read is refused with `credential_kind_unsupported`, naming both shapes, **before anything is loaded or minted** — so a caller that could not have used the credential never causes one to be created. Omitting the pin still works and still tells you the shape in the response.
+
+This is what makes adding a shape backwards-compatible. A cloud can serve more than one: AWS SES over SMTP needs `{username, password}`, and cannot use an STS session at all, because SMTP `AUTH` carries only two values and there is nowhere to put the session token. When that shape appears, a client pinning `sigv4_session` keeps getting exactly what it asked for. A kind names a payload rather than a cloud, so two clouds emitting the same keys share one — GCP and OVH are both `oauth2_bearer` — and a conformance test over the whole registry enforces that rather than trusting it.
 
 ### Minter capability is verified, not assumed
 

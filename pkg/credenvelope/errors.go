@@ -36,6 +36,7 @@ import (
 //
 //	retry with backoff        upstream_unavailable, upstream_timeout, upstream_quota_exceeded
 //	do not retry, fix config  config_invalid, upstream_request_invalid, role_not_found, role_disabled, unsupported
+//	ask for a different shape credential_kind_unsupported
 //	do not retry, fix creds   upstream_auth_failed
 //	do not retry, page someone internal, lease_revoke_failed, entity_unavailable, pool_exhausted
 type ErrorCode string
@@ -47,6 +48,13 @@ const (
 	ErrRoleDisabled  ErrorCode = "role_disabled"
 	ErrConfigInvalid ErrorCode = "config_invalid"
 	ErrUnsupported   ErrorCode = "unsupported"
+
+	// ErrCredentialKindUnsupported: the client pinned a credential shape
+	// (credential_kind) that this role does not serve. It earns its own code because
+	// it is the one refusal a client can resolve WITHOUT an operator: a library that
+	// can parse two shapes retries asking for the other. Every other
+	// "do not retry, fix config" code needs a human.
+	ErrCredentialKindUnsupported ErrorCode = "credential_kind_unsupported"
 
 	// Upstream-shaped: the cloud answered, or failed to answer.
 	ErrUpstreamAuthFailed     ErrorCode = "upstream_auth_failed"
@@ -69,6 +77,7 @@ const (
 func AllCodes() []ErrorCode {
 	return []ErrorCode{
 		ErrRoleNotFound, ErrRoleDisabled, ErrConfigInvalid, ErrUnsupported,
+		ErrCredentialKindUnsupported,
 		ErrUpstreamAuthFailed, ErrUpstreamQuotaExceeded, ErrUpstreamTimeout,
 		ErrUpstreamUnavailable, ErrUpstreamRequestInvalid, ErrEntityUnavailable,
 		ErrPoolExhausted, ErrLeaseRevokeFailed, ErrInternal,

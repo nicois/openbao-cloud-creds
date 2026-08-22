@@ -129,3 +129,59 @@ func pad(cell, column string) string {
 	}
 	return cell
 }
+
+// TestOneCredentialKindMeansOneKeySet enforces the promise that makes shape pinning
+// useful: a kind names a PAYLOAD, not a cloud.
+//
+// GCP and OVH both emit `{access_token, token_type}` and both declare
+// `oauth2_bearer`, so a client that can parse one can parse the other — and pinning
+// `oauth2_bearer` is a statement about what it can parse rather than about which
+// cloud it happens to be talking to. That only holds if two clouds sharing a kind
+// really do emit the same keys, which is a claim about ten separate plugins and
+// therefore worth a test rather than a comment.
+//
+// It also catches the likelier mistake in the other direction: reusing an existing
+// kind for a payload that differs by one field, which would silently break every
+// client that pinned it.
+func TestOneCredentialKindMeansOneKeySet(t *testing.T) {
+	type declaration struct {
+		cloud    string
+		required []string
+		optional []string
+	}
+	byKind := map[string][]declaration{}
+
+	for _, entry := range registry {
+		h := entry.New(t)
+		if h.CredentialKind == "" {
+			t.Errorf("%s declares no CredentialKind", h.Cloud)
+			continue
+		}
+		byKind[h.CredentialKind] = append(byKind[h.CredentialKind], declaration{
+			cloud:    h.Cloud,
+			required: sortedCopy(h.CredentialKeys),
+			optional: sortedCopy(h.OptionalCredentialKeys),
+		})
+	}
+
+	for kind, declarations := range byKind {
+		first := declarations[0]
+		for _, other := range declarations[1:] {
+			if strings.Join(first.required, ",") != strings.Join(other.required, ",") ||
+				strings.Join(first.optional, ",") != strings.Join(other.optional, ",") {
+				t.Errorf("credential_kind %q is declared by %s as required=%v optional=%v and by %s as "+
+					"required=%v optional=%v. A kind names a payload, so a client pinning it must get "+
+					"the same keys whichever cloud answers — either the payloads should match or the "+
+					"kinds should differ",
+					kind, first.cloud, first.required, first.optional,
+					other.cloud, other.required, other.optional)
+			}
+		}
+	}
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
