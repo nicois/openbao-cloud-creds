@@ -44,6 +44,9 @@ const (
 	// CategoryReconcilerSafety covers the owner-tag invariant: the reconciler
 	// must never delete an entity the plugin did not create.
 	CategoryReconcilerSafety Category = "reconciler-safety"
+	// CategoryMinterVisibility covers what an operator can see: per-minter
+	// lifecycle and health on the set read endpoint, and no credential material.
+	CategoryMinterVisibility Category = "minter-visibility"
 	// CategoryErrorTaxonomy covers the error_code contract: every error a client
 	// can receive carries a code from the published vocabulary, and the code says
 	// what the client should do. Catches the class KI-010 belongs to — a real

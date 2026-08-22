@@ -18,7 +18,6 @@ import (
 const (
 	rotatePath        = "minter-sets/default/rotate"
 	rotationParamsKey = "rotation_params"
-	neverExpiresKey   = "never_expires"
 	idKey             = "id"
 	testUsername      = "minter-svc-user"
 	testHost          = "akab-test.luna.akamaiapis.net"

@@ -252,3 +252,40 @@ func ParseRetryAfter(header http.Header, now time.Time) time.Duration {
 	}
 	return 0
 }
+
+// Snapshot is a point-in-time, secret-free view of a minter's health, for the
+// minter-set read endpoint.
+//
+// None of this was observable. The read endpoint returned {name, minter_count,
+// minter_ids} on all ten plugins while recovery state, last success, failure count
+// and the rate-limit cooldown all sat in the same process — so after a rotation an
+// operator could not see which minter was retired or when the sweep would act, and
+// during an outage could not see that a minter was auth_failing or cooling down.
+// With metrics going nowhere in the documented deployment (A12), that left
+// log-grepping as the only channel (A27 in docs/audit-2026-08-22.md).
+type Snapshot struct {
+	State               string `json:"state"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+	LastSuccessAt       string `json:"last_success_at,omitempty"`
+	Selectable          bool   `json:"selectable"`
+	RateLimited         bool   `json:"rate_limited"`
+	RetryInSeconds      int    `json:"retry_in_seconds,omitempty"`
+}
+
+// Snapshot renders the machine's current state. It deliberately exposes no
+// credential material and no upstream error text — only the operator-facing facts.
+func (sm *StateMachine) Snapshot(now time.Time) Snapshot {
+	snap := Snapshot{
+		State:               string(sm.State()),
+		ConsecutiveFailures: sm.ConsecutiveFailures(),
+		Selectable:          sm.Selectable(now),
+		RateLimited:         sm.InRateLimitCooldown(now),
+	}
+	if last := sm.LastSuccessAt(); !last.IsZero() {
+		snap.LastSuccessAt = last.UTC().Format(time.RFC3339)
+	}
+	if retryIn := sm.RetryIn(now); retryIn > 0 {
+		snap.RetryInSeconds = int(retryIn.Seconds())
+	}
+	return snap
+}

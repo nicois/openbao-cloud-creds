@@ -93,3 +93,10 @@ const (
 	// maxSessionPolicyARNs is STS's documented limit on managed session policies.
 	maxSessionPolicyARNs = 10
 )
+
+// Minter-set field names, constified because they appear in the schema, the
+// write parser and the read response.
+const (
+	fieldMintersKey = "minters"
+	neverExpiresKey = "never_expires"
+)

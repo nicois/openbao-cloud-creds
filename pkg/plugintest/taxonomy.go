@@ -165,3 +165,48 @@ func siblingPath(path, lastSegment string) string {
 	}
 	return path[:cut+1] + lastSegment
 }
+
+// RunMinterVisibilitySuite asserts an operator can see what they need to act on.
+//
+// The read endpoint returned {name, minter_count, minter_ids} on all ten plugins
+// while recovery state, last success, failure count and the rate-limit cooldown all
+// sat in the same process. After a rotation an operator could not see which minter was
+// retired or when the sweep would delete it; during an outage they could not see a
+// minter was auth_failing. With metrics reaching nothing in the documented deployment
+// (A12), that left log-grepping as the only channel (A27).
+//
+// It also asserts the negative that matters: no credential material in the response.
+func RunMinterVisibilitySuite(t *testing.T, h Harness) {
+	t.Helper()
+	b, storage := newConfiguredBackend(t, h)
+
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.ReadOperation, Path: h.SetPath, Storage: storage,
+	})
+	if err != nil || resp == nil || resp.IsError() {
+		t.Fatalf("reading %s failed: err=%v resp=%v", h.SetPath, err, resp)
+	}
+
+	minters, ok := resp.Data["minters"].([]map[string]interface{})
+	if !ok || len(minters) == 0 {
+		t.Fatalf("%s exposes no per-minter status (%T), so a minter's health is invisible to the "+
+			"operator who has to act on it", h.SetPath, resp.Data["minters"])
+	}
+	for _, minter := range minters {
+		if minter["id"] == nil || minter["id"] == "" {
+			t.Error("a minter entry has no id, so it cannot be acted on")
+		}
+		if _, present := minter["health"]; !present {
+			t.Errorf("minter %v carries no health snapshot: recovery state is in this process and "+
+				"still unobservable", minter["id"])
+		}
+		if _, leaked := minter["token"]; leaked {
+			t.Errorf("minter %v exposes its token; the read endpoint must never return credential "+
+				"material", minter["id"])
+		}
+		if _, leaked := minter["rotation_params"]; leaked {
+			t.Errorf("minter %v exposes rotation_params, which carry upstream credential ids",
+				minter["id"])
+		}
+	}
+}

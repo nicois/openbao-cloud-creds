@@ -75,6 +75,13 @@ var suites = []suite{
 		},
 	},
 	{
+		name: CategoryMinterVisibility,
+		run:  RunMinterVisibilitySuite,
+		// No extra wiring: SetPath is already required of every harness, so no cloud
+		// can opt out of being observable.
+		requires: func(_ Harness) []string { return nil },
+	},
+	{
 		name: CategoryErrorTaxonomy,
 		run:  RunErrorTaxonomySuite,
 		// No extra wiring, so NO cloud can opt out of the contract that its

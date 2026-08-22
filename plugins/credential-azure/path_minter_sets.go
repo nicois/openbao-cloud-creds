@@ -20,8 +20,8 @@ func (b *backend) minterSetPaths() []*framework.Path {
 		{
 			Pattern: "minter-sets/" + framework.GenericNameRegex("name"),
 			Fields: map[string]*framework.FieldSchema{
-				fieldName: {Type: framework.TypeString, Description: "Name of the minter set"},
-				"minters": {Type: framework.TypeSlice, Description: "Minter credentials in this set (each token is client_id:client_secret)"},
+				fieldName:       {Type: framework.TypeString, Description: "Name of the minter set"},
+				fieldMintersKey: {Type: framework.TypeSlice, Description: "Minter credentials in this set (each token is client_id:client_secret)"},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathMinterSetWrite},
@@ -48,13 +48,13 @@ func (b *backend) minterSetPaths() []*framework.Path {
 	}
 }
 
-// parseMinters converts the raw "minters" field into cloudconfig.Minters.
+// parseMinters converts the raw fieldMintersKey field into cloudconfig.Minters.
 // Each Azure minter token must be of the form client_id:client_secret.
 // minterSetStoragePrefix is where minter sets are persisted.
 const minterSetStoragePrefix = "minter-sets/"
 
 func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
-	raw := d.Get("minters")
+	raw := d.Get(fieldMintersKey)
 	if raw == nil {
 		return nil, fmt.Errorf("minters is required")
 	}
@@ -77,7 +77,7 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 			Token:     token,
 			CreatedAt: time.Now(),
 		}
-		if ne, ok := mMap["never_expires"].(bool); ok && ne {
+		if ne, ok := mMap[neverExpiresKey].(bool); ok && ne {
 			minter.NeverExpires = true
 		}
 		if exp, ok := mMap["expires_at"].(string); ok {
@@ -362,6 +362,11 @@ func (b *backend) pathMinterSetRead(ctx context.Context, req *logical.Request, d
 	}
 	return &logical.Response{Data: map[string]interface{}{
 		"name": set.Name, "minter_count": len(set.Minters), "minter_ids": ids,
+		// Per-minter lifecycle and health. All of this was in this process and none
+		// of it was observable, so an operator could not see which minter was
+		// retired, when the sweep would delete it, or that a minter was auth_failing
+		// or rate-limited (A27). No credential material is included.
+		fieldMintersKey: b.minterStatus(&set),
 	}}, nil
 }
 
@@ -387,17 +392,25 @@ func (b *backend) pathMinterSetList(ctx context.Context, req *logical.Request, d
 func (b *backend) loadMinterSet(set *cloudconfig.MinterSet) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	previous := b.minterSets[set.Name]
 	states := make(map[string]*minterState, len(set.Minters))
 	for i := range set.Minters {
 		m := set.Minters[i]
-		states[m.ID] = &minterState{
-			set:    set.Name,
-			minter: m,
-			sm: recovery.NewStateMachine(recovery.Config{
-				AuthFailThreshold:   authFailThreshold,
-				HealthCheckInterval: healthCheckInterval,
-			}),
+		// Carry the recovery state machine forward for a minter we already know.
+		// Building a fresh one discarded everything it had learned: an AuthFailing
+		// minter became Healthy and immediately selectable again, and an open
+		// rate-limit cooldown was thrown away — on any unrelated minter-set write,
+		// not merely on a reload (A25 in docs/audit-2026-08-22.md). That made
+		// RSK-007's "the operator never sees a sustained signal" strictly worse than
+		// documented, because a routine write reset the signal.
+		sm := recovery.NewStateMachine(recovery.Config{
+			AuthFailThreshold:   authFailThreshold,
+			HealthCheckInterval: healthCheckInterval,
+		})
+		if existing, known := previous[m.ID]; known && existing.sm != nil {
+			sm = existing.sm
 		}
+		states[m.ID] = &minterState{set: set.Name, minter: m, sm: sm}
 	}
 	b.minterSets[set.Name] = states
 }
@@ -452,4 +465,38 @@ func (b *backend) loadStoredSet(ctx context.Context, storage logical.Storage, na
 		return nil, err
 	}
 	return &set, nil
+}
+
+// minterStatus renders each minter's lifecycle and health for the read endpoint.
+// Secrets are structurally absent: only ids, timestamps, flags and the recovery
+// snapshot are emitted, never Token or RotationParams.
+func (b *backend) minterStatus(set *cloudconfig.MinterSet) []map[string]interface{} {
+	now := time.Now()
+	b.mu.RLock()
+	states := b.minterSets[set.Name]
+	b.mu.RUnlock()
+
+	out := make([]map[string]interface{}, 0, len(set.Minters))
+	for i := range set.Minters {
+		m := set.Minters[i]
+		entry := map[string]interface{}{
+			"id":            m.ID,
+			neverExpiresKey: m.NeverExpires,
+			"retired":       m.Retired,
+		}
+		if !m.CreatedAt.IsZero() {
+			entry["created_at"] = m.CreatedAt.UTC().Format(time.RFC3339)
+		}
+		if !m.ExpiresAt.IsZero() {
+			entry["expires_at"] = m.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+		if !m.RetiredAt.IsZero() {
+			entry["retired_at"] = m.RetiredAt.UTC().Format(time.RFC3339)
+		}
+		if state, known := states[m.ID]; known && state.sm != nil {
+			entry["health"] = state.sm.Snapshot(now)
+		}
+		out = append(out, entry)
+	}
+	return out
 }

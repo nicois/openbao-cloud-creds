@@ -15,7 +15,6 @@ import (
 // goconst count for these literals stays below threshold.
 const (
 	pathConfigKey       = "config"
-	fieldMintersKey     = "minters"
 	pathMinterSetWrite  = "minter-sets/default"
 	fieldTokenEndpoint  = "token_endpoint"
 	fieldExpiresAt      = "expires_at"
