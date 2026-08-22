@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -30,10 +31,10 @@ func probeRecorder(probed *[]string, fail error) ChecksFunc {
 		if role.Shape == "" {
 			role.Shape = shapeRead
 		}
-		return ChecksPerMinter(set, role.Name, role.Shape, func(minter cloudconfig.Minter) func(context.Context) error {
-			return func(context.Context) error {
+		return ChecksPerMinter(set, role.Name, role.Shape, func(minter cloudconfig.Minter) func(context.Context) (int, error) {
+			return func(context.Context) (int, error) {
 				*probed = append(*probed, minter.ID+"/"+role.Name)
-				return fail
+				return http.StatusForbidden, fail
 			}
 		})
 	}
@@ -186,8 +187,8 @@ func TestChecksPerMinter_SkipsRetiredMinters(t *testing.T) {
 		{ID: "live", NeverExpires: true},
 		{ID: "gone", NeverExpires: true, Retired: true},
 	}}
-	checks := ChecksPerMinter(set, "role-a", shapeRead, func(cloudconfig.Minter) func(context.Context) error {
-		return func(context.Context) error { return nil }
+	checks := ChecksPerMinter(set, "role-a", shapeRead, func(cloudconfig.Minter) func(context.Context) (int, error) {
+		return func(context.Context) (int, error) { return http.StatusOK, nil }
 	})
 	if len(checks) != 1 || checks[0].Minter != "live" {
 		t.Fatalf("expected only the active minter probed, got %+v", checks)

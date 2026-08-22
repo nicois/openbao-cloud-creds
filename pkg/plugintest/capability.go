@@ -1,6 +1,7 @@
 package plugintest
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -11,6 +12,12 @@ import (
 // capability rejection carries (from pkg/capability). Asserting on it keeps the
 // failure attributable to the probe rather than to some other validation.
 const capabilityFailureFragment = "capability verification failed"
+
+// rateLimitRefusalFragment is the text a probe refused by a cooldown carries (from
+// capability.Throttled). It is asserted separately from capabilityFailureFragment
+// because the two are different answers: "retry shortly" versus "this minter cannot
+// mint what you asked for".
+const rateLimitRefusalFragment = "rate-limit cooldown"
 
 // RunCapabilitySuite covers the configuration-time capability probe. Every
 // assertion here is cloud-agnostic: what the probe MINTS differs per cloud (and
@@ -43,6 +50,12 @@ func RunCapabilitySuite(t *testing.T, h Harness) {
 	})
 	t.Run("VerificationDisabledSkipsProbe", func(t *testing.T) {
 		capVerificationDisabled(t, h)
+	})
+	t.Run("RepeatedWriteReusesTheProbeVerdict", func(t *testing.T) {
+		capRepeatedWriteIsCached(t, h)
+	})
+	t.Run("ProbeRefusedWhileTheCloudIsThrottlingUs", func(t *testing.T) {
+		capProbeRespectsRateLimit(t, h)
 	})
 }
 
@@ -175,5 +188,68 @@ func minterIDs(t *testing.T, h Harness, b logical.Backend, storage logical.Stora
 	default:
 		t.Fatalf("minter-set read returned minter_ids of type %T, want []string", resp.Data["minter_ids"])
 		return nil
+	}
+}
+
+// capRepeatedWriteIsCached: an identical configuration write must not re-mint.
+//
+// A probe is a real mint against a real quota, and the fan-out is (active minters x
+// bound roles), so an idempotent `terraform apply` used to re-mint all of it every
+// time — and on the clouds with no revoke API each of those probes leaves a live
+// credential behind (A29).
+//
+// Proved without a mint counter, by denying minting after the first write: if the
+// second write still probes it is rejected, and if it reuses the verdict it
+// succeeds. That also states the cache's contract exactly — it stands in for a
+// mint the cloud would otherwise have to serve.
+func capRepeatedWriteIsCached(t *testing.T, h Harness) {
+	b, storage := newBackend(t, h)
+	h.ConfigureProbe(t, b, storage, true)
+
+	if resp := h.WriteProbeRole(t, b, storage); resp != nil && resp.IsError() {
+		t.Fatalf("first role write was rejected: %v", resp.Error())
+	}
+
+	denyMint(t, h)
+	if resp := h.WriteProbeRole(t, b, storage); resp != nil && resp.IsError() {
+		t.Fatalf("re-writing an identical role probed the cloud again (and was rejected because "+
+			"minting is now denied): %v. A repeated write must reuse the verdict inside "+
+			"capability_cache_ttl, or every re-apply re-mints the whole fan-out", resp.Error())
+	}
+}
+
+// capProbeRespectsRateLimit: probes are inside the circuit breaker, in both
+// directions. A probe that earns a 429 must open the cooldown, and while that
+// window is open the next write must be refused as throttled — with the wait —
+// rather than sent to a cloud that has just refused us, and rather than reported as
+// a verdict on the minter that nobody has established (A29).
+func capProbeRespectsRateLimit(t *testing.T, h Harness) {
+	if h.FailNextMintWithStatus == nil {
+		t.Skipf("%s: FailNextMintWithStatus is not wired, so a 429 cannot be forced and the "+
+			"probe's rate-limit behaviour is not asserted for this cloud", h.Cloud)
+	}
+	b, storage := newBackend(t, h)
+	h.ConfigureProbe(t, b, storage, true)
+
+	if reason := h.FailNextMintWithStatus(t, http.StatusTooManyRequests); reason != "" {
+		t.Skipf("%s: %s", h.Cloud, reason)
+	}
+	first := h.WriteProbeRole(t, b, storage)
+	if first == nil || !first.IsError() {
+		t.Fatalf("a role write whose probe was rate-limited succeeded: %v", first)
+	}
+
+	// Only the FIRST mint was forced to fail, so a second probe would now succeed.
+	// The write must still be refused — by the cooldown the first probe opened.
+	second := h.WriteProbeRole(t, b, storage)
+	if second == nil || !second.IsError() {
+		t.Fatalf("the write immediately after a rate-limited probe was allowed to mint again: %v. "+
+			"A probe outside the circuit breaker hammers a cloud that has just throttled the read "+
+			"path sharing the same quota", second)
+	}
+	if got := second.Error().Error(); !strings.Contains(got, rateLimitRefusalFragment) {
+		t.Fatalf("the second write was refused, but not as a rate limit: %q. A cooldown and an "+
+			"incapable minter are different answers, and only one of them is worth retrying",
+			got)
 	}
 }

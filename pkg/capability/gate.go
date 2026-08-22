@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
@@ -27,6 +28,17 @@ const skipHint = " (set verify_minter_capability=false on the config endpoint to
 // so the probe exercises exactly the representation that will be persisted.
 type ChecksFunc func(set *cloudconfig.MinterSet, roleJSON []byte) []Check
 
+// probeFanOutNoticeThreshold is the number of distinct probes in one write above
+// which the count is logged.
+//
+// There is deliberately no hard CAP. A cap large enough for a legitimate set (five
+// minters across thirty roles) would never fire, and one small enough to fire would
+// block that set from ever being written except by turning verification off
+// entirely — trading a cost problem for a security one. Dedupe plus the cache is
+// what actually bounds the cost; this line is so an operator can SEE a fan-out
+// they did not intend, which is the case a cap was really aimed at.
+const probeFanOutNoticeThreshold = 20
+
 // Gate is the config-time capability check shared by every plugin: it turns a
 // set of probes into either nil (proceed with the write) or an operator-facing
 // error response (reject it).
@@ -38,6 +50,12 @@ type Gate struct {
 	// Enabled is false when the operator has set verify_minter_capability=false,
 	// in which case every Verify* method is a no-op.
 	Enabled bool
+	// Limiter shares the issuance path's rate-limit state with the probes; nil
+	// leaves probes outside the circuit breaker.
+	Limiter *Limiter
+	// CacheTTL is how long a successful probe stands in for a fresh one; zero
+	// disables the cache. See DefaultCacheTTL for the trade this makes.
+	CacheTTL time.Duration
 }
 
 // VerifySet proves every active minter in a candidate set can mint for every
@@ -56,7 +74,7 @@ func (g Gate) VerifySet(ctx context.Context, storage logical.Storage, set *cloud
 	for i := range roles {
 		all = append(all, checks(set, roles[i].Raw)...)
 	}
-	return g.run(ctx, all)
+	return g.run(ctx, storage, all)
 }
 
 // VerifySuccessor proves a rotation successor can mint everything the set's
@@ -86,31 +104,57 @@ func (g Gate) VerifyRole(ctx context.Context, storage logical.Storage, setName s
 	if set == nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", setName)
 	}
-	return g.run(ctx, checks(set, roleJSON))
+	return g.run(ctx, storage, checks(set, roleJSON))
 }
 
 // run executes the probes and renders the outcome.
-func (g Gate) run(ctx context.Context, checks []Check) *logical.Response {
-	result, err := Verify(ctx, checks)
-	if err != nil {
-		// The full error, upstream body and all, goes to the operator's log; the
-		// caller gets identities and a pointer to that log (A4).
-		if g.Logger != nil {
-			g.Logger.Warn("minter capability verification failed", "cloud", g.Cloud, "error", err)
-		}
-		var failure *Failure
-		if errors.As(err, &failure) {
-			return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
-				"minter capability verification failed: %s"+skipHint, failure.ClientMessage())
-		}
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
-			"minter capability verification failed"+skipHint)
+func (g Gate) run(ctx context.Context, storage logical.Storage, checks []Check) *logical.Response {
+	if n := len(Dedupe(checks)); n > probeFanOutNoticeThreshold && g.Logger != nil {
+		g.Logger.Info("capability verification will mint a large number of probe credentials",
+			"cloud", g.Cloud, "probes", n,
+			"note", "each probe is a real mint against the cloud; a recent identical probe is "+
+				"reused for capability_cache_ttl")
 	}
-	if g.Logger != nil && (result.Ran > 0 || result.Skipped > 0) {
+	runner := Runner{
+		Limiter: g.Limiter,
+		Cache:   &Cache{Storage: storage, TTL: g.CacheTTL},
+	}
+	result, err := runner.Verify(ctx, checks)
+	if err != nil {
+		return g.renderFailure(err)
+	}
+	if g.Logger != nil && (result.Ran > 0 || result.Skipped > 0 || result.Cached > 0) {
 		g.Logger.Info("minter capability verified", "cloud", g.Cloud,
-			"probes", result.Ran, "skipped", result.Skipped)
+			"probes", result.Ran, "skipped", result.Skipped, "cached", result.Cached)
 	}
 	return nil
+}
+
+// renderFailure turns a verification error into the response the caller sees. The
+// three cases are deliberately distinct: a cooldown is "ask again", a *Failure is a
+// verdict on the minter, and anything else is ours.
+func (g Gate) renderFailure(err error) *logical.Response {
+	var throttled *Throttled
+	if errors.As(err, &throttled) {
+		if g.Logger != nil {
+			g.Logger.Warn("capability verification deferred by a rate-limit cooldown",
+				"cloud", g.Cloud, "minter_id", throttled.Minter, "retry_in", throttled.RetryIn)
+		}
+		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamQuotaExceeded,
+			"minter capability verification could not run: %v", throttled)
+	}
+	// The full error, upstream body and all, goes to the operator's log; the caller
+	// gets identities and a pointer to that log (A4).
+	if g.Logger != nil {
+		g.Logger.Warn("minter capability verification failed", "cloud", g.Cloud, "error", err)
+	}
+	var failure *Failure
+	if errors.As(err, &failure) {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"minter capability verification failed: %s"+skipHint, failure.ClientMessage())
+	}
+	return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+		"minter capability verification failed"+skipHint)
 }
 
 // ChecksPerMinter builds one Check per active minter in the set. Every active
@@ -119,16 +163,21 @@ func (g Gate) run(ctx context.Context, checks []Check) *logical.Response {
 // intermittently rather than not at all. shape describes the mint request (the
 // role fields that reach the cloud) and forms the dedup key together with the
 // minter ID; run builds the probe for one minter.
-func ChecksPerMinter(set *cloudconfig.MinterSet, roleName, shape string, run func(cloudconfig.Minter) func(context.Context) error) []Check {
+func ChecksPerMinter(set *cloudconfig.MinterSet, roleName, shape string, run func(cloudconfig.Minter) func(context.Context) (int, error)) []Check {
 	active := cloudconfig.ActiveMinters(set.Minters)
 	checks := make([]Check, 0, len(active))
 	for i := range active {
 		minter := active[i]
+		// A minter that will not marshal simply gets no fingerprint, and an
+		// unfingerprintable check is never cached — so the probe runs, which is the
+		// safe direction.
+		raw, _ := json.Marshal(minter)
 		checks = append(checks, Check{
-			Key:    minter.ID + "|" + shape,
-			Minter: minter.ID,
-			Roles:  []string{roleName},
-			Run:    run(minter),
+			Key:        minter.ID + "|" + shape,
+			Minter:     minter.ID,
+			Roles:      []string{roleName},
+			Run:        run(minter),
+			MinterJSON: raw,
 		})
 	}
 	return checks

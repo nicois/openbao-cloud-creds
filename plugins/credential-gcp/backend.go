@@ -139,8 +139,6 @@ func machinesOf(states map[string]*minterState) []*recovery.StateMachine {
 	return machines
 }
 
-// ownerInstanceID returns this mount's owner instance id, minting and persisting one on
-// first use. It is cached because the id is immutable for the life of the mount, and
-// because the reconciler's lister and the capability probe both need it in places that
-// have no storage handle.
-//
+// There is deliberately no owner-instance accessor here. This cloud issues tokens
+// with no upstream name and has no lister, so it has no owner-tag surface to scope
+// — see A19's note that a guard belongs where the thing it guards exists.

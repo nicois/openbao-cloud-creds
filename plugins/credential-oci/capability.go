@@ -7,6 +7,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -35,8 +36,8 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 	if err := json.Unmarshal(roleJSON, &role); err != nil {
 		return nil
 	}
-	return capability.ChecksPerMinter(set, role.Name, "", func(_ cloudconfig.Minter) func(context.Context) error {
-		return func(_ context.Context) error { return capability.ErrUnsupported }
+	return capability.ChecksPerMinter(set, role.Name, "", func(_ cloudconfig.Minter) func(context.Context) (int, error) {
+		return func(_ context.Context) (int, error) { return credenvelope.StatusNone, capability.ErrUnsupported }
 	})
 }
 
@@ -65,9 +66,32 @@ func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Stor
 	return b.gate().VerifyRole(ctx, storage, role.MinterSet, capability.RoleJSON(role), b.capabilityChecks)
 }
 
-// gate snapshots the operator's verification setting for this backend.
+// gate snapshots the operator's verification settings for this backend, and hands
+// the probes the two things they used to lack: the read path's rate-limit state,
+// and a memory of what has recently been proved (A29).
 func (b *backend) gate() capability.Gate {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return capability.Gate{Cloud: cloudName, Logger: b.Logger(), Enabled: b.config.CapabilityVerificationEnabled()}
+	return capability.Gate{
+		Cloud:    cloudName,
+		Logger:   b.Logger(),
+		Enabled:  b.config.CapabilityVerificationEnabled(),
+		Limiter:  &capability.Limiter{States: b.minterStateByID},
+		CacheTTL: b.config.CapabilityCacheDuration(),
+	}
+}
+
+// minterStateByID finds a minter's recovery state machine by id, across every set,
+// so a probe can see (and open) the same rate-limit cooldown issuance uses. A
+// candidate minter being written for the first time has no state yet; nil then
+// means "unthrottled as far as we know", which is the only honest answer.
+func (b *backend) minterStateByID(minterID string) *recovery.StateMachine {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, states := range b.minterSets {
+		if ms, ok := states[minterID]; ok {
+			return ms.sm
+		}
+	}
+	return nil
 }

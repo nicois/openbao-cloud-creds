@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -152,6 +153,12 @@ func (b *backend) rotateDueSlots(ctx context.Context, storage logical.Storage, r
 
 // reconcileWorker runs the reconciliation logic from the background worker.
 func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) error {
+	// Housekeeping that must run whether or not the pass below can: an expired
+	// capability verdict is dead weight, and clearing entries when the TTL is zero
+	// is what makes capability_cache_ttl=0 mean "off" rather than "off from now on"
+	// (A29).
+	capability.SweepCache(ctx, storage, cloudName, b.Logger(), b.gate().CacheTTL)
+
 	roleNames, err := storage.List(ctx, "roles/")
 	if err != nil {
 		return err

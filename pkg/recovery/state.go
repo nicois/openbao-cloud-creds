@@ -105,7 +105,7 @@ func (sm *StateMachine) Record(o Outcome, at time.Time) {
 		// half-open probe, it must still be released, or one malformed request
 		// freezes a recovering minter for the whole ProbeGrace (A18). Two correct
 		// fixes interacting: the KI-010 exoneration and the breaker.
-		sm.releaseProbe()
+		sm.ReleaseProbe()
 		return
 	}
 	if code == credenvelope.ErrUpstreamQuotaExceeded {
@@ -213,9 +213,16 @@ func isAuthError(status int) bool {
 	return status == 401 || status == 403
 }
 
-// releaseProbe hands the half-open claim back without recording anything against
+// ReleaseProbe hands the half-open claim back without recording anything against
 // the minter, for an outcome that was not the minter's fault.
-func (sm *StateMachine) releaseProbe() {
+//
+// Exported for the capability probe, which must not indict a minter for a refusal
+// that is about a GRANT rather than a credential: a 403 on one role's mint shape
+// says the minter lacks that grant, and counting it as a credential failure would
+// walk a minter serving nine other roles toward AuthFailing because a tenth role
+// was written wrong (A29). Record uses it internally for the same reason, one level
+// up: an outcome that says nothing about this minter (A18).
+func (sm *StateMachine) ReleaseProbe() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.probeUntil = time.Time{}

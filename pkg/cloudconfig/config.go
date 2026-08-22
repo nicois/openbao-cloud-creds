@@ -24,13 +24,38 @@ type PluginConfig struct {
 	// reads as enabled — the fail-closed default, so a config written before this
 	// field existed does not silently lose the check.
 	VerifyMinterCapability *bool `json:"verify_minter_capability,omitempty"`
+
+	// CapabilityCacheTTL is how long a successful capability probe stands in for a
+	// fresh one, so a repeated configuration write does not re-mint the whole
+	// (minters x roles) fan-out. A nil pointer means "not configured", which reads
+	// as capability.DefaultCacheTTL; an explicit 0 disables the cache and re-probes
+	// every write.
+	CapabilityCacheTTL *time.Duration `json:"capability_cache_ttl,omitempty"`
 }
+
+// DefaultCapabilityCacheTTL is the default for CapabilityCacheTTL. It is declared
+// here rather than imported from pkg/capability because cloudconfig must not depend
+// on a package that depends on it; the two constants are asserted equal by
+// pkg/capability's tests.
+const DefaultCapabilityCacheTTL = time.Hour
 
 // CapabilityVerificationEnabled reports whether capability probes should run.
 // Enabled unless an operator has explicitly set verify_minter_capability=false,
 // including when there is no stored config at all.
 func (c *PluginConfig) CapabilityVerificationEnabled() bool {
 	return c == nil || c.VerifyMinterCapability == nil || *c.VerifyMinterCapability
+}
+
+// CapabilityCacheDuration reports how long a probe verdict stands. An operator's
+// explicit 0 is honoured (the cache off), which is why the field is a pointer.
+func (c *PluginConfig) CapabilityCacheDuration() time.Duration {
+	if c == nil || c.CapabilityCacheTTL == nil {
+		return DefaultCapabilityCacheTTL
+	}
+	if *c.CapabilityCacheTTL < 0 {
+		return 0
+	}
+	return *c.CapabilityCacheTTL
 }
 
 func DefaultConfig(cloud string) *PluginConfig {

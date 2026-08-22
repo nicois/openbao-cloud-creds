@@ -10,6 +10,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -32,7 +33,7 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 		return nil
 	}
 	shape := role.ACLs + "|" + role.EmailDomain
-	return capability.ChecksPerMinter(set, role.Name, shape, func(minter cloudconfig.Minter) func(context.Context) error {
+	return capability.ChecksPerMinter(set, role.Name, shape, func(minter cloudconfig.Minter) func(context.Context) (int, error) {
 		return b.probeMint(minter, &role)
 	})
 }
@@ -41,8 +42,8 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 // deletes it. A failed delete does not fail the probe — minting is what was being
 // proved, and the probe sub-user carries the owner prefix in its name so the
 // reconciler reclaims it.
-func (b *backend) probeMint(minter cloudconfig.Minter, role *vultrRole) func(context.Context) error {
-	return func(ctx context.Context) error {
+func (b *backend) probeMint(minter cloudconfig.Minter, role *vultrRole) func(context.Context) (int, error) {
+	return func(ctx context.Context) (int, error) {
 		client := b.clientForMinter(minter)
 		// The probe name carries the owner prefix, and the email is formed from it
 		// in the role's own domain, so the request differs from a real issuance only
@@ -51,13 +52,13 @@ func (b *backend) probeMint(minter cloudconfig.Minter, role *vultrRole) func(con
 		email := probeName + "@" + emailDomainFor(role)
 		user, status, err := client.CreateUser(ctx, probeName, email, parseACLs(role.ACLs))
 		if err != nil {
-			return fmt.Errorf("probe sub-user creation with acls %q returned %d: %w", role.ACLs, status, err)
+			return status, fmt.Errorf("probe sub-user creation with acls %q returned %d: %w", role.ACLs, status, err)
 		}
 		if delStatus, delErr := client.DeleteUser(ctx, user.User.ID); delErr != nil && delStatus != http.StatusNotFound {
 			b.Logger().Warn("capability probe sub-user could not be deleted; left for the owner-tag reconciler",
 				fieldCloud, cloudName, "user_id", user.User.ID, "status", delStatus, "error", delErr)
 		}
-		return nil
+		return status, nil
 	}
 }
 
@@ -99,5 +100,26 @@ func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Stor
 func (b *backend) gate() capability.Gate {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return capability.Gate{Cloud: cloudName, Logger: b.Logger(), Enabled: b.config.CapabilityVerificationEnabled()}
+	return capability.Gate{
+		Cloud:    cloudName,
+		Logger:   b.Logger(),
+		Enabled:  b.config.CapabilityVerificationEnabled(),
+		Limiter:  &capability.Limiter{States: b.minterStateByID},
+		CacheTTL: b.config.CapabilityCacheDuration(),
+	}
+}
+
+// minterStateByID finds a minter's recovery state machine by id, across every set,
+// so a probe can see (and open) the same rate-limit cooldown issuance uses. A
+// candidate minter being written for the first time has no state yet; nil then
+// means "unthrottled as far as we know", which is the only honest answer.
+func (b *backend) minterStateByID(minterID string) *recovery.StateMachine {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, states := range b.minterSets {
+		if ms, ok := states[minterID]; ok {
+			return ms.sm
+		}
+	}
+	return nil
 }

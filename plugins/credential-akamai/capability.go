@@ -11,6 +11,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -44,7 +45,7 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 		return nil
 	}
 	shape := role.APIAccess + "|" + strconv.Itoa(role.GroupID)
-	return capability.ChecksPerMinter(set, role.Name, shape, func(minter cloudconfig.Minter) func(context.Context) error {
+	return capability.ChecksPerMinter(set, role.Name, shape, func(minter cloudconfig.Minter) func(context.Context) (int, error) {
 		return b.probeMint(minter, &role)
 	})
 }
@@ -54,22 +55,22 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 // being proved, and the probe client's name carries the owner prefix, so the
 // reconciler reclaims it (it is an orphan by construction: probe clients are
 // never recorded in active-clients).
-func (b *backend) probeMint(minter cloudconfig.Minter, role *akamaiRole) func(context.Context) error {
-	return func(ctx context.Context) error {
+func (b *backend) probeMint(minter cloudconfig.Minter, role *akamaiRole) func(context.Context) (int, error) {
+	return func(ctx context.Context) (int, error) {
 		client, err := b.clientForMinter(minter)
 		if err != nil {
-			return fmt.Errorf("probe client could not be built: %w", err)
+			return credenvelope.StatusNone, fmt.Errorf("probe client could not be built: %w", err)
 		}
 		apiAccess, groupAccess := roleAccess(role)
 		created, status, err := client.CreateClient(ctx, capability.ProbeName(ownertag.Prefix(b.ownerInstance()), role.Name), apiAccess, groupAccess)
 		if err != nil {
-			return fmt.Errorf("probe api-client creation returned %d: %w", status, err)
+			return status, fmt.Errorf("probe api-client creation returned %d: %w", status, err)
 		}
 		if delStatus, delErr := client.DeleteClient(ctx, created.ClientID); delErr != nil && delStatus != http.StatusNotFound {
 			b.Logger().Warn("capability probe api client could not be deleted; left for the owner-tag reconciler",
 				fieldCloud, cloudName, fieldClientID, created.ClientID, "status", delStatus, "error", delErr)
 		}
-		return nil
+		return status, nil
 	}
 }
 
@@ -109,9 +110,32 @@ func (b *backend) verifySuccessorCapability(ctx context.Context, storage logical
 	return b.gate().VerifySuccessor(ctx, storage, setName, successor, b.capabilityChecks)
 }
 
-// gate snapshots the operator's verification setting for this backend.
+// gate snapshots the operator's verification settings for this backend, and hands
+// the probes the two things they used to lack: the read path's rate-limit state,
+// and a memory of what has recently been proved (A29).
 func (b *backend) gate() capability.Gate {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return capability.Gate{Cloud: cloudName, Logger: b.Logger(), Enabled: b.config.CapabilityVerificationEnabled()}
+	return capability.Gate{
+		Cloud:    cloudName,
+		Logger:   b.Logger(),
+		Enabled:  b.config.CapabilityVerificationEnabled(),
+		Limiter:  &capability.Limiter{States: b.minterStateByID},
+		CacheTTL: b.config.CapabilityCacheDuration(),
+	}
+}
+
+// minterStateByID finds a minter's recovery state machine by id, across every set,
+// so a probe can see (and open) the same rate-limit cooldown issuance uses. A
+// candidate minter being written for the first time has no state yet; nil then
+// means "unthrottled as far as we know", which is the only honest answer.
+func (b *backend) minterStateByID(minterID string) *recovery.StateMachine {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, states := range b.minterSets {
+		if ms, ok := states[minterID]; ok {
+			return ms.sm
+		}
+	}
+	return nil
 }

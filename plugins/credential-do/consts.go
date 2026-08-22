@@ -22,6 +22,11 @@ const (
 	// throwaway mint-and-delete proving a minter can mint, not merely
 	// authenticate). See capability.go.
 	fieldVerifyCapability = "verify_minter_capability"
+
+	// fieldCapabilityCacheTTL is the config field bounding how long a successful
+	// capability probe is reused. Probes are real mints against the cloud, so an
+	// unremembered fan-out re-minted on every configuration write (A29).
+	fieldCapabilityCacheTTL = "capability_cache_ttl"
 )
 
 // Path and field keys reused across schemas, request handlers, and tests.

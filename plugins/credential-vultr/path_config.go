@@ -24,6 +24,11 @@ const (
 	// exists only to keep the config surface uniform across all clouds.
 	defaultMinterRetireGraceSeconds = 604800 // 7d
 
+	// defaultCapabilityCacheTTLSeconds is how long a successful capability probe
+	// stands in for a fresh one (1h). See capability.DefaultCacheTTL for the trade:
+	// without a cache, every configuration write re-mints the whole probe fan-out.
+	defaultCapabilityCacheTTLSeconds = 3600
+
 	// reconcilerBootstrapDelay holds off the first reconcile pass after a
 	// (re)start so leases issued just before restart aren't seen as orphans.
 	reconcilerBootstrapDelay = 24 * time.Hour
@@ -65,6 +70,11 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     true,
 					Description: "Prove a minter can mint (throwaway mint-and-delete probe) at minter-set write and role write; set false only where a probe mint is unacceptable",
 				},
+				fieldCapabilityCacheTTL: {
+					Type:        framework.TypeDurationSecond,
+					Default:     defaultCapabilityCacheTTLSeconds,
+					Description: "How long a successful capability probe stands in for a fresh one, so a repeated configuration write does not re-mint the whole (minters x roles) fan-out; 0 re-probes every write",
+				},
 				"vultr_api_url": {
 					Type:        framework.TypeString,
 					Default:     "https://api.vultr.com",
@@ -101,6 +111,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 	verifyCapability := d.Get(fieldVerifyCapability).(bool)
+	capabilityCacheTTL := time.Duration(d.Get(fieldCapabilityCacheTTL).(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
@@ -111,6 +122,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		MinterRetireGrace: minterRetireGrace,
 
 		VerifyMinterCapability: &verifyCapability,
+		CapabilityCacheTTL:     &capabilityCacheTTL,
 	}
 
 	entry, err := logical.StorageEntryJSON("config", cfg)
@@ -192,11 +204,12 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			fieldCloud:             cfg.Cloud,
-			fieldReconcileCadence:  int(cfg.ReconcileCadence.Seconds()),
-			fieldMinterExpiryWarn:  int(cfg.MinterExpiryWarn.Seconds()),
-			fieldMinterRetireGrace: int(cfg.MinterRetireGrace.Seconds()),
-			fieldVerifyCapability:  cfg.CapabilityVerificationEnabled(),
+			fieldCloud:              cfg.Cloud,
+			fieldReconcileCadence:   int(cfg.ReconcileCadence.Seconds()),
+			fieldMinterExpiryWarn:   int(cfg.MinterExpiryWarn.Seconds()),
+			fieldMinterRetireGrace:  int(cfg.MinterRetireGrace.Seconds()),
+			fieldVerifyCapability:   cfg.CapabilityVerificationEnabled(),
+			fieldCapabilityCacheTTL: int(cfg.CapabilityCacheDuration().Seconds()),
 		},
 	}, nil
 }

@@ -40,6 +40,11 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     true,
 					Description: "Prove a minter can mint (throwaway mint-and-delete probe) at minter-set write and role write; set false only where a probe mint is unacceptable",
 				},
+				fieldCapabilityCacheTTL: {
+					Type:        framework.TypeDurationSecond,
+					Default:     defaultCapabilityCacheTTLSeconds,
+					Description: "How long a successful capability probe stands in for a fresh one, so a repeated configuration write does not re-mint the whole (minters x roles) fan-out; 0 re-probes every write",
+				},
 				fieldAPIURL: {
 					Type:        framework.TypeString,
 					Default:     "",
@@ -81,6 +86,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 	verifyCapability := d.Get(fieldVerifyCapability).(bool)
+	capabilityCacheTTL := time.Duration(d.Get(fieldCapabilityCacheTTL).(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
@@ -91,6 +97,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		MinterRetireGrace: minterRetireGrace,
 
 		VerifyMinterCapability: &verifyCapability,
+		CapabilityCacheTTL:     &capabilityCacheTTL,
 	}
 
 	entry, err := logical.StorageEntryJSON(pathConfig, cfg)
@@ -180,11 +187,12 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			fieldCloud:             cfg.Cloud,
-			fieldReconcileCadence:  int(cfg.ReconcileCadence.Seconds()),
-			fieldMinterExpiryWarn:  int(cfg.MinterExpiryWarn.Seconds()),
-			fieldMinterRetireGrace: int(cfg.MinterRetireGrace.Seconds()),
-			fieldVerifyCapability:  cfg.CapabilityVerificationEnabled(),
+			fieldCloud:              cfg.Cloud,
+			fieldReconcileCadence:   int(cfg.ReconcileCadence.Seconds()),
+			fieldMinterExpiryWarn:   int(cfg.MinterExpiryWarn.Seconds()),
+			fieldMinterRetireGrace:  int(cfg.MinterRetireGrace.Seconds()),
+			fieldVerifyCapability:   cfg.CapabilityVerificationEnabled(),
+			fieldCapabilityCacheTTL: int(cfg.CapabilityCacheDuration().Seconds()),
 		},
 	}, nil
 }

@@ -28,6 +28,11 @@ const (
 	// fieldVerifyCapability is the config field toggling the capability probe
 	// (a throwaway mint-and-delete) run at minter-set and role write.
 	fieldVerifyCapability = "verify_minter_capability"
+
+	// fieldCapabilityCacheTTL is the config field bounding how long a successful
+	// capability probe is reused. Probes are real mints against the cloud, so an
+	// unremembered fan-out re-minted on every configuration write (A29).
+	fieldCapabilityCacheTTL = "capability_cache_ttl"
 	// fieldRotationParams is the per-minter rotation metadata map key (after
 	// rotation it carries the successor's upstream SA key resource name used by
 	// the retired-sweep to delete it).
@@ -67,6 +72,11 @@ const (
 	// reloads the set, so no node's in-memory snapshot still selects a minter whose
 	// upstream key has been deleted.
 	defaultMinterRetireGraceSeconds = 604800
+
+	// defaultCapabilityCacheTTLSeconds is how long a successful capability probe
+	// stands in for a fresh one (1h). See capability.DefaultCacheTTL for the trade:
+	// without a cache, every configuration write re-mints the whole probe fan-out.
+	defaultCapabilityCacheTTLSeconds = 3600
 	// defaultRoleTTLSeconds is the default/maximum role token lifetime (1h);
 	// GCP caps access-token lifetime at 3600s by default.
 	defaultRoleTTLSeconds = 3600

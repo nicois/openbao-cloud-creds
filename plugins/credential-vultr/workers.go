@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
@@ -91,6 +92,12 @@ func (b *backend) stopWorkers() {
 }
 
 func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) error {
+	// Housekeeping that must run whether or not the pass below can: an expired
+	// capability verdict is dead weight, and clearing entries when the TTL is zero
+	// is what makes capability_cache_ttl=0 mean "off" rather than "off from now on"
+	// (A29).
+	capability.SweepCache(ctx, storage, cloudName, b.Logger(), b.gate().CacheTTL)
+
 	client, err := b.anyHealthyMinter()
 	if err != nil {
 		return err

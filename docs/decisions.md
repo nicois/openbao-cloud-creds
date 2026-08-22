@@ -662,3 +662,51 @@ turns up in a real-cloud run, the recording will say what it actually means.
 mapped to 501, and emitted by nothing. Since no code path ever produced it, no client
 can have observed it, so removing it breaks nobody — and leaving it would keep implying
 a behaviour that does not exist.
+
+## Why capability probes are rate-limited but not health-gated, and cached but not capped
+
+A capability probe is a real mint against the cloud's real quota. It was outside
+every mechanism this project has for bounding real mints, which produced three
+distinct problems and three answers that do not all point the same way (A29 in
+[`audit-2026-08-22.md`](audit-2026-08-22.md)).
+
+**Rate limiting: yes, and in both directions.** A probe refused while a cooldown is
+open, and a probe's own `429` opening one. There is nothing to weigh here — the
+quota is shared with the read path by definition, so a probe outside the breaker
+hammers a cloud that has just refused a caller.
+
+**Health gating: deliberately not.** The obvious implementation is
+`StateMachine.TryAcquire`, which couples the cooldown to serviceability. It is
+wrong here, for a reason that only shows up in the recovery path: an operator
+replacing a failed credential writes *the same minter id*, so a state machine still
+in `auth_failing` from the old credential would refuse the write that repairs it.
+The set would be unfixable except by turning verification off. So probes consult
+`InRateLimitCooldown` and never claim the half-open probe, which stays reserved for
+issuance for the reason already recorded in `pkg/recovery/ratelimit.go`.
+
+**Recording: successes and rate limits only.** A probe that mints is a successful
+upstream mint and is recorded as health. A probe *refused on privilege grounds* is
+not a fact about the credential — it is a fact about one role's mint shape — and
+recording it as a credential failure would walk a minter serving nine other roles
+toward `auth_failing` because a tenth role was written wrong. Those refusals
+release the half-open claim (`ReleaseProbe`) and record nothing.
+
+**Caching: yes, one hour by default, and the staleness is the point of the trade.**
+A cached verdict can be an hour old, so revoking a grant upstream and then writing a
+role can have the role accepted on an earlier probe's word. Accepted deliberately:
+the consequence is bounded, because issuance then fails at read time with the
+upstream's own refusal — the probe exists to make that *rarer* and earlier, not to be
+the last line of defence against it. Against that, the uncached behaviour was a full
+(minters × roles) re-mint on every configuration write, so an idempotent `terraform
+apply` paid for the whole fan-out each run and every OVH probe in it left a live
+one-hour token that no API can revoke. Only successes are cached, so a fixed grant
+takes effect on the next retry; the fingerprint covers the minter's stored form, so
+replacing a credential under an existing id re-proves it.
+
+**Capping: deliberately not.** A cap generous enough for a legitimate set (five
+minters, thirty roles) never fires; one tight enough to fire blocks that set from
+ever being written unless the operator disables verification altogether — trading a
+cost problem for a security one, which is the wrong direction. Dedup plus the cache
+bound the cost. What a cap was really aimed at is an *unintended* fan-out, and that
+is served by logging the probe count above a threshold, where an operator can see it
+without being stopped by it.

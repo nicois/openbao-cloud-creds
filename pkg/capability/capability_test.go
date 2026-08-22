@@ -3,6 +3,7 @@ package capability
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -12,9 +13,9 @@ import (
 func okCheck(key, minter, role string, ran *[]string) Check {
 	return Check{
 		Key: key, Minter: minter, Roles: []string{role},
-		Run: func(context.Context) error {
+		Run: func(context.Context) (int, error) {
 			*ran = append(*ran, key)
-			return nil
+			return http.StatusOK, nil
 		},
 	}
 }
@@ -41,7 +42,7 @@ func TestVerify_RunsEachDistinctCheckOnce(t *testing.T) {
 // A failure must name the minter and every role that shares the failing shape,
 // so the operator knows what is broken and for whom.
 func TestVerify_FailureNamesMinterAndAllSharingRoles(t *testing.T) {
-	fail := func(context.Context) error { return errors.New("403 forbidden") }
+	fail := func(context.Context) (int, error) { return http.StatusForbidden, errors.New("403 forbidden") }
 	checks := []Check{
 		{Key: "a", Minter: "minter-1", Roles: []string{"role-a"}, Run: fail},
 		{Key: "a", Minter: "minter-1", Roles: []string{"role-b"}, Run: fail},
@@ -61,7 +62,7 @@ func TestVerify_FailureNamesMinterAndAllSharingRoles(t *testing.T) {
 func TestVerify_UnsupportedIsSkippedNotFailed(t *testing.T) {
 	checks := []Check{{
 		Key: "a", Minter: "m1", Roles: []string{"role-a"},
-		Run: func(context.Context) error { return ErrUnsupported },
+		Run: func(context.Context) (int, error) { return 0, ErrUnsupported },
 	}}
 	result, err := Verify(t.Context(), checks)
 	if err != nil {

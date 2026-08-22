@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -37,22 +39,22 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 	if err := json.Unmarshal(roleJSON, &role); err != nil {
 		return nil
 	}
-	return capability.ChecksPerMinter(set, role.Name, "", func(minter cloudconfig.Minter) func(context.Context) error {
+	return capability.ChecksPerMinter(set, role.Name, "", func(minter cloudconfig.Minter) func(context.Context) (int, error) {
 		return b.probeMint(minter)
 	})
 }
 
 // probeMint returns a probe that mints an access token. There is nothing to clean
 // up: OVH exposes no token-revocation API, so the token simply expires.
-func (b *backend) probeMint(minter cloudconfig.Minter) func(context.Context) error {
-	return func(ctx context.Context) error {
+func (b *backend) probeMint(minter cloudconfig.Minter) func(context.Context) (int, error) {
+	return func(ctx context.Context) (int, error) {
 		b.mu.RLock()
 		client := b.buildTokenClient(minter)
 		b.mu.RUnlock()
 		if _, _, err := client.MintToken(ctx); err != nil {
-			return fmt.Errorf("probe token mint failed: %w", err)
+			return classifyOVHError(err), fmt.Errorf("probe token mint failed: %w", err)
 		}
-		return nil
+		return http.StatusOK, nil
 	}
 }
 
@@ -74,5 +76,26 @@ func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Stor
 func (b *backend) gate() capability.Gate {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return capability.Gate{Cloud: cloudName, Logger: b.Logger(), Enabled: b.config.CapabilityVerificationEnabled()}
+	return capability.Gate{
+		Cloud:    cloudName,
+		Logger:   b.Logger(),
+		Enabled:  b.config.CapabilityVerificationEnabled(),
+		Limiter:  &capability.Limiter{States: b.minterStateByID},
+		CacheTTL: b.config.CapabilityCacheDuration(),
+	}
+}
+
+// minterStateByID finds a minter's recovery state machine by id, across every set,
+// so a probe can see (and open) the same rate-limit cooldown issuance uses. A
+// candidate minter being written for the first time has no state yet; nil then
+// means "unthrottled as far as we know", which is the only honest answer.
+func (b *backend) minterStateByID(minterID string) *recovery.StateMachine {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, states := range b.minterSets {
+		if ms, ok := states[minterID]; ok {
+			return ms.sm
+		}
+	}
+	return nil
 }

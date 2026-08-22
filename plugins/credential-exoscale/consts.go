@@ -27,6 +27,11 @@ const (
 	// fieldVerifyCapability is the config field toggling the capability probe
 	// (a throwaway mint-and-delete) run at minter-set and role write.
 	fieldVerifyCapability = "verify_minter_capability"
+
+	// fieldCapabilityCacheTTL is the config field bounding how long a successful
+	// capability probe is reused. Probes are real mints against the cloud, so an
+	// unremembered fan-out re-minted on every configuration write (A29).
+	fieldCapabilityCacheTTL = "capability_cache_ttl"
 	// fieldRotationParams is the per-minter rotation metadata map key. It carries
 	// role_id (the minter's key-management IAM role, needed to mint a mint-capable
 	// successor) and, after rotation, key_id (the successor's upstream key-id used
@@ -64,6 +69,11 @@ const (
 	// has reloaded the set, so no node's in-memory snapshot still selects a minter
 	// whose upstream key has been deleted.
 	defaultMinterRetireGraceSeconds = 604800
+
+	// defaultCapabilityCacheTTLSeconds is how long a successful capability probe
+	// stands in for a fresh one (1h). See capability.DefaultCacheTTL for the trade:
+	// without a cache, every configuration write re-mints the whole probe fan-out.
+	defaultCapabilityCacheTTLSeconds = 3600
 )
 
 // defaultMinterSecretLifetime is how long a rotation successor key is treated as

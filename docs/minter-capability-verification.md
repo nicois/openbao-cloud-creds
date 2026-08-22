@@ -127,7 +127,9 @@ configured it.
 ## Configuration
 
 ```bash
-bao write cloud-creds/<cloud>/config verify_minter_capability=false   # default: true
+bao write cloud-creds/<cloud>/config \
+  verify_minter_capability=false \   # default: true
+  capability_cache_ttl=1h            # default: 1h; 0 re-probes on every write
 ```
 
 Verification is **on by default**: the failure it prevents is silent, lands on
@@ -145,6 +147,64 @@ Roles marked `disabled` are excluded from probing: they cannot issue, so an
 incapable minter cannot hurt them, and probing them would block a set write over
 a role the operator has already turned off. A stored role whose JSON cannot be
 parsed is treated as not bound rather than blocking set writes.
+
+## Cost: the probe is inside the circuit breaker, and it has a memory
+
+A probe is not a cheap simulation. It is a real mint against the cloud's real
+quota, differing from an issuance only in that it is deleted afterwards — and on
+the three clouds that cannot revoke, not even in that. Two consequences followed
+from leaving it outside every mechanism that exists to bound real mints (A29 in
+[`audit-2026-08-22.md`](audit-2026-08-22.md)), and both are now closed.
+
+**Probes share the read path's rate limiter, in both directions.**
+`capability.Limiter` refuses a probe while a minter is in a rate-limit cooldown,
+and records a probe's own `429` so the cooldown opens for the callers sharing that
+quota. A refused write answers `upstream_quota_exceeded` with the remaining wait,
+which is a different answer from `config_invalid` — "ask again shortly", not "this
+minter cannot mint what you asked for" — and only one of those is worth retrying.
+
+Three things it deliberately does **not** do:
+
+- **It does not gate on minter health, only on the cooldown.** Gating on health
+  would make a broken set unfixable: an operator replacing a failed credential
+  writes the same minter id, so a state machine still in `auth_failing` from the
+  old credential would refuse the very write that repairs it.
+- **It does not take the half-open single-flight claim.** That claim belongs to
+  issuance ([`ttl-semantics.md`](ttl-semantics.md) and `pkg/recovery/ratelimit.go`):
+  spending it on a configuration write would defer a live caller's read to answer
+  a question the operator can ask again a second later.
+- **It does not record a refused probe as a minter failure.** A refusal on
+  privilege grounds is about one role's mint shape. Indicting the minter for it
+  would pull a credential serving every other role bound to the set out of
+  service because a tenth role was written wrong.
+
+**A successful probe is remembered for `capability_cache_ttl` (default 1h).**
+Dedup collapses identical mint shapes within one write; the cache collapses them
+across writes, keyed on `(minter id, mint shape)` and invalidated by a change to
+the minter's stored form — so replacing the credential behind a minter id
+re-proves it, which is how a hand-rotated minter is normally replaced. Only
+successes are cached: an operator who has just fixed a grant upstream must be able
+to retry immediately and see it work.
+
+The trade is stated where it is made (`capability.DefaultCacheTTL`): a verdict can
+be up to an hour old, so revoking a grant upstream and then writing a role can see
+that role accepted on the strength of an earlier probe. That is acceptable because
+the consequence is bounded — issuance then fails at read time with the upstream's
+own refusal, which is the state the probe exists to make *rarer*, not one it is the
+last line of defence against. Without the cache, an idempotent `terraform apply`
+re-minted the entire (minters × roles) fan-out on every run, and each OVH probe in
+it left a live one-hour token behind that nothing can revoke.
+
+**There is deliberately no hard cap on the fan-out.** A cap large enough for a
+legitimate set — five minters across thirty roles — would never fire, and one small
+enough to fire would block that set from ever being written except by turning
+verification off entirely, trading a cost problem for a security one. Dedup and the
+cache are what bound the cost; a fan-out above 20 distinct probes is *logged*, so an
+operator can see one they did not intend, which is what a cap was really aimed at.
+
+Expired verdicts are swept by the reconcile worker, and setting
+`capability_cache_ttl=0` clears the whole keyspace on the next sweep — so "off"
+means off, not "off from now on".
 
 ## Failure surface
 

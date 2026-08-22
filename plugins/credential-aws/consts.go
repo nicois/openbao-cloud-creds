@@ -30,6 +30,11 @@ const (
 	// fieldVerifyCapability is the config field toggling the capability probe
 	// (a throwaway mint-and-delete) run at minter-set and role write.
 	fieldVerifyCapability = "verify_minter_capability"
+
+	// fieldCapabilityCacheTTL is the config field bounding how long a successful
+	// capability probe is reused. Probes are real mints against the cloud, so an
+	// unremembered fan-out re-minted on every configuration write (A29).
+	fieldCapabilityCacheTTL = "capability_cache_ttl"
 	// fieldRotationParams is the per-minter rotation metadata map key (after
 	// rotation it carries the successor's upstream access_key_id used by the
 	// retired-sweep to delete it).

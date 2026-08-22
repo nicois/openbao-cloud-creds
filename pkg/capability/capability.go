@@ -52,8 +52,17 @@ type Check struct {
 	Minter string
 	// Roles are the role names that share this Key, for the failure message.
 	Roles []string
-	// Run performs the probe mint and deletes what it created.
-	Run func(context.Context) error
+	// Run performs the probe mint and deletes what it created. It returns the
+	// upstream HTTP status alongside the error (credenvelope.StatusNone when there
+	// was no response) so that a probe's own 429 can open the same cooldown a
+	// caller's read would — a probe is a real mint against the same quota, and
+	// leaving it outside the rate limiter meant a probe storm could neither be
+	// gated by a cooldown nor open one (A29).
+	Run func(context.Context) (int, error)
+	// MinterJSON is the minter's stored form, used only to fingerprint a cached
+	// verdict so that replacing the credential behind a minter id invalidates it.
+	// It is never stored, logged or returned.
+	MinterJSON []byte
 }
 
 // Result counts what a Verify pass did, for operator-facing logging.
@@ -62,6 +71,9 @@ type Result struct {
 	Ran int
 	// Skipped is the number that reported ErrUnsupported.
 	Skipped int
+	// Cached is the number satisfied by a recent identical probe rather than by a
+	// fresh mint.
+	Cached int
 }
 
 // BoundRole is a stored role bound to a minter set. Raw is the role's stored
@@ -110,12 +122,46 @@ func (f *Failure) ClientMessage() string {
 // operator sees the first thing that is wrong rather than a list of cascading
 // consequences. A failure is returned as *Failure.
 func Verify(ctx context.Context, checks []Check) (Result, error) {
+	return Runner{}.Verify(ctx, checks)
+}
+
+// Runner is Verify with the two things a bare probe pass lacked: a shared view of
+// the rate limiter, and a memory.
+//
+// Both address the same complaint. A single minter-set write costs up to
+// (minters x bound roles) real mints against the cloud, with nothing deduplicating
+// across writes — so an idempotent `terraform apply` re-minted the whole fan-out
+// every time, and on OVH each of those probes leaves a live one-hour token behind
+// because that cloud has no revoke API at all. Meanwhile none of it went through
+// the circuit breaker, so probes hammered a throttled cloud and a probe's own 429
+// stayed invisible to the readers sharing that quota (A29).
+//
+// Both fields are optional: a zero Runner is the old behaviour, which is what the
+// package's own tests want.
+type Runner struct {
+	// Cache remembers recent successful probes. Nil disables it.
+	Cache *Cache
+	// Limiter shares the issuance path's rate-limit state. Nil disables it.
+	Limiter *Limiter
+}
+
+// Verify runs the deduplicated checks, consulting the cache and the limiter.
+func (r Runner) Verify(ctx context.Context, checks []Check) (Result, error) {
 	var result Result
 	for _, c := range Dedupe(checks) {
-		err := c.Run(ctx)
+		if r.Cache.fresh(ctx, c) {
+			result.Cached++
+			continue
+		}
+		if err := r.Limiter.acquire(c.Minter); err != nil {
+			return result, err
+		}
+		status, err := c.Run(ctx)
+		r.Limiter.record(c.Minter, status, err)
 		switch {
 		case err == nil:
 			result.Ran++
+			r.Cache.store(ctx, c)
 		case errors.Is(err, ErrUnsupported):
 			result.Skipped++
 		default:

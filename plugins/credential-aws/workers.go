@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/localexpiry"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
@@ -94,6 +95,12 @@ func (b *backend) stopWorkers() {
 // reconcileWorker for AWS is simpler than DO/Exoscale since STS creds auto-expire.
 // It cleans up stale tracking entries from storage.
 func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) error {
+	// Housekeeping that must run whether or not the pass below can: an expired
+	// capability verdict is dead weight, and clearing entries when the TTL is zero
+	// is what makes capability_cache_ttl=0 mean "off" rather than "off from now on"
+	// (A29).
+	capability.SweepCache(ctx, storage, cloudName, b.Logger(), b.gate().CacheTTL)
+
 	res, err := localexpiry.PruneExpired(ctx, storage, localexpiry.Options{
 		Prefix: "active-tokens/",
 		Now:    time.Now(),

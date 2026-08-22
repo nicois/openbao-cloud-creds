@@ -11,6 +11,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -54,7 +55,7 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 		return nil
 	}
 	apiURL := b.apiURLLocked()
-	return capability.ChecksPerMinter(set, role.Name, role.Scopes, func(minter cloudconfig.Minter) func(context.Context) error {
+	return capability.ChecksPerMinter(set, role.Name, role.Scopes, func(minter cloudconfig.Minter) func(context.Context) (int, error) {
 		return b.probeMint(apiURL, minter, role.Name, role.Scopes)
 	})
 }
@@ -63,21 +64,21 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 // deletes it. A failed delete does not fail the probe — minting is what was
 // being proved, and the probe token carries the owner prefix so the reconciler
 // reclaims it.
-func (b *backend) probeMint(apiURL string, minter cloudconfig.Minter, roleName, scopes string) func(context.Context) error {
-	return func(ctx context.Context) error {
+func (b *backend) probeMint(apiURL string, minter cloudconfig.Minter, roleName, scopes string) func(context.Context) (int, error) {
+	return func(ctx context.Context) (int, error) {
 		client := newDOClient(apiURL, minter.Token)
 		resp, status, err := client.CreateToken(ctx, capability.ProbeName(ownertag.Prefix(b.ownerInstance()), roleName), strings.Split(scopes, ","))
 		if err != nil {
 			if status == http.StatusForbidden {
-				return fmt.Errorf("probe mint returned %d (%w): %s", status, err, forbiddenMintHint)
+				return status, fmt.Errorf("probe mint returned %d (%w): %s", status, err, forbiddenMintHint)
 			}
-			return fmt.Errorf("probe mint returned %d: %w", status, err)
+			return status, fmt.Errorf("probe mint returned %d: %w", status, err)
 		}
 		if delStatus, delErr := client.DeleteToken(ctx, resp.Token.ID); delErr != nil && delStatus != http.StatusNotFound {
 			b.Logger().Warn("capability probe token could not be deleted; left for the owner-tag reconciler",
 				fieldCloud, cloudName, "token_id", resp.Token.ID, "status", delStatus, "error", delErr)
 		}
-		return nil
+		return status, nil
 	}
 }
 
@@ -105,11 +106,34 @@ func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Stor
 	return b.gate().VerifyRole(ctx, storage, role.MinterSet, capability.RoleJSON(role), b.capabilityChecks)
 }
 
-// gate snapshots the operator's verification setting for this backend.
+// gate snapshots the operator's verification settings for this backend, and hands
+// the probes the two things they used to lack: the read path's rate-limit state,
+// and a memory of what has recently been proved (A29).
 func (b *backend) gate() capability.Gate {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return capability.Gate{Cloud: cloudName, Logger: b.Logger(), Enabled: b.config.CapabilityVerificationEnabled()}
+	return capability.Gate{
+		Cloud:    cloudName,
+		Logger:   b.Logger(),
+		Enabled:  b.config.CapabilityVerificationEnabled(),
+		Limiter:  &capability.Limiter{States: b.minterStateByID},
+		CacheTTL: b.config.CapabilityCacheDuration(),
+	}
+}
+
+// minterStateByID finds a minter's recovery state machine by id, across every set,
+// so a probe can see (and open) the same rate-limit cooldown issuance uses. A
+// candidate minter being written for the first time has no state yet; nil then
+// means "unthrottled as far as we know", which is the only honest answer.
+func (b *backend) minterStateByID(minterID string) *recovery.StateMachine {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, states := range b.minterSets {
+		if ms, ok := states[minterID]; ok {
+			return ms.sm
+		}
+	}
+	return nil
 }
 
 // apiURLLocked returns the configured API base URL, taking the read lock itself.
