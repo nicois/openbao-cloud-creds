@@ -67,9 +67,16 @@ func TestMinterSetRotate_RejectsAndDoesNotMutate(t *testing.T) {
 	}
 }
 
-// TestConfigMinterRetireGraceRoundTrip verifies the uniform minter_retire_grace
-// config field writes and reads back unchanged.
-func TestConfigMinterRetireGraceRoundTrip(t *testing.T) {
+// TestConfigMinterRetireGraceRejectedWhereNothingRetires: this cloud's minters
+// cannot self-rotate, so no minter is ever retired and the retired-sweep has nothing
+// to sweep — the field is inert here.
+//
+// This test used to assert the OPPOSITE: that the value round-trips. Uniformity of
+// the config schema is worth something, but not at the price of telling an operator
+// a setting is in force when nothing will ever read it — which is the same defect as
+// UpCloud's `scopes` and is what A28 is about. A uniform template that omits the
+// field still works; only setting it explicitly is refused.
+func TestConfigMinterRetireGraceRejectedWhereNothingRetires(t *testing.T) {
 	const graceSeconds = 86400
 	srv := fakes.NewDOServer()
 	defer srv.Close()
@@ -81,21 +88,20 @@ func TestConfigMinterRetireGraceRoundTrip(t *testing.T) {
 	}
 	storage := config.StorageView
 
-	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
 		Data: map[string]interface{}{"do_api_url": srv.URL, fieldMinterRetireGrace: graceSeconds},
-	}); err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write: %v %v", err, resp)
-	}
-
-	resp, err := b.HandleRequest(t.Context(), &logical.Request{
-		Operation: logical.ReadOperation, Path: "config", Storage: storage,
 	})
-	if err != nil || resp == nil || resp.IsError() {
-		t.Fatalf("config read: %v %v", err, resp)
+	if err != nil {
+		t.Fatalf("config write errored: %v", err)
 	}
-	if got := resp.Data[fieldMinterRetireGrace]; got != graceSeconds {
-		t.Fatalf("minter_retire_grace = %v, want %d", got, graceSeconds)
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("an explicitly-set %s was accepted on a cloud where nothing is ever retired, so "+
+			"the operator is told a setting is in force that will never be read: %v",
+			fieldMinterRetireGrace, resp)
+	}
+	if got := resp.Error().Error(); !strings.Contains(got, "has no effect on this cloud") {
+		t.Errorf("the rejection should say the field has no effect here, got: %v", got)
 	}
 }
 
@@ -124,4 +130,48 @@ func readSetSnapshot(t *testing.T, b logical.Backend, storage logical.Storage) s
 		sb.WriteString(";")
 	}
 	return sb.String()
+}
+
+// TestMinterSetRejectsRotationParamsWhereNothingRotates: DO minters cannot
+// self-rotate (minter-sets/<name>/rotate rejects, verified infeasible), so
+// rotation_params would never be read. It used to be accepted and dropped on the
+// floor — an operator's setting silently discarded, which is the same defect as
+// UpCloud's `scopes` (A28). The mechanism is shared
+// (cloudconfig.ValidateMinterKeys, unit-tested there); this is the wiring.
+func TestMinterSetRejectsRotationParamsWhereNothingRotates(t *testing.T) {
+	srv := fakes.NewDOServer()
+	defer srv.Close()
+	config := logical.TestBackendConfig()
+	config.StorageView = &logical.InmemStorage{}
+	b, err := Factory(t.Context(), config)
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+	storage := config.StorageView
+
+	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
+		Data: map[string]interface{}{"do_api_url": srv.URL},
+	}); err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("config write: %v %v", err, resp)
+	}
+
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
+		Data: map[string]interface{}{fieldMintersKey: []interface{}{
+			map[string]interface{}{
+				"id": "minter-1", "token": "dop_v1_fake", neverExpiresKey: true,
+				"rotation_params": map[string]interface{}{"token_id": "123"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("minter-set write errored: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("rotation_params was accepted on a cloud that cannot rotate a minter: %v", resp)
+	}
+	if got := resp.Error().Error(); !strings.Contains(got, "cannot self-rotate") {
+		t.Errorf("the rejection should explain that nothing would read it, got: %v", got)
+	}
 }

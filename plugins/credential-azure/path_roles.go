@@ -13,8 +13,15 @@ import (
 
 const (
 	// Role TTL schema defaults, in seconds (framework.TypeDurationSecond).
-	defaultRoleTTLSeconds    = 3600  // 1h
-	defaultRoleMaxTTLSeconds = 86400 // 24h
+	// The role TTL defaults are deliberately the SAME on every cloud that can honour
+	// them — 15m default, 1h maximum — because short-lived credentials are the product
+	// and a default is what most roles will actually run with. They used to vary by up
+	// to 400x across ten plugins with identical documentation (A28 in
+	// docs/audit-2026-08-22.md). Only OVH (a fixed 1h token, so exactly 3600 either
+	// way) and OCI (whose lease TTL is derived from the rotation period) differ, and
+	// both are forced by the cloud rather than chosen.
+	defaultRoleTTLSeconds    = 900  // 15m
+	defaultRoleMaxTTLSeconds = 3600 // 1h
 )
 
 type azureRole struct {

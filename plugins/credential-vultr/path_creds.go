@@ -264,7 +264,7 @@ func buildUserIdentity(ownerPrefix, roleName, leaseID string, role *vultrRole,
 	userName = ownerPrefix + roleName + "-" + leaseShortID
 	userEmail = userName + "@" + emailDomainFor(role)
 
-	return userName, userEmail, parseACLs(role.ACLs)
+	return userName, userEmail, role.ACLs
 }
 
 // emailDomainFor returns the domain generated sub-user addresses are formed in:
@@ -274,17 +274,6 @@ func emailDomainFor(role *vultrRole) string {
 		return defaultEmailDomain
 	}
 	return role.EmailDomain
-}
-
-// parseACLs splits a role's comma-separated ACL field into the list the Vultr
-// create-user call takes. Shared with the capability probe so a probe requests
-// exactly the ACLs a real issuance would.
-func parseACLs(raw string) []string {
-	acls := strings.Split(raw, ",")
-	for i := range acls {
-		acls[i] = strings.TrimSpace(acls[i])
-	}
-	return acls
 }
 
 // anyHealthyMinter returns a client for any healthy minter across all sets.
@@ -408,7 +397,7 @@ func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
 		Renewable:    true,
 		CredentialID: a.resp.User.ID,
 		// Vultr ACLs are eight coarse access-control categories.
-		Scope:     a.role.ACLs,
+		Scope:     strings.Join(a.role.ACLs, ","),
 		ScopeKind: credenvelope.ScopeKindACL,
 		IssuedBy:  "cloud-creds-vultr/v0.1",
 		MinterSet: a.setName,

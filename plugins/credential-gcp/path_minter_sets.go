@@ -68,6 +68,12 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 		if !ok {
 			return nil, fmt.Errorf("each minter must be an object")
 		}
+		// Reject a key this cloud does not read, rather than discarding the
+		// operator's intent in silence (A28).
+		if err := cloudconfig.ValidateMinterKeys(fmt.Sprintf("%v", mMap["id"]), mMap,
+			"id", "expires_at", neverExpiresKey, "credentials_json", cloudconfig.MinterKeyRotationParams); err != nil {
+			return nil, err
+		}
 		minter, err := parseMinter(mMap)
 		if err != nil {
 			return nil, err

@@ -7,6 +7,7 @@ toolchain go1.26.6
 require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-metrics v0.5.4
+	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.0.0-00010101000000-000000000000
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
 

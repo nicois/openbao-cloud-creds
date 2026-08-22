@@ -77,6 +77,13 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	groupID := d.Get(fieldGroupID).(int)
 	apiAccess := d.Get(fieldAPIAccess).(string)
 
+	// apiAccess is what an Akamai API client is permitted to call; an empty grant is a
+	// client with no access at all (A28).
+	if apiAccess == "" {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"%s is required", fieldAPIAccess), nil
+	}
+
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil

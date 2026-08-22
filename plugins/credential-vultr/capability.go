@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
@@ -32,7 +33,7 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 	if err := json.Unmarshal(roleJSON, &role); err != nil {
 		return nil
 	}
-	shape := role.ACLs + "|" + role.EmailDomain
+	shape := strings.Join(role.ACLs, ",") + "|" + role.EmailDomain
 	return capability.ChecksPerMinter(set, role.Name, shape, func(minter cloudconfig.Minter) func(context.Context) (int, error) {
 		return b.probeMint(minter, &role)
 	})
@@ -50,9 +51,9 @@ func (b *backend) probeMint(minter cloudconfig.Minter, role *vultrRole) func(con
 		// in the identifier — the ACL list, which is what Vultr checks, is identical.
 		probeName := capability.ProbeName(ownertag.Prefix(b.ownerInstance()), role.Name)
 		email := probeName + "@" + emailDomainFor(role)
-		user, status, err := client.CreateUser(ctx, probeName, email, parseACLs(role.ACLs))
+		user, status, err := client.CreateUser(ctx, probeName, email, role.ACLs)
 		if err != nil {
-			return status, fmt.Errorf("probe sub-user creation with acls %q returned %d: %w", role.ACLs, status, err)
+			return status, fmt.Errorf("probe sub-user creation with acls %v returned %d: %w", role.ACLs, status, err)
 		}
 		if delStatus, delErr := client.DeleteUser(ctx, user.User.ID); delErr != nil && delStatus != http.StatusNotFound {
 			b.Logger().Warn("capability probe sub-user could not be deleted; left for the owner-tag reconciler",

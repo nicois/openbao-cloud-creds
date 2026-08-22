@@ -117,6 +117,16 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	reconcileCadence := time.Duration(d.Get(fieldReconcileCadence).(int)) * time.Second
 	minterExpiryWarn := time.Duration(d.Get(fieldMinterExpiryWarn).(int)) * time.Second
+	// Nothing on this cloud is ever retired: minter self-rotation is infeasible here
+	// and minter-sets/<name>/rotate rejects, so the retired-sweep has no work and this
+	// value would never be read. Accepting it silently is how an operator comes to
+	// believe a setting is in force (A28). GetOk distinguishes "set to the default"
+	// from "not set", so a uniform config template that omits it still works.
+	if _, provided := d.GetOk(fieldMinterRetireGrace); provided {
+		return credenvelope.ErrorResponse(credenvelope.ErrUnsupported,
+			"%s has no effect on this cloud: its minters cannot self-rotate, so no minter is ever "+
+				"retired and the retired-sweep has nothing to sweep", fieldMinterRetireGrace), nil
+	}
 	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
 
 	// Reject a non-positive interval here, where the operator finds out. A zero

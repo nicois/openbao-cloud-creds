@@ -1,6 +1,7 @@
 package credentialvultr_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -55,7 +56,9 @@ func TestRoleCRUD(t *testing.T) {
 	if resp.Data["name"] != "deploy-rw" {
 		t.Fatalf("unexpected name: %v", resp.Data["name"])
 	}
-	if resp.Data["acls"] != "subscriptions,provisioning" {
+	// A list-valued role field reads back as a LIST on every cloud now, whatever form
+	// it was written in (A28).
+	if got := fmt.Sprint(resp.Data["acls"]); got != "[subscriptions provisioning]" {
 		t.Fatalf("unexpected acls: %v", resp.Data["acls"])
 	}
 	if resp.Data["email_domain"] != "managed.local" {

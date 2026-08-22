@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -98,5 +99,43 @@ func ValidateMinterSet(minters []Minter) error {
 		}
 	}
 
+	return nil
+}
+
+// MinterKeyRotationParams is the per-minter key carrying rotation metadata. Named
+// here because whether it is accepted is a per-cloud fact (only the six clouds whose
+// minters can self-rotate read it).
+const MinterKeyRotationParams = "rotation_params"
+
+// ValidateMinterKeys rejects a minter object carrying a key this cloud does not
+// understand.
+//
+// A minter arrives as an untyped object inside a TypeSlice, so every plugin simply
+// read the keys it knew and ignored the rest. Two consequences: `rotation_params`
+// was accepted in silence on the four clouds that cannot rotate a minter at all,
+// where nothing would ever read it (A28 in docs/audit-2026-08-22.md), and any
+// mistyped key — `never_expire`, `expires`, `acccess_key_id` — was accepted as
+// though it had been understood.
+//
+// Rejecting is right rather than pedantic: the whole point of a minter set is that
+// the operator's intent is enforceable, and a key nobody reads is intent that was
+// silently discarded.
+func ValidateMinterKeys(minterID string, raw map[string]interface{}, allowed ...string) error {
+	permitted := make(map[string]bool, len(allowed))
+	for _, key := range allowed {
+		permitted[key] = true
+	}
+	for key := range raw {
+		if permitted[key] {
+			continue
+		}
+		if key == MinterKeyRotationParams {
+			return fmt.Errorf("minter %s: %s is not accepted on this cloud — its minters cannot "+
+				"self-rotate (minter-sets/<name>/rotate rejects), so nothing would ever read it",
+				minterID, key)
+		}
+		return fmt.Errorf("minter %s: unknown field %q (accepted: %s)",
+			minterID, key, strings.Join(allowed, ", "))
+	}
 	return nil
 }

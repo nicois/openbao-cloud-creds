@@ -55,7 +55,7 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 		return nil
 	}
 	apiURL := b.apiURLLocked()
-	return capability.ChecksPerMinter(set, role.Name, role.Scopes, func(minter cloudconfig.Minter) func(context.Context) (int, error) {
+	return capability.ChecksPerMinter(set, role.Name, strings.Join(role.Scopes, ","), func(minter cloudconfig.Minter) func(context.Context) (int, error) {
 		return b.probeMint(apiURL, minter, role.Name, role.Scopes)
 	})
 }
@@ -64,10 +64,10 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 // deletes it. A failed delete does not fail the probe — minting is what was
 // being proved, and the probe token carries the owner prefix so the reconciler
 // reclaims it.
-func (b *backend) probeMint(apiURL string, minter cloudconfig.Minter, roleName, scopes string) func(context.Context) (int, error) {
+func (b *backend) probeMint(apiURL string, minter cloudconfig.Minter, roleName string, scopes []string) func(context.Context) (int, error) {
 	return func(ctx context.Context) (int, error) {
 		client := newDOClient(apiURL, minter.Token)
-		resp, status, err := client.CreateToken(ctx, capability.ProbeName(ownertag.Prefix(b.ownerInstance()), roleName), strings.Split(scopes, ","))
+		resp, status, err := client.CreateToken(ctx, capability.ProbeName(ownertag.Prefix(b.ownerInstance()), roleName), scopes)
 		if err != nil {
 			if status == http.StatusForbidden {
 				return status, fmt.Errorf("probe mint returned %d (%w): %s", status, err, forbiddenMintHint)

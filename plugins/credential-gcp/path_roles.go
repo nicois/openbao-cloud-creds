@@ -58,7 +58,7 @@ func (b *backend) rolePaths() []*framework.Path {
 				},
 				fieldMaxTTL: {
 					Type:        framework.TypeDurationSecond,
-					Default:     defaultRoleTTLSeconds,
+					Default:     defaultRoleMaxTTLSeconds,
 					Description: "Maximum token lifetime in seconds",
 				},
 				fieldServiceAccountEmail: {

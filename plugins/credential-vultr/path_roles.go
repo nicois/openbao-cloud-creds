@@ -21,7 +21,7 @@ type vultrRole struct {
 	Name        string        `json:"name"`
 	DefaultTTL  time.Duration `json:"default_ttl"`
 	MaxTTL      time.Duration `json:"max_ttl"`
-	ACLs        string        `json:"acls"`
+	ACLs        []string      `json:"acls"`
 	EmailDomain string        `json:"email_domain"`
 	MinterSet   string        `json:"minter_set"`
 	Disabled    bool          `json:"disabled,omitempty"`
@@ -47,8 +47,9 @@ func (b *backend) rolePaths() []*framework.Path {
 					Description: "Maximum lease TTL",
 				},
 				fieldACLs: {
-					Type:        framework.TypeString,
-					Description: "Comma-separated Vultr ACL list (manage_users,subscriptions,provisioning,billing,support,abuse,dns,upgrade)",
+					Type: framework.TypeCommaStringSlice,
+					Description: "Vultr sub-user ACLs, e.g. subscriptions,dns (required; " +
+						"they are this cloud's privilege boundary, so there is no default)",
 				},
 				fieldEmailDomain: {
 					Type:        framework.TypeString,
@@ -79,8 +80,15 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	name := d.Get(fieldName).(string)
 	defaultTTL := time.Duration(d.Get(fieldDefaultTTL).(int)) * time.Second
 	maxTTL := time.Duration(d.Get(fieldMaxTTL).(int)) * time.Second
-	acls := d.Get(fieldACLs).(string)
+	acls := d.Get(fieldACLs).([]string)
 	emailDomain := d.Get(fieldEmailDomain).(string)
+
+	// Vultr ACLs are the only privilege control here; a sub-user with none is a
+	// credential that can do nothing (A28).
+	if len(acls) == 0 {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"%s is required", fieldACLs), nil
+	}
 
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {

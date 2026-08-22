@@ -9,8 +9,6 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
-const minterTokenKey = "token"
-
 func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 	srv := fakes.NewDOServer()
 	defer srv.Close()

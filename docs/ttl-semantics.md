@@ -106,3 +106,16 @@ the role** rather than issue a lease it cannot honour.
   floor. Very short Azure TTLs interact with the Graph propagation lag (KI-003):
   a credential that takes seconds to become usable is not useful with a 30s TTL.
   That is a client-side sizing concern, not a validation rule.
+
+## Role TTL defaults (uniform since 2026-08-22, A28)
+
+`default_ttl` **15m** and `max_ttl` **1h** on every cloud that can honour them. They used
+to vary by up to 400× across ten plugins carrying identical documentation, which made a
+default an accident of which plugin an operator happened to write first.
+
+Two clouds differ, and both are forced rather than chosen:
+
+| Cloud | default_ttl | max_ttl | Why it differs |
+|---|---|---|---|
+| OVH | 3600s | 3600s | The token's lifetime is fixed at 1h by the cloud and there is no revoke API, so neither a shorter nor a longer TTL would be honest (see the OVH row above). |
+| OCI | rotation_period/2 | rotation_period | Phased rotation: a read returns the freshest pre-provisioned slot and the lease TTL is the time until that slot's next rotation, so the role's TTL fields are bounds on the rotation schedule rather than on a credential's own lifetime. |

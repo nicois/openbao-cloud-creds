@@ -7,9 +7,14 @@ const cloudName = "do"
 // Field and metric-label names that recur across schemas, responses, and
 // telemetry. Constified so the linter (goconst) has a single source of truth.
 const (
-	fieldName      = "name"
-	fieldRole      = "role"
-	fieldScopes    = "scopes"
+	fieldName   = "name"
+	fieldRole   = "role"
+	fieldScopes = "scopes"
+	// minterTokenKey is the field a DO PAT arrives under in a minter object, and the
+	// key an issued token is returned under in the credential block. The same spelling
+	// in two places; constified because goconst counts a literal package-wide,
+	// including the test files.
+	minterTokenKey = "token"
 	fieldMinterSet = "minter_set"
 	fieldCloud     = "cloud"
 	// fieldMinterID names the minter targeted by the rotate endpoint.

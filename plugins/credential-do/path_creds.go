@@ -62,7 +62,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
 	// Mint token via DO API
-	scopes := strings.Split(role.Scopes, ",")
+	scopes := role.Scopes
 	tokenName, errResp := b.credentialName(ctx, req, roleName, req.ID)
 	if errResp != nil {
 		return errResp, nil
@@ -84,15 +84,15 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		Cloud: cloudName,
 		Role:  roleName,
 		Credential: map[string]interface{}{
-			"token":     tokenResp.Token.AccessToken,
-			fieldScopes: scopes,
+			minterTokenKey: tokenResp.Token.AccessToken,
+			fieldScopes:    scopes,
 		},
 		ExpiresAt:    expiresAt,
 		TTLSeconds:   int(role.DefaultTTL.Seconds()),
 		Renewable:    true,
 		CredentialID: tokenResp.Token.ID,
 		// DO scopes are fine-grained `<resource>:<verb>` permissions the token carries.
-		Scope:     role.Scopes,
+		Scope:     strings.Join(role.Scopes, ","),
 		ScopeKind: credenvelope.ScopeKindScopes,
 		IssuedBy:  "cloud-creds-do/v0.1",
 		MinterSet: setName,

@@ -1,6 +1,7 @@
 package credentialdo_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -54,7 +55,9 @@ func TestRoleCRUD(t *testing.T) {
 	if resp.Data["name"] != "snapshot-rw" {
 		t.Fatalf("unexpected name: %v", resp.Data["name"])
 	}
-	if resp.Data["scopes"] != "read,write" {
+	// A list-valued role field reads back as a LIST on every cloud now, whatever form
+	// it was written in (A28).
+	if got := fmt.Sprint(resp.Data["scopes"]); got != "[read write]" {
 		t.Fatalf("unexpected scopes: %v", resp.Data["scopes"])
 	}
 	if resp.Data["minter_set"] != "default" {

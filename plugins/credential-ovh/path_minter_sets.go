@@ -75,29 +75,46 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 		if !ok {
 			return nil, fmt.Errorf("each minter must be an object")
 		}
-		minter := cloudconfig.Minter{
-			ID:        fmt.Sprintf("%v", mMap["id"]),
-			CreatedAt: time.Now(),
-		}
-		clientID, _ := mMap["client_id"].(string)
-		clientSecret, _ := mMap["client_secret"].(string)
-		if clientID == "" || clientSecret == "" {
-			return nil, fmt.Errorf("minter %s: client_id and client_secret are required", minter.ID)
-		}
-		minter.Token = clientID + ":" + clientSecret
-		if ne, ok := mMap[neverExpiresKey].(bool); ok && ne {
-			minter.NeverExpires = true
-		}
-		if exp, ok := mMap["expires_at"].(string); ok {
-			t, err := time.Parse(time.RFC3339, exp)
-			if err != nil {
-				return nil, fmt.Errorf("invalid expires_at for minter %s: %v", minter.ID, err)
-			}
-			minter.ExpiresAt = t
+		minter, err := parseMinter(mMap)
+		if err != nil {
+			return nil, err
 		}
 		minters = append(minters, minter)
 	}
 	return minters, nil
+}
+
+// parseMinter reads one minter object. Split out from parseMinters so the two
+// concerns — the shape of the list and the shape of an element — stay separately
+// readable, and so the key validation has an obvious home.
+func parseMinter(mMap map[string]interface{}) (cloudconfig.Minter, error) {
+	// Reject a key this cloud does not read, rather than discarding the
+	// operator's intent in silence (A28).
+	if err := cloudconfig.ValidateMinterKeys(fmt.Sprintf("%v", mMap["id"]), mMap,
+		"id", "expires_at", neverExpiresKey, "client_id", "client_secret"); err != nil {
+		return cloudconfig.Minter{}, err
+	}
+	minter := cloudconfig.Minter{
+		ID:        fmt.Sprintf("%v", mMap["id"]),
+		CreatedAt: time.Now(),
+	}
+	clientID, _ := mMap["client_id"].(string)
+	clientSecret, _ := mMap["client_secret"].(string)
+	if clientID == "" || clientSecret == "" {
+		return cloudconfig.Minter{}, fmt.Errorf("minter %s: client_id and client_secret are required", minter.ID)
+	}
+	minter.Token = clientID + ":" + clientSecret
+	if ne, ok := mMap[neverExpiresKey].(bool); ok && ne {
+		minter.NeverExpires = true
+	}
+	if exp, ok := mMap["expires_at"].(string); ok {
+		t, err := time.Parse(time.RFC3339, exp)
+		if err != nil {
+			return cloudconfig.Minter{}, fmt.Errorf("invalid expires_at for minter %s: %v", minter.ID, err)
+		}
+		minter.ExpiresAt = t
+	}
+	return minter, nil
 }
 
 func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {

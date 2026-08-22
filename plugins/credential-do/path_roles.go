@@ -21,7 +21,7 @@ type doRole struct {
 	Name       string        `json:"name"`
 	DefaultTTL time.Duration `json:"default_ttl"`
 	MaxTTL     time.Duration `json:"max_ttl"`
-	Scopes     string        `json:"scopes"`
+	Scopes     []string      `json:"scopes"`
 	MinterSet  string        `json:"minter_set"`
 	Disabled   bool          `json:"disabled,omitempty"`
 }
@@ -46,8 +46,9 @@ func (b *backend) rolePaths() []*framework.Path {
 					Description: "Maximum lease TTL",
 				},
 				fieldScopes: {
-					Type:        framework.TypeString,
-					Description: "Comma-separated DO token scopes",
+					Type: framework.TypeCommaStringSlice,
+					Description: "DigitalOcean token scopes, e.g. droplet:create (required; " +
+						"they are this cloud's privilege boundary, so there is no default)",
 				},
 				fieldMinterSet: {
 					Type:        framework.TypeString,
@@ -73,7 +74,15 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	name := d.Get(fieldName).(string)
 	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
-	scopes := d.Get(fieldScopes).(string)
+	scopes := d.Get(fieldScopes).([]string)
+
+	// DO scopes are the only privilege control this plugin has on that cloud, so a role
+	// with none would issue a token that can do nothing — and "no opinion about
+	// privilege" must not quietly mean that either (A28).
+	if len(scopes) == 0 {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"%s is required", fieldScopes), nil
+	}
 
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {

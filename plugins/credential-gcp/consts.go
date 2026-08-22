@@ -79,7 +79,17 @@ const (
 	defaultCapabilityCacheTTLSeconds = 3600
 	// defaultRoleTTLSeconds is the default/maximum role token lifetime (1h);
 	// GCP caps access-token lifetime at 3600s by default.
-	defaultRoleTTLSeconds = 3600
+	// The role TTL defaults are deliberately the SAME on every cloud that can honour
+	// them — 15m default, 1h maximum — because short-lived credentials are the product
+	// and a default is what most roles will actually run with. They used to vary by up
+	// to 400x across ten plugins with identical documentation (A28 in
+	// docs/audit-2026-08-22.md). Only OVH (a fixed 1h token, so exactly 3600 either
+	// way) and OCI (whose lease TTL is derived from the rotation period) differ, and
+	// both are forced by the cloud rather than chosen.
+	defaultRoleTTLSeconds = 900 // 15m
+	// defaultRoleMaxTTLSeconds is 1h. max_ttl used to default to defaultRoleTTLSeconds,
+	// which meant the ceiling and the default were the same value and moved together.
+	defaultRoleMaxTTLSeconds = 3600
 )
 
 // Operational tuning constants. Values unchanged from the original literals.

@@ -9,6 +9,7 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.0.0-00010101000000-000000000000
 	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/worker v0.0.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
@@ -50,7 +51,6 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/capability v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.0.0
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/openbao/go-kms-wrapping/v2 v2.8.0 // indirect

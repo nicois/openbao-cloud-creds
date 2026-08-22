@@ -65,9 +65,16 @@ func TestMinterSetRotate_RejectsAndDoesNotMutate(t *testing.T) {
 	}
 }
 
-// TestConfigMinterRetireGraceRoundTrip verifies the uniform minter_retire_grace
-// config field writes and reads back unchanged.
-func TestConfigMinterRetireGraceRoundTrip(t *testing.T) {
+// TestConfigMinterRetireGraceRejectedWhereNothingRetires: this cloud's minters
+// cannot self-rotate, so no minter is ever retired and the retired-sweep has nothing
+// to sweep — the field is inert here.
+//
+// This test used to assert the OPPOSITE: that the value round-trips. Uniformity of
+// the config schema is worth something, but not at the price of telling an operator
+// a setting is in force when nothing will ever read it — which is the same defect as
+// UpCloud's `scopes` and is what A28 is about. A uniform template that omits the
+// field still works; only setting it explicitly is refused.
+func TestConfigMinterRetireGraceRejectedWhereNothingRetires(t *testing.T) {
 	const graceSeconds = 86400
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
@@ -77,21 +84,20 @@ func TestConfigMinterRetireGraceRoundTrip(t *testing.T) {
 	}
 	storage := config.StorageView
 
-	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
 		Data: map[string]interface{}{testRegionField: testRegionValue, fieldMinterRetireGrace: graceSeconds},
-	}); err != nil || (resp != nil && resp.IsError()) {
-		t.Fatalf("config write: %v %v", err, resp)
-	}
-
-	resp, err := b.HandleRequest(t.Context(), &logical.Request{
-		Operation: logical.ReadOperation, Path: pathConfigKey, Storage: storage,
 	})
-	if err != nil || resp == nil || resp.IsError() {
-		t.Fatalf("config read: %v %v", err, resp)
+	if err != nil {
+		t.Fatalf("config write errored: %v", err)
 	}
-	if got := resp.Data[fieldMinterRetireGrace]; got != graceSeconds {
-		t.Fatalf("minter_retire_grace = %v, want %d", got, graceSeconds)
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("an explicitly-set %s was accepted on a cloud where nothing is ever retired, so "+
+			"the operator is told a setting is in force that will never be read: %v",
+			fieldMinterRetireGrace, resp)
+	}
+	if got := resp.Error().Error(); !strings.Contains(got, "has no effect on this cloud") {
+		t.Errorf("the rejection should say the field has no effect here, got: %v", got)
 	}
 }
 

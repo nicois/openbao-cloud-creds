@@ -69,6 +69,13 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	maxTTL := time.Duration(d.Get(fieldMaxTTL).(int)) * time.Second
 	roleID := d.Get(fieldRoleID).(string)
 
+	// An Exoscale API key is scoped by the IAM role it is bound to. Without one there is
+	// no privilege boundary at all, and the key would be whatever the cloud defaults to (A28).
+	if roleID == "" {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"%s is required", fieldRoleID), nil
+	}
+
 	minterSet := d.Get(fieldMinterSet).(string)
 	if minterSet == "" {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil
