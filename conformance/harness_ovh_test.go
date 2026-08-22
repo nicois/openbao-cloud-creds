@@ -51,10 +51,12 @@ func ovhHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath, minterSet(ovhMinter(liveMinterID)))
 			plugintest.Write(t, b, storage, rolePath, ovhRoleFields())
 		},
-		IssuePath:      issuePath,
-		RolePath:       rolePath,
-		WorkersRunning: credentialovh.WorkersRunning,
-		SetPath:        setPath,
+		IssuePath:             issuePath,
+		SecretType:            "ovh_access_token",
+		LeaseInternalDataKeys: []string{"credential_id", "role", "minter_set", "minter_id"},
+		RolePath:              rolePath,
+		WorkersRunning:        credentialovh.WorkersRunning,
+		SetPath:               setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath, minterSet(ovhMinter(replacementMinterID)))
 		},

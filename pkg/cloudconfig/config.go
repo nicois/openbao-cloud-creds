@@ -9,6 +9,7 @@ const (
 )
 
 type PluginConfig struct {
+	Versioned
 	Cloud             string        `json:"cloud"`
 	Minters           []Minter      `json:"minters"`
 	ReconcileCadence  time.Duration `json:"reconcile_cadence"`
@@ -60,6 +61,7 @@ func (c *PluginConfig) CapabilityCacheDuration() time.Duration {
 
 func DefaultConfig(cloud string) *PluginConfig {
 	return &PluginConfig{
+		Versioned:         Versioned{Schema: SchemaVersion},
 		Cloud:             cloud,
 		ReconcileCadence:  defaultReconcileCadence,
 		BootstrapDelay:    defaultBootstrapDelay,

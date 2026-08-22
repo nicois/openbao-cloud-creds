@@ -194,7 +194,19 @@ func (b *backend) trackActiveKey(ctx context.Context, req *logical.Request, a tr
 func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	keyID, ok := req.Secret.InternalData["upstream_key_id"].(string)
 	if !ok || keyID == "" {
-		return nil, fmt.Errorf("missing upstream_key_id in internal_data")
+		// Nothing here is retryable: an internal_data key that is absent will be absent
+		// on every retry, and OpenBao retries a failed revoke indefinitely — so
+		// returning an error wedged the lease forever while the API key it names stayed
+		// alive upstream. That is KI-002's wedge with a different cause (A30 in
+		// docs/audit-2026-08-22.md).
+		//
+		// Releasing the lease is the lesser harm, and it is logged at ERROR because it
+		// needs a human: we cannot name the upstream credential, so the owner-tag
+		// reconciler will only reclaim it once its own tracking entry is gone.
+		b.Logger().Error("revoke: lease internal_data is missing a required field; releasing the "+
+			"lease and leaving the upstream credential to be reclaimed by hand",
+			fieldCloud, cloudName, "missing_field", "upstream_key_id", "lease_id", req.Secret.LeaseID)
+		return nil, nil
 	}
 
 	minterSet, _ := req.Secret.InternalData[fieldMinterSet].(string)

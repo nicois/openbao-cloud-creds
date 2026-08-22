@@ -32,7 +32,7 @@ func (b *backend) emitMinterMetrics() {
 			}
 			labels = withCloudKey(labels, cloudconfig.CloudKeyID(ms.minter))
 
-			emit.Gauge("minter_age_seconds", float32(now.Sub(ms.minter.CreatedAt).Seconds()), labels)
+			b.emitMinterAge(ms.minter, labels, setName, id)
 
 			state := string(ms.sm.State())
 			emit.Gauge("upstream_state", 1, append(labels, metrics.Label{Name: "state", Value: state}))
@@ -78,4 +78,20 @@ func withCloudKey(labels []metrics.Label, cloudKey string) []metrics.Label {
 		return labels
 	}
 	return append(labels, metrics.Label{Name: "cloud_key_id", Value: cloudKey})
+}
+
+// emitMinterAge publishes a minter's age, or explains why it cannot.
+//
+// An absent CreatedAt is a MISSING fact, not an age. Subtracting the zero time
+// published ~2e9 seconds — 63 years — so a dashboard or an alert on minter age read a
+// pre-lifecycle or version-skewed entry as the oldest credential in the fleet (A30 in
+// docs/audit-2026-08-22.md). Emitting nothing is honest: the series is absent rather
+// than wrong, and absent is a condition an alert can express.
+func (b *backend) emitMinterAge(minter cloudconfig.Minter, labels []metrics.Label, setName, id string) {
+	if minter.CreatedAt.IsZero() {
+		b.Logger().Warn("minter has no created_at, so its age cannot be reported",
+			fieldCloud, cloudName, fieldMinterSet, setName, "minter_id", id)
+		return
+	}
+	emit.Gauge("minter_age_seconds", float32(time.Since(minter.CreatedAt).Seconds()), labels)
 }

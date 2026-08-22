@@ -64,10 +64,12 @@ func awsHarness(t *testing.T) plugintest.Harness {
 				minterSet(awsMinter(liveMinterID, awsLiveKeyID, awsLiveSecret)))
 			plugintest.Write(t, b, storage, rolePath, awsRoleFields())
 		},
-		IssuePath:      issuePath,
-		RolePath:       rolePath,
-		WorkersRunning: credentialaws.WorkersRunning,
-		SetPath:        setPath,
+		IssuePath:             issuePath,
+		SecretType:            "aws_sts_credentials",
+		LeaseInternalDataKeys: []string{"access_key_id", "role", "minter_set", "minter_id"},
+		RolePath:              rolePath,
+		WorkersRunning:        credentialaws.WorkersRunning,
+		SetPath:               setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(awsMinter(replacementMinterID, awsOtherKeyID, awsOtherSecret)))

@@ -56,10 +56,12 @@ func ociHarness(t *testing.T) plugintest.Harness {
 				fieldMinterSet: defaultSet,
 			})
 		},
-		IssuePath:      issuePath,
-		RolePath:       rolePath,
-		WorkersRunning: credentialoci.WorkersRunning,
-		SetPath:        setPath,
+		IssuePath:             issuePath,
+		SecretType:            "oci_auth_token",
+		LeaseInternalDataKeys: []string{"token_id", "slot_index", "role", "minter_set", "minter_id"},
+		RolePath:              rolePath,
+		WorkersRunning:        credentialoci.WorkersRunning,
+		SetPath:               setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(replacementMinterID, ociOtherToken)))
 		},

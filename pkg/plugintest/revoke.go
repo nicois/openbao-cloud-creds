@@ -18,6 +18,49 @@ import (
 func RunRevokeResilienceSuite(t *testing.T, h Harness) {
 	t.Run("RevokeDeletesTheUpstreamCredential", func(t *testing.T) { assertRevokeDeletesUpstream(t, h) })
 	t.Run("DoubleRevokeIsNoOp", func(t *testing.T) { assertDoubleRevokeIsNoOp(t, h) })
+	t.Run("RevokeWithUnusableInternalDataReleasesTheLease", func(t *testing.T) {
+		assertRevokeWithoutInternalDataReleases(t, h)
+	})
+}
+
+// assertRevokeWithoutInternalDataReleases: a revoke that cannot possibly succeed
+// must fail the lease OPEN, not retry it forever.
+//
+// OpenBao retries a failed revoke indefinitely, so an error is a promise that a
+// later attempt could work. A missing internal_data key is the opposite of that: it
+// will be missing on every attempt. Returning an error therefore wedged the lease
+// permanently — visible in `bao list sys/leases` for good — while the upstream
+// credential it named stayed alive anyway. That is KI-002's wedge reached by a
+// different route, and version skew is the route (A30).
+//
+// The lease is released instead, loudly, because a human has to reclaim a credential
+// we can no longer name.
+func assertRevokeWithoutInternalDataReleases(t *testing.T, h Harness) {
+	t.Helper()
+	b, storage := newConfiguredBackend(t, h)
+	resp, err := issue(t, b, storage, h.IssuePath)
+	if err != nil || resp == nil || resp.IsError() || resp.Secret == nil {
+		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
+	}
+
+	// Strip everything the PLUGIN put there, keeping only the framework's own
+	// secret_type — which is how core routes the revoke to a callback at all, so
+	// removing it would test the SDK rather than the plugin. What is left is a lease
+	// whose every plugin-written key a newer binary renamed.
+	stripped := *resp.Secret
+	stripped.InternalData = map[string]interface{}{
+		"secret_type": resp.Secret.InternalData["secret_type"],
+	}
+
+	r, e := revokeSecret(t, b, storage, h.IssuePath, &stripped)
+	if e != nil {
+		t.Fatalf("revoke with unusable internal_data returned an error (%v), so core will retry it "+
+			"forever and the lease never goes away. Nothing about it is retryable", e)
+	}
+	if r != nil && r.IsError() {
+		t.Fatalf("revoke with unusable internal_data returned an error response (%v); same "+
+			"consequence as an error", r.Error())
+	}
 }
 
 // assertRevokeDeletesUpstream is the assertion whose absence made this category

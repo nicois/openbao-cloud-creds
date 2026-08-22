@@ -733,3 +733,47 @@ cost problem for a security one, which is the wrong direction. Dedup plus the ca
 bound the cost. What a cap was really aimed at is an *unintended* fan-out, and that
 is served by logging the probe count above a threshold, where an operator can see it
 without being stopped by it.
+
+## Why persisted entries carry a schema version but not unknown-field preservation
+
+Every mutation in this codebase is read-struct → change one field → write the WHOLE
+struct back, and `encoding/json` silently drops fields it does not know. So a binary
+that predates a field *erases* it on any write — and on a minter set that erasure is
+A13 by another route: losing `retired`/`retired_at` un-retires a rotated-out minter,
+cancels the sweep that was going to delete its upstream credential, and returns a
+credential the operator has already replaced to the selection pool.
+
+The strictly stronger answer is field preservation: decode into a
+`map[string]json.RawMessage`, mutate the known keys, re-encode everything. It also
+means every persisted type loses its Go struct as the single description of itself,
+every read path gains a decode step that cannot be type-checked, and a field's
+meaning stops being visible where it is declared. That is a large, permanent tax on
+every entry to survive a case — a downgrade — that a version check turns into a clear
+error instead.
+
+So: `cloudconfig.Versioned`, stamped on write, checked on load, and the check refuses
+only the FUTURE. An entry from a newer schema is not loaded, not rewritten, and the
+error names the entry and says to upgrade the binary on that node; an entry with no
+version (written before this existed) is read as current, which during alpha is the
+ordinary case. The operator keeps an intact entry and a specific instruction, which
+is a better outcome than a partially-preserved one nobody can audit.
+
+What this deliberately does not provide is a migration mechanism. There are no
+migrations yet — `SchemaVersion` is 1 — and inventing a framework for a transition
+that has never happened would be guessing at its shape. The version is the
+prerequisite: it is what makes the *first* migration possible to write and detectable
+if forgotten. `AGENTS.md` carries the rule for new persisted types.
+
+## Why a revoke that cannot succeed releases the lease instead of failing
+
+OpenBao retries a failed revoke indefinitely, so returning an error is a promise that
+a later attempt might work. A missing `internal_data` key is the exact opposite: it
+will be missing on every attempt, forever. The old behaviour therefore produced the
+worst of both — a lease wedged permanently in `sys/leases`, and the upstream
+credential it could not name alive anyway.
+
+Releasing the lease is the lesser harm, and it is logged at ERROR rather than WARN
+because it genuinely needs a person: we cannot identify the upstream credential, so
+the owner-tag reconciler will only reclaim it once its own tracking entry is gone.
+The alternative — keeping the lease as a marker of the problem — keeps a marker
+nobody reads and a retry loop nobody wants, and still leaks the credential.

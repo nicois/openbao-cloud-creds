@@ -120,6 +120,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	capabilityCacheTTL := time.Duration(d.Get(fieldCapabilityCacheTTL).(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
+		Versioned:         cloudconfig.Versioned{Schema: cloudconfig.SchemaVersion},
 		Cloud:             cloudName,
 		ReconcileCadence:  reconcileCadence,
 		BootstrapDelay:    reconcilerBootstrapDelay,
@@ -182,6 +183,11 @@ func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error
 	}
 	var cfg cloudconfig.PluginConfig
 	if err := json.Unmarshal(entry.Value, &cfg); err != nil {
+		return err
+	}
+	// Refuse an entry a NEWER binary wrote: every mutation here rewrites the whole
+	// struct, so loading it would erase the fields this binary does not know (A30).
+	if err := cfg.CheckSchema("the stored config"); err != nil {
 		return err
 	}
 	b.mu.Lock()

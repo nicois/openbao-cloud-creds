@@ -167,6 +167,18 @@ type Harness struct {
 	HasEntity func(id string) bool
 
 	// Skips declares categories this plugin cannot exercise, mapped to the
+	// SecretType is the framework.Secret.Type string this plugin issues under, and
+	// LeaseInternalDataKeys are the internal_data keys revoke needs. Both are stated
+	// here as DATA rather than left implicit, because both are rename tripwires: the
+	// secret type is how core routes a revoke to the right callback, and a lease
+	// carrying an internal_data key the new binary no longer reads is a credential
+	// nothing will ever revoke. Neither rename fails any other test (A30 in
+	// docs/audit-2026-08-22.md), and this is also the only place the per-cloud lease
+	// contract is written down at all (A28).
+	SecretType string
+	// LeaseInternalDataKeys must all be present on an issued lease.
+	LeaseInternalDataKeys []string
+
 	// IssuesFromPreprovisionedSlots is true where a credential read serves a slot
 	// provisioned earlier rather than minting one, so it selects no minter. Only OCI
 	// (phased rotation) sets it. It changes what a minter-level fault can be observed

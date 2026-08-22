@@ -45,10 +45,12 @@ func upcloudHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, upcloudLiveToken)))
 			plugintest.Write(t, b, storage, rolePath, upcloudRoleFields())
 		},
-		IssuePath:      issuePath,
-		RolePath:       rolePath,
-		WorkersRunning: credentialupcloud.WorkersRunning,
-		SetPath:        setPath,
+		IssuePath:             issuePath,
+		SecretType:            "upcloud_token",
+		LeaseInternalDataKeys: []string{"upstream_token_id", "role", "minter_set", "minter_id"},
+		RolePath:              rolePath,
+		WorkersRunning:        credentialupcloud.WorkersRunning,
+		SetPath:               setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, upcloudOtherToken)))

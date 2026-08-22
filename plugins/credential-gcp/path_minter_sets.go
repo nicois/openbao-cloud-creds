@@ -135,7 +135,11 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 	if err := cloudconfig.ValidateMinterSet(minters); err != nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "invalid minter set: %v", err), nil
 	}
-	set := &cloudconfig.MinterSet{Name: name, Minters: minters}
+	set := &cloudconfig.MinterSet{
+		Versioned: cloudconfig.Versioned{Schema: cloudconfig.SchemaVersion},
+		Name:      name,
+		Minters:   minters,
+	}
 	// Prove the candidate minters can mint for the roles already bound to this
 	// set before persisting them (see capability.go). The validation above only
 	// inspects expiry metadata; without this a replacement minter that
@@ -485,6 +489,16 @@ func (b *backend) loadAllMinterSets(ctx context.Context, storage logical.Storage
 		// it then fail to issue with config_invalid naming the set, and the operator
 		// can rewrite it. Refusing to load the MOUNT would crash-loop it, which is
 		// the mistake A2 was about.
+		// Refuse an entry a NEWER binary wrote. Every write here rewrites the whole
+		// set, so registering one would mean erasing the fields this binary does not
+		// know — and on a minter set that is A13 by version skew: dropping
+		// retired/retired_at un-retires a rotated-out minter and cancels the sweep
+		// that was going to delete its upstream credential (A30).
+		if err := set.CheckSchema("minter set " + name); err != nil {
+			b.Logger().Error("refusing to load a minter set from a newer schema", fieldCloud, cloudName,
+				"name", name, "error", err)
+			continue
+		}
 		if err := cloudconfig.ValidateMinterSet(set.Minters); err != nil {
 			b.Logger().Error("refusing to load an invalid minter set; roles bound to it cannot issue "+
 				"until it is rewritten", fieldCloud, cloudName, "name", name, "error", err)

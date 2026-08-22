@@ -3,6 +3,7 @@ package plugintest
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -33,6 +34,61 @@ func RunLeaseContractSuite(t *testing.T, h Harness) {
 	t.Run("EnvelopeAgreesWithLease", func(t *testing.T) { assertEnvelopeAgreesWithLease(t, h) })
 	t.Run("RenewMatchesWhatTheLeaseAdvertises", func(t *testing.T) { assertRenewMatchesLease(t, h) })
 	t.Run("InternalDataSurvivesRPC", func(t *testing.T) { assertInternalDataSurvivesRPC(t, h) })
+	t.Run("SecretTypeAndInternalDataKeysAreTheDeclaredOnes", func(t *testing.T) {
+		assertLeaseIdentifiersAreDeclared(t, h)
+	})
+}
+
+// assertLeaseIdentifiersAreDeclared pins the two strings an upgrade can rename
+// without any other test noticing, and whose rename silently orphans every live
+// lease (A30).
+//
+// framework.Secret.Type is how core routes a revoke back to a callback: rename it
+// and every lease issued by the old binary revokes to nothing, so its upstream
+// credential lives on with the lease gone. An internal_data key is how revoke finds
+// the credential to delete: rename it and revoke cannot identify what to revoke —
+// which, before this batch, also meant retrying forever.
+//
+// Both are declared in the conformance registry rather than inferred here, so the
+// test states a contract instead of restating whatever the code happens to do.
+func assertLeaseIdentifiersAreDeclared(t *testing.T, h Harness) {
+	t.Helper()
+	if h.SecretType == "" || len(h.LeaseInternalDataKeys) == 0 {
+		t.Fatalf("%s: the harness declares no SecretType/LeaseInternalDataKeys, so a rename of "+
+			"either would go unnoticed. Both are part of this cloud's lease contract", h.Cloud)
+	}
+	b, storage := newConfiguredBackend(t, h)
+	resp, err := issue(t, b, storage, h.IssuePath)
+	if err != nil || resp == nil || resp.IsError() || resp.Secret == nil {
+		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
+	}
+
+	if resp.Secret.TTL <= 0 {
+		t.Errorf("issued lease has a non-positive TTL (%s)", resp.Secret.TTL)
+	}
+	if got := resp.Secret.InternalData["secret_type"]; got != nil && got != h.SecretType {
+		t.Errorf("internal_data secret_type is %v, declared %q", got, h.SecretType)
+	}
+	for _, key := range h.LeaseInternalDataKeys {
+		value, present := resp.Secret.InternalData[key]
+		if !present {
+			t.Errorf("issued lease has no internal_data[%q]; revoke reads it, so its absence means a "+
+				"credential nothing can revoke. Present keys: %v", key, keysOf(resp.Secret.InternalData))
+			continue
+		}
+		if str, ok := value.(string); ok && str == "" {
+			t.Errorf("issued lease has an empty internal_data[%q]", key)
+		}
+	}
+}
+
+func keysOf(data map[string]interface{}) []string {
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // assertEnvelopeShape checks the success side of the response contract, which is

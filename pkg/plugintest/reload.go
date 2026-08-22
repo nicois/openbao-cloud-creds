@@ -1,6 +1,7 @@
 package plugintest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -32,6 +33,8 @@ func RunReloadSuite(t *testing.T, h Harness) {
 	t.Run("InitializeRehydratesAndIssues", func(t *testing.T) { assertInitializeRehydrates(t, h) })
 
 	t.Run("InvalidPersistedSetIsNotLoaded", func(t *testing.T) { assertInvalidPersistedSetIsRefused(t, h) })
+
+	t.Run("SetFromANewerSchemaIsNotLoaded", func(t *testing.T) { assertFutureSchemaSetIsRefused(t, h) })
 
 	t.Run("ReloadPreservesRoleAndSet", func(t *testing.T) {
 		_, storage := newConfiguredBackend(t, h)
@@ -160,5 +163,63 @@ func assertInvalidPersistedSetIsRefused(t *testing.T, h Harness) {
 		t.Fatalf("a reloaded backend issued a credential from a minter set that violates RSK-005: "+
 			"%v. An invalid set must not be registered — the operator has to be told to rewrite it, "+
 			"not served from it", resp.Data)
+	}
+}
+
+// assertFutureSchemaSetIsRefused: an entry written by a NEWER binary must not be
+// loaded by this one.
+//
+// Every mutation here is read-struct → change → write the whole struct back, and
+// encoding/json drops what it does not know — so an older binary silently ERASES a
+// field a newer one added. On a minter set that is A13 by version skew: losing
+// retired/retired_at un-retires a rotated-out minter, cancelling the sweep that was
+// going to delete its upstream credential and returning a replaced minter to the
+// selection pool. Refusing to touch the entry leaves it intact and tells the
+// operator which node to upgrade (A30).
+func assertFutureSchemaSetIsRefused(t *testing.T, h Harness) {
+	t.Helper()
+	if h.IssuesFromPreprovisionedSlots {
+		t.Skipf("%s: a credential read serves a slot provisioned earlier and selects no minter, so "+
+			"declining to load a set is not observable at the read path — the refusal is shared code "+
+			"and is asserted by the nine JIT clouds", h.Cloud)
+	}
+	_, storage := newConfiguredBackend(t, h)
+
+	entry, err := storage.Get(t.Context(), h.SetPath)
+	if err != nil || entry == nil {
+		t.Fatalf("could not read the persisted minter set at %q: err=%v entry=%v", h.SetPath, err, entry)
+	}
+	var set map[string]interface{}
+	if err := json.Unmarshal(entry.Value, &set); err != nil {
+		t.Fatalf("persisted minter set is not JSON: %v", err)
+	}
+	// A version from the future, plus a field this binary knows nothing about — which
+	// is the thing a whole-struct rewrite would destroy.
+	set["schema_version"] = 9999
+	set["a_field_this_binary_does_not_know"] = "must survive"
+
+	value, err := json.Marshal(set)
+	if err != nil {
+		t.Fatalf("could not re-encode the minter set: %v", err)
+	}
+	if err := storage.Put(t.Context(), &logical.StorageEntry{Key: h.SetPath, Value: value}); err != nil {
+		t.Fatalf("could not write the future-schema minter set back: %v", err)
+	}
+
+	b2 := Reload(t, h, storage)
+	if resp, issueErr := issue(t, b2, storage, h.IssuePath); issueErr == nil && resp != nil && !resp.IsError() {
+		t.Fatalf("a backend that does not understand the persisted schema issued a credential from it "+
+			"anyway: %v. The next write of that set would erase whatever the newer binary put there",
+			resp.Data)
+	}
+
+	// And the entry itself must be untouched: refusing means refusing to write, too.
+	after, err := storage.Get(t.Context(), h.SetPath)
+	if err != nil || after == nil {
+		t.Fatalf("the minter set went missing: err=%v", err)
+	}
+	if !bytes.Contains(after.Value, []byte("a_field_this_binary_does_not_know")) {
+		t.Errorf("the unknown field was erased from the persisted set, which is the exact damage the "+
+			"version check exists to prevent: %s", after.Value)
 	}
 }

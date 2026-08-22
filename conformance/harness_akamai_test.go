@@ -52,10 +52,12 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, akamaiMinterToken)))
 			plugintest.Write(t, b, storage, rolePath, akamaiRoleFields())
 		},
-		IssuePath:      issuePath,
-		RolePath:       rolePath,
-		WorkersRunning: credentialakamai.WorkersRunning,
-		SetPath:        setPath,
+		IssuePath:             issuePath,
+		SecretType:            "akamai_client",
+		LeaseInternalDataKeys: []string{"upstream_client_id", "role", "minter_set", "minter_id"},
+		RolePath:              rolePath,
+		WorkersRunning:        credentialakamai.WorkersRunning,
+		SetPath:               setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, akamaiOtherToken)))

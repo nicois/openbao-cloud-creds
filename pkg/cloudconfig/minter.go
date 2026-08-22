@@ -25,6 +25,7 @@ type Minter struct {
 // MinterSet is a named, independently-validated group of minter credentials.
 // Roles bind to exactly one set; the plugin mints only from that set's minters.
 type MinterSet struct {
+	Versioned
 	Name    string   `json:"name"`
 	Minters []Minter `json:"minters"`
 }
