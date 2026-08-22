@@ -102,7 +102,7 @@ func (c *azureClient) getToken(ctx context.Context) (token string, httpStatus in
 		return c.cachedToken, http.StatusOK, nil
 	}
 
-	tokenURL := fmt.Sprintf("%s/%s/oauth2/v2.0/token", c.loginEndpoint, c.tenantID)
+	tokenURL := fmt.Sprintf("%s/%s/oauth2/v2.0/token", c.loginEndpoint, cloudconfig.PathSegment(c.tenantID))
 
 	form := url.Values{}
 	form.Set("grant_type", "client_credentials")
@@ -155,7 +155,7 @@ func (c *azureClient) AddPassword(ctx context.Context, appObjectID, displayName 
 	}
 	body, _ := json.Marshal(reqBody)
 
-	apiURL := fmt.Sprintf("%s/v1.0/applications/%s/addPassword", c.graphEndpoint, appObjectID)
+	apiURL := fmt.Sprintf("%s/v1.0/applications/%s/addPassword", c.graphEndpoint, cloudconfig.PathSegment(appObjectID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
@@ -190,7 +190,7 @@ func (c *azureClient) RemovePassword(ctx context.Context, appObjectID, keyID str
 	reqBody := removePasswordRequest{KeyID: keyID}
 	body, _ := json.Marshal(reqBody)
 
-	apiURL := fmt.Sprintf("%s/v1.0/applications/%s/removePassword", c.graphEndpoint, appObjectID)
+	apiURL := fmt.Sprintf("%s/v1.0/applications/%s/removePassword", c.graphEndpoint, cloudconfig.PathSegment(appObjectID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
@@ -217,7 +217,7 @@ func (c *azureClient) GetApplication(ctx context.Context, appObjectID string) (*
 		return nil, tokenStatus, fmt.Errorf("failed to get access token: %w", err)
 	}
 
-	apiURL := fmt.Sprintf("%s/v1.0/applications/%s", c.graphEndpoint, appObjectID)
+	apiURL := fmt.Sprintf("%s/v1.0/applications/%s", c.graphEndpoint, cloudconfig.PathSegment(appObjectID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return nil, 0, err

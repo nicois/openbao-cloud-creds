@@ -78,3 +78,47 @@ func isLoopback(host string) bool {
 	}
 	return false
 }
+
+// PathSegment escapes a value being interpolated into ONE segment of an upstream
+// URL path.
+//
+// Not one plugin client escaped anything: every upstream id — a token id, an Azure
+// app object id, a tenant id, a service-account email, and every
+// `rotation_params` value the six rotation clouds record — was concatenated into a
+// path raw. Most of those come from an operator's own configuration, and a value
+// containing `../` therefore aimed a DELETE at a resource nobody named: Go's
+// transport writes the path as given and lets the server resolve the dots (A29 in
+// docs/audit-2026-08-22.md).
+//
+// It is deliberately not a validator. Escaping is total — every character survives
+// as itself, so a legitimately odd id still works — whereas a character allowlist
+// would have to guess each cloud's id grammar and would reject something real.
+func PathSegment(value string) string {
+	return url.PathEscape(value)
+}
+
+// ValidateResourcePath checks a value that is a MULTI-segment upstream resource
+// path, where escaping the separators would break it. GCP's `key_name` is the one
+// such field: it is literally
+// `projects/-/serviceAccounts/<sa>/keys/<id>` and is appended to the API root.
+//
+// So this rejects rather than transforms: no traversal, no absolute path, no
+// scheme, no empty segment. A rotation_params value written by an operator can
+// otherwise point a DELETE at any resource the minter can reach.
+func ValidateResourcePath(field, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s must not be empty", field)
+	}
+	if strings.HasPrefix(value, "/") || strings.Contains(value, "://") {
+		return fmt.Errorf("%s must be a relative resource path, not %q", field, value)
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" {
+			return fmt.Errorf("%s contains an empty path segment: %q", field, value)
+		}
+		if segment == "." || segment == ".." {
+			return fmt.Errorf("%s must not contain a %q traversal segment: %q", field, segment, value)
+		}
+	}
+	return nil
+}

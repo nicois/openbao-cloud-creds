@@ -76,6 +76,40 @@ func (m *Manager) Start(ctx context.Context) {
 
 func (m *Manager) Wait() {
 	m.wg.Wait()
+	m.markStopped()
+}
+
+// DrainTimeout bounds how long a shutdown waits for in-flight ticks. It is above a
+// plugin's 30s upstream HTTP timeout, so an ordinary in-flight call has time to
+// notice its cancelled context, and short enough that a call which does NOT notice
+// cannot hold the caller indefinitely.
+const DrainTimeout = 35 * time.Second
+
+// WaitFor drains like Wait but gives up after timeout, reporting whether the drain
+// completed.
+//
+// The caller is framework.Backend.Clean, which the SDK invokes while holding a
+// process-wide lock — so an unbounded wait there stalls every OTHER mount in the
+// multiplexed binary behind one mount's in-flight HTTP call (A29 in
+// docs/audit-2026-08-22.md). Returning early is safe: the worker context is already
+// cancelled, the goroutines are on their way out, and every storage write they
+// could still attempt fails against a cancelled context.
+func (m *Manager) WaitFor(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		m.markStopped()
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+func (m *Manager) markStopped() {
 	m.mu.Lock()
 	m.running = false
 	m.mu.Unlock()

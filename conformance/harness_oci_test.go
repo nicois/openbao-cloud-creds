@@ -70,6 +70,9 @@ func ociHarness(t *testing.T) plugintest.Harness {
 			return 0
 		},
 		ExpectsHardRevoke: false,
+		// Phased rotation: a read returns the freshest pre-provisioned slot and selects
+		// no minter, so a minter-level fault shows up at the next rotation.
+		IssuesFromPreprovisionedSlots: true,
 
 		Skips: map[plugintest.Category]string{
 			plugintest.CategoryCapability: "OCI returns capability.ErrUnsupported for every check: a " +

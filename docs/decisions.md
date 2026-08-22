@@ -118,15 +118,38 @@ structurally loose). See `docs/superpowers/specs/2026-05-31-golangci-config-upgr
 
 ## Why minter rotation retires with a grace period instead of deleting immediately
 
+> **Corrected 2026-08-22 (A29).** The paragraph below originally justified the grace
+> with "the other nodes keep the old minter in their in-memory snapshot", which
+> describes a model OpenBao OSS does not have: only the ACTIVE node loads the mount
+> table and runs a backend, and standbys forward requests rather than serving them,
+> so there is never a second live backend holding a stale snapshot. The grace is
+> still right, for the failure that CAN happen — see the corrected reasoning
+> immediately below. The conclusion did not change; the reason it rests on did.
+
 Minter sets are loaded into memory only at `Factory` construction and on a
-minter-set write — there is no periodic reload. On a raft cluster the rotate
-request is served by exactly one node; the other nodes keep the old minter in
-their in-memory snapshot until they next reload (failover, restart, or a
-subsequent minter-set write). If rotation deleted the old upstream credential
-the moment it minted and swapped in the successor, every other node would still
-be trying to mint with a credential that no longer exists upstream — issuance
-would wedge cluster-wide (the KI-001 class of "the surviving node holds stale
-config" failure).
+minter-set write — there is no periodic reload. **One backend instance is live at a
+time** (the active node's), so the hazard is not a peer with a stale snapshot; it is
+*the same mount at a different moment*, and a stale actor that has not yet noticed
+it is no longer the one in charge:
+
+- **Failover.** The new active node builds a fresh backend from storage. Any
+  in-flight issuance on the outgoing node was using the minter that storage no
+  longer names, and a lease whose credential was minted by it still has to be
+  revocable — with a minter the new node can also reach.
+- **A partitioned former leader.** Raft stops its *storage* writes, not its
+  outbound HTTPS. A worker tick that began before it lost leadership keeps talking
+  to the cloud, using whatever set it last loaded. Deleting the retired credential
+  the instant the successor is swapped in makes those calls fail against a
+  credential that no longer exists, and there is no fencing token in the plugin API
+  to stop them.
+- **The operator's own copy.** A minter is frequently pasted into a set from a
+  password manager or a Terraform variable. An immediate upstream delete means a
+  mis-typed successor leaves the operator with two dead credentials instead of one
+  live one.
+
+If rotation deleted the old upstream credential the moment it minted and swapped in
+the successor, each of those becomes an unrecoverable wedge rather than a slow
+handover — the KI-001 class of "the surviving actor holds stale config" failure.
 
 Decision: rotation is grace-separated. `RotateMinter` mints the successor,
 validates the prospective set, health-checks the successor, swaps it in, and

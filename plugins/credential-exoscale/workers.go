@@ -43,7 +43,7 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 	wm.Register("health-check", healthCheckInterval, worker.Opts{}, b.healthCheckWorker)
 
 	wm.Register("reconciler", cfg.ReconcileCadence, worker.Opts{
-		InitialDelay: cfg.BootstrapDelay,
+		InitialDelay: b.remainingBootstrapDelay(cfg.BootstrapDelay),
 	}, func(ctx context.Context) error {
 		return b.reconcileWorker(ctx, storage)
 	})
@@ -72,8 +72,11 @@ func (b *backend) stopWorkersLocked() {
 	if cancel != nil {
 		cancel()
 	}
-	if wm != nil {
-		wm.Wait()
+	if wm != nil && !wm.WaitFor(worker.DrainTimeout) {
+		// Do not hold the SDK's process-wide lock behind one mount's in-flight
+		// upstream call: the goroutines are already cancelled and on their way out.
+		b.Logger().Warn("worker drain did not finish within the deadline; continuing shutdown",
+			fieldCloud, cloudName, "deadline", worker.DrainTimeout)
 	}
 }
 
@@ -141,4 +144,26 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 	// reconcile cadence but is keyed off RetiredAt, separate from the orphan
 	// reconciler above.
 	return b.sweepRetiredMinters(ctx, storage, time.Now())
+}
+
+// remainingBootstrapDelay is what is LEFT of the reconciler's hold-off, measured
+// from the first time this process started workers rather than from this call.
+//
+// The hold-off exists so a freshly (re)started mount does not treat leases issued
+// just before the restart as orphans. It was passed straight through as
+// InitialDelay — and startWorkers re-runs on every config write, every minter-set
+// write and every plugin reload, so a write every 23h re-armed a 24h delay forever
+// and the orphan backstop never ran once (A29 in docs/audit-2026-08-22.md).
+func (b *backend) remainingBootstrapDelay(total time.Duration) time.Duration {
+	b.mu.Lock()
+	if b.bootstrapAt.IsZero() {
+		b.bootstrapAt = time.Now()
+	}
+	startedAt := b.bootstrapAt
+	b.mu.Unlock()
+
+	if remaining := total - time.Since(startedAt); remaining > 0 {
+		return remaining
+	}
+	return 0
 }

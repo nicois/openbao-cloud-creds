@@ -233,6 +233,22 @@ func (b *backend) loadAllMinterSets(ctx context.Context, storage logical.Storage
 			b.Logger().Warn("skipping unparseable minter set", "name", name, "error", err)
 			continue
 		}
+		// OBC-005 requires an invalid minter set to fail at config LOAD, not only at
+		// config write, and this path used to register whatever was persisted. A set
+		// no write would accept today — one a version-skewed binary stripped fields
+		// from, or storage was edited under — was therefore loaded fail-OPEN and
+		// issued from, which is exactly the silent single-minter case RSK-005 exists
+		// to prevent (A29 in docs/audit-2026-08-22.md).
+		//
+		// Not registering it is the fail-closed action available here: roles bound to
+		// it then fail to issue with config_invalid naming the set, and the operator
+		// can rewrite it. Refusing to load the MOUNT would crash-loop it, which is
+		// the mistake A2 was about.
+		if err := cloudconfig.ValidateMinterSet(set.Minters); err != nil {
+			b.Logger().Error("refusing to load an invalid minter set; roles bound to it cannot issue "+
+				"until it is rewritten", fieldCloud, cloudName, "name", name, "error", err)
+			continue
+		}
 		b.loadMinterSet(&set)
 	}
 	return nil

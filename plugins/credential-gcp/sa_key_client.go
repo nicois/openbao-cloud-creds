@@ -148,7 +148,7 @@ func (c *realSAKeyClient) CreateKey(ctx context.Context) (newKeyJSON, keyName st
 		return "", "", err
 	}
 
-	apiURL := fmt.Sprintf("%s/projects/-/serviceAccounts/%s/keys", iamServiceEndpoint, saEmail)
+	apiURL := fmt.Sprintf("%s/projects/-/serviceAccounts/%s/keys", iamServiceEndpoint, cloudconfig.PathSegment(saEmail))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create keys.create request: %w", err)
@@ -191,6 +191,12 @@ func (c *realSAKeyClient) CreateKey(ctx context.Context) (newKeyJSON, keyName st
 func (c *realSAKeyClient) DeleteKey(ctx context.Context, keyName string) error {
 	authTok, _, err := c.authToken(ctx)
 	if err != nil {
+		return err
+	}
+	// key_name is a MULTI-segment resource path (projects/-/serviceAccounts/<sa>/keys/<id>),
+	// so it cannot be escaped without breaking it — it is validated instead. It reaches
+	// here from rotation_params, which an operator can write by hand (A29).
+	if err := cloudconfig.ValidateResourcePath(fieldKeyName, keyName); err != nil {
 		return err
 	}
 	apiURL := iamServiceEndpoint + "/" + keyName

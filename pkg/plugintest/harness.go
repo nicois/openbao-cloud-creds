@@ -167,6 +167,12 @@ type Harness struct {
 	HasEntity func(id string) bool
 
 	// Skips declares categories this plugin cannot exercise, mapped to the
+	// IssuesFromPreprovisionedSlots is true where a credential read serves a slot
+	// provisioned earlier rather than minting one, so it selects no minter. Only OCI
+	// (phased rotation) sets it. It changes what a minter-level fault can be observed
+	// to break: the next rotation, not the next read.
+	IssuesFromPreprovisionedSlots bool
+
 	// reason. An empty reason, or a key that is not a known category, fails the
 	// conformance run.
 	Skips map[Category]string

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 )
 
 // httpTimeout bounds every DO API call the minter client makes.
@@ -132,7 +134,7 @@ func (c *doClient) ListTokens(ctx context.Context) ([]tokenInfo, error) {
 }
 
 func (c *doClient) DeleteToken(ctx context.Context, tokenID string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v2/tokens/"+tokenID, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v2/tokens/"+cloudconfig.PathSegment(tokenID), http.NoBody)
 	if err != nil {
 		return 0, err
 	}

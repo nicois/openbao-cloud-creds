@@ -217,3 +217,53 @@ func TestConcurrentStartWaitCycles(t *testing.T) {
 	}
 	wgOuter.Wait()
 }
+
+// A shutdown must not be able to hold its caller indefinitely. Backend.Clean is
+// invoked by the SDK while holding a process-wide lock, so an unbounded drain there
+// stalls every other mount in the multiplexed binary behind one mount's in-flight
+// upstream call (A29).
+func TestWaitForGivesUpOnAWorkerThatIgnoresCancellation(t *testing.T) {
+	stuck := make(chan struct{})
+	t.Cleanup(func() { close(stuck) })
+
+	m := worker.New()
+	m.Register("stuck", time.Millisecond, worker.Opts{}, func(context.Context) error {
+		<-stuck // deliberately ignores ctx, which is the case the deadline exists for
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.Start(ctx)
+	// Let the ticker fire so a tick is genuinely in flight.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	start := time.Now()
+	if m.WaitFor(50 * time.Millisecond) {
+		t.Fatal("WaitFor reported a completed drain while a tick was still stuck")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("WaitFor blocked for %s despite a 50ms deadline", elapsed)
+	}
+}
+
+// The ordinary case: a cancellation-aware worker drains, and WaitFor says so.
+func TestWaitForReportsACompletedDrain(t *testing.T) {
+	m := worker.New()
+	m.Register("polite", time.Millisecond, worker.Opts{}, func(ctx context.Context) error {
+		<-ctx.Done()
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.Start(ctx)
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	if !m.WaitFor(2 * time.Second) {
+		t.Fatal("a worker that respects its context did not drain within two seconds")
+	}
+	if m.Running() {
+		t.Error("a completed drain must leave the manager not running")
+	}
+}

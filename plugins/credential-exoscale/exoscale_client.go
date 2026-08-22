@@ -124,7 +124,7 @@ func (c *exoscaleClient) ListAPIKeys(ctx context.Context) ([]apiKeyInfo, error) 
 }
 
 func (c *exoscaleClient) DeleteAPIKey(ctx context.Context, keyID string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v2/api-key/"+keyID, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v2/api-key/"+cloudconfig.PathSegment(keyID), http.NoBody)
 	if err != nil {
 		return 0, err
 	}

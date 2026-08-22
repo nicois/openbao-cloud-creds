@@ -225,7 +225,8 @@ func (c *realIAMClient) GenerateAccessToken(ctx context.Context, serviceAccount 
 		return "", time.Time{}, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	apiURL := fmt.Sprintf("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateAccessToken", serviceAccount)
+	apiURL := fmt.Sprintf("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateAccessToken",
+		cloudconfig.PathSegment(serviceAccount))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("failed to create request: %w", err)

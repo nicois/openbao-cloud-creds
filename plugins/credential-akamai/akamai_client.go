@@ -400,7 +400,7 @@ func (c *akamaiClient) ListClients(ctx context.Context) ([]clientInfo, error) {
 }
 
 func (c *akamaiClient) DeleteClient(ctx context.Context, clientID string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/identity-management/v3/api-clients/"+clientID, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/identity-management/v3/api-clients/"+cloudconfig.PathSegment(clientID), http.NoBody)
 	if err != nil {
 		return 0, err
 	}

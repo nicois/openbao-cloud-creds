@@ -2,6 +2,7 @@ package plugintest
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -29,6 +30,8 @@ func RunReloadSuite(t *testing.T, h Harness) {
 	})
 
 	t.Run("InitializeRehydratesAndIssues", func(t *testing.T) { assertInitializeRehydrates(t, h) })
+
+	t.Run("InvalidPersistedSetIsNotLoaded", func(t *testing.T) { assertInvalidPersistedSetIsRefused(t, h) })
 
 	t.Run("ReloadPreservesRoleAndSet", func(t *testing.T) {
 		_, storage := newConfiguredBackend(t, h)
@@ -98,3 +101,64 @@ const (
 	workerStartTimeout = 5 * time.Second
 	workerStartPoll    = 10 * time.Millisecond
 )
+
+// assertInvalidPersistedSetIsRefused: validation belonged at config LOAD as well as
+// at config write, and was only at write.
+//
+// OBC-005 calls an invalid minter set a hard config-load failure, but every plugin
+// registered whatever was persisted — so a set that no write would accept today was
+// loaded fail-OPEN and issued from. That is reachable without anyone doing anything
+// exotic: a version-skewed binary that does not know a field drops it on the next
+// whole-struct write (A30), and RSK-005's whole point is that a set which has
+// quietly become single-minter is the failure nobody notices until the minter dies.
+//
+// The set is broken here the way either of those would break it — through storage,
+// not through the API — because the API is exactly the path that already refuses it.
+func assertInvalidPersistedSetIsRefused(t *testing.T, h Harness) {
+	t.Helper()
+	if h.IssuesFromPreprovisionedSlots {
+		t.Skipf("%s: a credential read serves a slot provisioned earlier and selects no minter, so "+
+			"refusing to load an invalid set stops the next ROTATION rather than the next read — the "+
+			"load-time refusal itself is shared code and is asserted by the nine JIT clouds", h.Cloud)
+	}
+	_, storage := newConfiguredBackend(t, h)
+
+	entry, err := storage.Get(t.Context(), h.SetPath)
+	if err != nil || entry == nil {
+		t.Fatalf("could not read the persisted minter set at %q: err=%v entry=%v", h.SetPath, err, entry)
+	}
+	var set map[string]interface{}
+	if err := json.Unmarshal(entry.Value, &set); err != nil {
+		t.Fatalf("persisted minter set is not JSON: %v", err)
+	}
+	minters, ok := set["minters"].([]interface{})
+	if !ok || len(minters) == 0 {
+		t.Fatalf("persisted minter set holds no minters: %v", set)
+	}
+	first, ok := minters[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("minters[0] is %T, want an object", minters[0])
+	}
+	// One EXPIRING minter and nothing else: the exact shape the (>=1 never_expires)
+	// OR (>=2 with a >=7d gap) rule exists to reject, with the credential material
+	// left untouched so the only thing wrong is the set's composition.
+	delete(first, "never_expires")
+	first["expires_at"] = time.Now().Add(30 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	set["minters"] = []interface{}{first}
+
+	value, err := json.Marshal(set)
+	if err != nil {
+		t.Fatalf("could not re-encode the minter set: %v", err)
+	}
+	if err := storage.Put(t.Context(), &logical.StorageEntry{Key: h.SetPath, Value: value}); err != nil {
+		t.Fatalf("could not write the broken minter set back: %v", err)
+	}
+
+	b2 := Reload(t, h, storage)
+	resp, err := issue(t, b2, storage, h.IssuePath)
+	if err == nil && resp != nil && !resp.IsError() {
+		t.Fatalf("a reloaded backend issued a credential from a minter set that violates RSK-005: "+
+			"%v. An invalid set must not be registered — the operator has to be told to rewrite it, "+
+			"not served from it", resp.Data)
+	}
+}

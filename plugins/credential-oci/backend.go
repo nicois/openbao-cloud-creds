@@ -3,6 +3,7 @@ package credentialoci
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
@@ -50,8 +51,12 @@ type backend struct {
 	config            *cloudconfig.PluginConfig
 	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
 	region            string
-	workerMgr         *worker.Manager
-	workerCancel      context.CancelFunc
+	// bootstrapAt is when this process first started workers, so the reconciler's
+	// hold-off is measured from a restart rather than re-armed by every write.
+	bootstrapAt time.Time
+
+	workerMgr    *worker.Manager
+	workerCancel context.CancelFunc
 	// baseCtx is the parent context for all worker goroutines; baseCancel is
 	// fired from Clean (backend teardown) so leaked workers cannot outlive the
 	// backend. Worker launch sites use baseCtx, never context.Background().

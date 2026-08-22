@@ -3,6 +3,7 @@ package credentialaws
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
@@ -31,9 +32,13 @@ type backend struct {
 	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
 	region            string
 	stsEndpoint       string
-	workerMgr         *worker.Manager
-	workerCancel      context.CancelFunc
-	stsClientFn       STSClientFactory
+	// bootstrapAt is when this process first started workers, so the reconciler's
+	// hold-off is measured from a restart rather than re-armed by every write.
+	bootstrapAt time.Time
+
+	workerMgr    *worker.Manager
+	workerCancel context.CancelFunc
+	stsClientFn  STSClientFactory
 	// iamMinterClientFn builds the IAM access-key management client used for
 	// minter self-rotation (CreateAccessKey/DeleteAccessKey/ListAccessKeys on the
 	// minter IAM user). Mirrors stsClientFn: tests inject a fake; when nil the

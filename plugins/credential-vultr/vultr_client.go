@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 )
 
 // httpTimeout bounds every upstream Vultr API call.
@@ -130,7 +132,7 @@ func (c *vultrClient) ListUsers(ctx context.Context) ([]userInfo, error) {
 }
 
 func (c *vultrClient) DeleteUser(ctx context.Context, userID string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v2/users/"+userID, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/v2/users/"+cloudconfig.PathSegment(userID), http.NoBody)
 	if err != nil {
 		return 0, err
 	}
