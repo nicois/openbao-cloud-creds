@@ -101,6 +101,11 @@ func (sm *StateMachine) RecordUpstream(httpStatus int, err error, at time.Time) 
 func (sm *StateMachine) Record(o Outcome, at time.Time) {
 	code := credenvelope.Classify(o.Status, o.Err)
 	if !credenvelope.IndictsMinter(code) {
+		// The outcome says nothing about this minter — but if the caller held the
+		// half-open probe, it must still be released, or one malformed request
+		// freezes a recovering minter for the whole ProbeGrace (A18). Two correct
+		// fixes interacting: the KI-010 exoneration and the breaker.
+		sm.releaseProbe()
 		return
 	}
 	if code == credenvelope.ErrUpstreamQuotaExceeded {
@@ -206,4 +211,12 @@ func (sm *StateMachine) NeedsHealthCheck(now time.Time) bool {
 
 func isAuthError(status int) bool {
 	return status == 401 || status == 403
+}
+
+// releaseProbe hands the half-open claim back without recording anything against
+// the minter, for an outcome that was not the minter's fault.
+func (sm *StateMachine) releaseProbe() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.probeUntil = time.Time{}
 }

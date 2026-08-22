@@ -113,22 +113,41 @@ func TestGate_VerifyRoleRejectsMissingSet(t *testing.T) {
 	}
 }
 
-// The failure response must both explain what failed and how to proceed without
-// the check, so an environment where a probe mint is unacceptable is not stuck.
-func TestGate_FailureExplainsAndOffersTheEscapeHatch(t *testing.T) {
+// The failure response must explain what failed and how to proceed without the
+// check, so an environment where a probe mint is unacceptable is not stuck — and it
+// must do so WITHOUT the upstream's own words.
+//
+// This test previously required the upstream text to be present, which encoded the
+// A4 leak as desired behaviour: a probe error chains down to the cloud's raw
+// response body, so a caller holding only `create` on roles/* received the cloud's
+// verbatim diagnostics. The identities below are things that caller supplied; the
+// upstream body is not.
+func TestGate_FailureExplainsWithoutLeakingTheUpstreamBody(t *testing.T) {
 	storage := &logical.InmemStorage{}
 	putMinterSet(t, storage, twoMinterSet())
 
+	const upstreamBody = `403 {"id":"forbidden","message":"tenant 8f3c-... is not authorized"}`
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: true}
 	resp := gate.VerifyRole(t.Context(), storage, setAlpha,
-		[]byte(`{"name":"role-a"}`), probeRecorder(&probed, errors.New("403 forbidden")))
+		[]byte(`{"name":"role-a"}`), probeRecorder(&probed, errors.New(upstreamBody)))
 	if resp == nil || !resp.IsError() {
 		t.Fatal("expected rejection")
 	}
-	for _, want := range []string{"403 forbidden", "role-a", "verify_minter_capability=false"} {
-		if !strings.Contains(resp.Error().Error(), want) {
-			t.Fatalf("error %q does not mention %q", resp.Error(), want)
+	message := resp.Error().Error()
+
+	// Actionable: which minter, which role, and how to proceed.
+	for _, want := range []string{"minter-1", "role-a", "verify_minter_capability=false"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("error %q does not mention %q, so the operator cannot act on it", message, want)
+		}
+	}
+	// But not the cloud's own response.
+	for _, leaked := range []string{upstreamBody, "tenant 8f3c", "forbidden"} {
+		if strings.Contains(message, leaked) {
+			t.Errorf("error response leaks upstream detail %q. Role-write privilege is less than "+
+				"minter-secret privilege, so cloud diagnostics must go to the operator log only (A4). "+
+				"Full message: %q", leaked, message)
 		}
 	}
 }

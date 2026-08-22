@@ -3,14 +3,19 @@ package credentialaws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
+	"github.com/aws/smithy-go"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
@@ -359,44 +364,78 @@ func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
 		"upstream credential issuance failed")
 }
 
-// awsErrorSignatures maps substrings AWS puts in its error strings to the HTTP
-// status they mean. A table rather than an if-chain because the list grows every
-// time a real-cloud run shows us a shape we had not seen; first match wins, so
-// specific precedes general.
-var awsErrorSignatures = []struct {
-	needles []string
-	status  int
-}{
-	{[]string{"AccessDenied", "403"}, http.StatusForbidden},
-	{[]string{"ExpiredToken", "InvalidClientTokenId", "401"}, http.StatusUnauthorized},
+// awsErrorCodes maps AWS's own error codes to the HTTP status they represent.
+// Keyed on the code the SDK reports, never on a substring of the message: the
+// message carries request-ID hex, ARNs and 12-digit account numbers, so matching
+// "403" inside it classified `StatusCode: 500, RequestID: 4038e1a2...` as an
+// authorization failure and indicted a healthy minter during a cloud outage (A16
+// in docs/audit-2026-08-22.md).
+var awsErrorCodes = map[string]int{
+	"AccessDenied":          http.StatusForbidden,
+	"AccessDeniedException": http.StatusForbidden,
+	"UnauthorizedOperation": http.StatusForbidden,
+	"ExpiredToken":          http.StatusUnauthorized,
+	"InvalidClientTokenId":  http.StatusUnauthorized,
+	"Throttling":            http.StatusTooManyRequests,
+	"ThrottlingException":   http.StatusTooManyRequests,
 	// LimitExceeded is how IAM reports the 2-access-keys-per-user cap: a quota,
 	// not a bug, and rotation depends on telling them apart.
-	{[]string{"Throttling", "LimitExceeded", "429"}, http.StatusTooManyRequests},
+	"LimitExceeded":          http.StatusTooManyRequests,
+	"LimitExceededException": http.StatusTooManyRequests,
 	// AWS labels these <Type>Sender</Type>: the request is wrong and an identical
 	// retry cannot succeed. KI-010 — also how a target role's MaxSessionDuration
 	// being below the role TTL surfaces.
-	{[]string{"ValidationError", "InvalidParameterValue"}, http.StatusBadRequest},
-	{[]string{"504"}, http.StatusGatewayTimeout},
-	// The cloud is degraded, not this plugin: retryable, and never `internal`.
-	{[]string{"500", "502", "503"}, http.StatusInternalServerError},
+	"ValidationError":       http.StatusBadRequest,
+	"InvalidParameterValue": http.StatusBadRequest,
 }
 
 // classifyAWSError maps an AWS SDK error to the HTTP status it represents, or
-// credenvelope.StatusNone when nothing matches — in which case
-// credenvelope.Classify inspects the error itself. Returning a synthetic 500 for
-// "unrecognised" is what used to make ErrUpstreamTimeout unreachable and reported
-// an unreachable cloud as a defect in this plugin.
+// credenvelope.StatusNone when nothing recognises it — in which case
+// credenvelope.Classify inspects the error itself, which is the only way a
+// client-side timeout can be told apart from a defect in this plugin.
+//
+// The status is taken from the transport error where the SDK provides one, so a
+// 500 is a 500 whatever its message happens to contain.
 func classifyAWSError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	errMsg := err.Error()
-	for _, signature := range awsErrorSignatures {
-		for _, needle := range signature.needles {
-			if strings.Contains(errMsg, needle) {
-				return signature.status
-			}
+
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		if status, ok := awsErrorCodes[apiErr.ErrorCode()]; ok {
+			return status
+		}
+	}
+
+	var respErr *awshttp.ResponseError
+	if errors.As(err, &respErr) && respErr.HTTPStatusCode() > 0 {
+		return respErr.HTTPStatusCode()
+	}
+
+	// The SDK also renders the status into the message as "StatusCode: nnn" — its
+	// own delimited marker, unlike a bare digit that could sit inside a request id.
+	if m := statusCodeInError.FindStringSubmatch(err.Error()); m != nil {
+		if status, convErr := strconv.Atoi(m[1]); convErr == nil && status > 0 {
+			return status
+		}
+	}
+
+	// The fakes and unit tests raise plain errors carrying AWS's code text; match
+	// the code as a whole word rather than as a loose substring.
+	for code, status := range awsErrorCodes {
+		if awsCodeWord(code).MatchString(err.Error()) {
+			return status
 		}
 	}
 	return credenvelope.StatusNone
+}
+
+// statusCodeInError extracts the status from the AWS SDK's own rendering.
+var statusCodeInError = regexp.MustCompile(`StatusCode: (\d{3})`)
+
+// awsCodeWord builds a word-boundary matcher for an AWS error code, so a code
+// cannot be found inside an unrelated identifier.
+func awsCodeWord(code string) *regexp.Regexp {
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(code) + `\b`)
 }

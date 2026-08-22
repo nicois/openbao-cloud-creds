@@ -2,6 +2,8 @@ package credentialazure
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
@@ -40,16 +42,31 @@ func (l *azureCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler
 }
 
 func (l *azureCloudLister) DeleteEntity(ctx context.Context, id string) error {
-	// We need to find which app this password belongs to.
-	// For simplicity, try all known apps. In practice the reconciler stores
-	// the app_object_id in active-tokens, but for orphan cleanup we iterate.
+	// Try each known app registration: a password id alone does not say which app
+	// owns it. A 404 from one app simply means "not this one".
+	//
+	// Every error used to be swallowed and nil returned unconditionally, so the
+	// reconciler incremented Deleted and left Errors empty even when every Graph
+	// call failed on auth, throttling or 5xx — a false record of a
+	// security-relevant deletion, with live client secrets still valid (A8 in
+	// docs/audit-2026-08-22.md). The other five listers propagate unless 404.
+	var lastErr error
 	for _, appObjID := range l.appObjectIDs {
-		_, err := l.client.RemovePassword(ctx, appObjID, id)
+		status, err := l.client.RemovePassword(ctx, appObjID, id)
 		if err == nil {
 			return nil
 		}
+		if status == http.StatusNotFound {
+			continue // this app does not own that password; try the next
+		}
+		lastErr = err
 	}
-	// If we get here, the password was already gone or not found
+	if lastErr != nil {
+		return fmt.Errorf("removing password %q from %d app registration(s): %w",
+			id, len(l.appObjectIDs), lastErr)
+	}
+	// Every app answered 404: the password is genuinely gone, which is success for
+	// a reclamation pass.
 	return nil
 }
 

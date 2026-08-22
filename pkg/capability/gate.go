@@ -3,6 +3,7 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/hashicorp/go-hclog"
@@ -92,10 +93,18 @@ func (g Gate) VerifyRole(ctx context.Context, storage logical.Storage, setName s
 func (g Gate) run(ctx context.Context, checks []Check) *logical.Response {
 	result, err := Verify(ctx, checks)
 	if err != nil {
+		// The full error, upstream body and all, goes to the operator's log; the
+		// caller gets identities and a pointer to that log (A4).
 		if g.Logger != nil {
 			g.Logger.Warn("minter capability verification failed", "cloud", g.Cloud, "error", err)
 		}
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter capability verification failed: %v"+skipHint, err)
+		var failure *Failure
+		if errors.As(err, &failure) {
+			return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+				"minter capability verification failed: %s"+skipHint, failure.ClientMessage())
+		}
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"minter capability verification failed"+skipHint)
 	}
 	if g.Logger != nil && (result.Ran > 0 || result.Skipped > 0) {
 		g.Logger.Info("minter capability verified", "cloud", g.Cloud,

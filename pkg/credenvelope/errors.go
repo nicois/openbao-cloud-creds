@@ -211,7 +211,12 @@ func classifyTransport(err error) ErrorCode {
 func IndictsMinter(code ErrorCode) bool {
 	switch code {
 	case ErrUpstreamRequestInvalid, ErrConfigInvalid, ErrRoleNotFound,
-		ErrRoleDisabled, ErrUnsupported, ErrInternal:
+		ErrRoleDisabled, ErrUnsupported, ErrInternal,
+		// A 404 says the thing we NAMED is absent — a mistyped app_object_id,
+		// role_id or any other role-supplied upstream target. That is a fault in
+		// the request, not evidence against the credential, and counting it walked
+		// healthy minters to AuthFailing for an operator's typo (A17).
+		ErrEntityUnavailable:
 		return false
 	default:
 		return true

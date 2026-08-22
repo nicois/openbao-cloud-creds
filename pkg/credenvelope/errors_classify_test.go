@@ -119,11 +119,15 @@ func TestClassifyPrefersStatusOverError(t *testing.T) {
 func TestIndictsMinter(t *testing.T) {
 	indicts := []ErrorCode{
 		ErrUpstreamAuthFailed, ErrUpstreamQuotaExceeded, ErrUpstreamTimeout,
-		ErrUpstreamUnavailable, ErrEntityUnavailable, ErrPoolExhausted,
+		ErrUpstreamUnavailable, ErrPoolExhausted,
 	}
+	// ErrEntityUnavailable moved here (A17). A 404 says the thing the REQUEST
+	// named is absent — a mistyped app_object_id or role_id — which is a fault in
+	// the request, not evidence against the credential. This test previously
+	// required the opposite and so cemented the wrong partition.
 	exonerates := []ErrorCode{
 		ErrUpstreamRequestInvalid, ErrConfigInvalid, ErrRoleNotFound,
-		ErrRoleDisabled, ErrUnsupported, ErrInternal,
+		ErrRoleDisabled, ErrUnsupported, ErrInternal, ErrEntityUnavailable,
 	}
 	for _, code := range indicts {
 		if !IndictsMinter(code) {

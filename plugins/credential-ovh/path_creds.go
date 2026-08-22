@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -243,39 +245,39 @@ func (b *backend) issuanceError(httpStatus int, err error) *logical.Response {
 		"upstream credential issuance failed")
 }
 
-// ovhErrorSignatures maps substrings OVH puts in its error strings to the
-// HTTP status they mean. A table rather than an if-chain because the list grows
-// every time a real run shows a shape we had not seen; first match wins, so
-// specific precedes general.
-var ovhErrorSignatures = []struct {
-	needles []string
-	status  int
-}{
-	{[]string{"invalid_client", "401"}, http.StatusUnauthorized},
-	{[]string{"403"}, http.StatusForbidden},
-	{[]string{"429"}, http.StatusTooManyRequests},
-	// The request is wrong and an identical retry cannot succeed.
-	{[]string{"invalid_request", "invalid_scope", "400"}, http.StatusBadRequest},
-	{[]string{"504"}, http.StatusGatewayTimeout},
-	// The cloud is degraded, not this plugin: retryable, and never `internal`.
-	{[]string{"500", "502", "503"}, http.StatusInternalServerError},
+// OVHErrorCodes maps the cloud's own textual error codes to a status. Bare
+// digit substrings are deliberately absent: matching "403" against a whole error
+// string found it inside request ids and account numbers, so a 500 was classified
+// as an authorization failure and indicted a healthy minter (A16 in
+// docs/audit-2026-08-22.md).
+var ovhErrorCodes = map[string]int{
+	"invalid_client":  http.StatusUnauthorized,
+	"invalid_request": http.StatusBadRequest,
+	"invalid_scope":   http.StatusBadRequest,
 }
 
+// httpStatusInError extracts the status this plugin's own client formats into its
+// errors as "(HTTP nnn)" — a delimited marker we write ourselves, so it cannot be
+// confused with a digit that happens to appear in an identifier.
+var httpStatusInError = regexp.MustCompile(`\(HTTP (\d{3})\)`)
+
 // classifyOVHError maps a OVH error to the HTTP status it represents, or
-// credenvelope.StatusNone when nothing matches — in which case
-// credenvelope.Classify inspects the error itself. Returning a synthetic 500 for
-// "unrecognised" is what used to make ErrUpstreamTimeout unreachable and reported
-// an unreachable cloud as a defect in this plugin.
+// credenvelope.StatusNone when nothing recognises it, in which case
+// credenvelope.Classify inspects the error itself.
 func classifyOVHError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
 	errMsg := err.Error()
-	for _, signature := range ovhErrorSignatures {
-		for _, needle := range signature.needles {
-			if strings.Contains(errMsg, needle) {
-				return signature.status
-			}
+
+	if m := httpStatusInError.FindStringSubmatch(errMsg); m != nil {
+		if status, convErr := strconv.Atoi(m[1]); convErr == nil && status > 0 {
+			return status
+		}
+	}
+	for code, status := range ovhErrorCodes {
+		if regexp.MustCompile(`\b` + regexp.QuoteMeta(code) + `\b`).MatchString(errMsg) {
+			return status
 		}
 	}
 	return credenvelope.StatusNone

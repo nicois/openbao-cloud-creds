@@ -249,3 +249,31 @@ func TestParseRetryAfter(t *testing.T) {
 		})
 	}
 }
+
+// TestNonIndictingOutcomeReleasesTheProbe is the regression guard for A18. The
+// half-open window admits exactly one caller; if that caller's outcome is one the
+// minter is not responsible for, the claim must come back immediately. Otherwise a
+// single malformed request freezes a recovering minter for the whole ProbeGrace —
+// the KI-010 exoneration and the circuit breaker, each correct alone, interacting.
+func TestNonIndictingOutcomeReleasesTheProbe(t *testing.T) {
+	fixJitter(t, 0)
+	sm := newSM()
+	start := time.Now()
+	sm.Record(rateLimited(0), start)
+	after := start.Add(RateLimitCooldown + time.Second)
+
+	if !sm.TryAcquire(after) {
+		t.Fatal("expected the half-open probe to be granted")
+	}
+	if sm.TryAcquire(after) {
+		t.Fatal("a second caller acquired while the probe was in flight")
+	}
+
+	// A request the cloud rejected on its content: not the credential's fault.
+	sm.Record(Outcome{Status: http.StatusBadRequest}, after)
+
+	if !sm.TryAcquire(after) {
+		t.Error("the half-open probe is still held after an outcome that does not indict the minter, " +
+			"so a recovering minter stays unusable for the whole ProbeGrace (A18)")
+	}
+}

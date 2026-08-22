@@ -76,9 +76,43 @@ type BoundRole struct {
 	Raw  []byte
 }
 
+// Failure describes a probe that failed, and exists to keep two audiences apart.
+//
+// Its Error() carries the upstream error verbatim, which is what the operator's
+// log needs — and which must NOT reach an API caller: a probe error chains down to
+// the cloud's raw response body, so returning it handed a caller with only
+// `create` on roles/* the cloud's verbatim diagnostics (Azure AADSTS codes with
+// tenant and correlation ids, Graph object ids, GCP project detail). That
+// contradicted an unqualified claim in README and SUMMARY and defeated the fixed
+// error string on the read path, since a role write probes the same minter with
+// the same mint shape (A4 in docs/audit-2026-08-22.md).
+//
+// ClientMessage is the safe rendering: it names the minter and roles — which the
+// caller supplied and already knows — and points at the log for the rest.
+type Failure struct {
+	Minter string
+	Roles  []string
+	Err    error
+}
+
+func (f *Failure) Error() string {
+	return fmt.Sprintf("minter %q cannot mint the credential role(s) %s require: %v",
+		f.Minter, strings.Join(f.Roles, ", "), f.Err)
+}
+
+func (f *Failure) Unwrap() error { return f.Err }
+
+// ClientMessage renders the failure for an API response: no upstream body, no
+// upstream error text, nothing the caller did not already provide.
+func (f *Failure) ClientMessage() string {
+	return fmt.Sprintf("minter %q cannot mint the credential role(s) %s require; the upstream "+
+		"refused the probe mint and its response is in the OpenBao server log",
+		f.Minter, strings.Join(f.Roles, ", "))
+}
+
 // Verify runs each distinct Check once and stops at the first failure, so an
 // operator sees the first thing that is wrong rather than a list of cascading
-// consequences. The returned error names the minter and the affected roles.
+// consequences. A failure is returned as *Failure.
 func Verify(ctx context.Context, checks []Check) (Result, error) {
 	var result Result
 	for _, c := range Dedupe(checks) {
@@ -89,9 +123,7 @@ func Verify(ctx context.Context, checks []Check) (Result, error) {
 		case errors.Is(err, ErrUnsupported):
 			result.Skipped++
 		default:
-			return result, fmt.Errorf(
-				"minter %q cannot mint the credential role(s) %s require: %w",
-				c.Minter, strings.Join(c.Roles, ", "), err)
+			return result, &Failure{Minter: c.Minter, Roles: c.Roles, Err: err}
 		}
 	}
 	return result, nil
