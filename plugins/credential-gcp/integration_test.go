@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -32,7 +33,7 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatal("missing expires_at")
 	}
 	meta, ok := issueResp.Data["metadata"].(map[string]interface{})
-	if !ok || meta["api_version"] != "2" {
+	if !ok || meta["api_version"] != credenvelope.APIVersion {
 		t.Fatalf("bad metadata: %v", issueResp.Data["metadata"])
 	}
 	if meta["minter_set"] != "default" || meta["minter_id"] != "minter-1" {

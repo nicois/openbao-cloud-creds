@@ -113,16 +113,19 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		Cloud: cloudName,
 		Role:  roleName,
 		Credential: map[string]interface{}{
-			"key": keyResp.Key,
+			"key":    keyResp.Key,
+			"secret": keyResp.Secret,
 		},
 		ExpiresAt:    expiresAt,
 		TTLSeconds:   int(role.DefaultTTL.Seconds()),
 		Renewable:    true,
 		CredentialID: keyResp.KeyID,
-		Scope:        role.RoleID,
-		IssuedBy:     "cloud-creds-exoscale/v0.1",
-		MinterSet:    setName,
-		MinterID:     minterID,
+		// The API key is bound to this Exoscale IAM role.
+		Scope:     role.RoleID,
+		ScopeKind: credenvelope.ScopeKindRole,
+		IssuedBy:  "cloud-creds-exoscale/v0.1",
+		MinterSet: setName,
+		MinterID:  minterID,
 	})
 
 	// Track active key for reconciler; compensate (revoke) on write failure.

@@ -125,7 +125,7 @@ func TestReconcile_NeverDeletesForeignEntity(t *testing.T) {
 	if !srv.HasToken("foreign-1") {
 		t.Fatal("foreign token was deleted by reconciler")
 	}
-	if got := resp.Data["orphans_found"].(int); got != 0 {
+	if got := resp.Data["found"].(int); got != 0 {
 		t.Fatalf("foreign token counted as orphan: orphans_found=%d", got)
 	}
 }

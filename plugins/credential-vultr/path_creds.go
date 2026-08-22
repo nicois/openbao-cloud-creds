@@ -407,9 +407,11 @@ func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
 		TTLSeconds:   int(a.role.DefaultTTL.Seconds()),
 		Renewable:    true,
 		CredentialID: a.resp.User.ID,
-		Scope:        a.role.ACLs,
-		IssuedBy:     "cloud-creds-vultr/v0.1",
-		MinterSet:    a.setName,
-		MinterID:     a.minterID,
+		// Vultr ACLs are eight coarse access-control categories.
+		Scope:     a.role.ACLs,
+		ScopeKind: credenvelope.ScopeKindACL,
+		IssuedBy:  "cloud-creds-vultr/v0.1",
+		MinterSet: a.setName,
+		MinterID:  a.minterID,
 	})
 }

@@ -51,6 +51,8 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, rolePath, exoscaleRoleFields())
 		},
 		IssuePath:             issuePath,
+		CredentialKeys:        []string{"key", "secret"},
+		ScopeKind:             "role",
 		SecretType:            "exoscale_api_key",
 		LeaseInternalDataKeys: []string{"upstream_key_id", "role", "minter_set", "minter_id"},
 		RolePath:              rolePath,

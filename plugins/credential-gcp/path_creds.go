@@ -108,10 +108,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		TTLSeconds:   ttlSeconds,
 		Renewable:    false,
 		CredentialID: credentialID,
-		Scope:        role.ServiceAccountEmail,
-		IssuedBy:     "cloud-creds-gcp/v0.1",
-		MinterSet:    setName,
-		MinterID:     minterID,
+		// The token impersonates this service account; role scopes narrow it further.
+		Scope:     role.ServiceAccountEmail,
+		ScopeKind: credenvelope.ScopeKindIdentity,
+		IssuedBy:  "cloud-creds-gcp/v0.1",
+		MinterSet: setName,
+		MinterID:  minterID,
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)

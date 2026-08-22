@@ -167,6 +167,21 @@ type Harness struct {
 	HasEntity func(id string) bool
 
 	// Skips declares categories this plugin cannot exercise, mapped to the
+	// CredentialKeys are the keys the `credential` block of this cloud's envelope
+	// must contain, and OptionalCredentialKeys the ones it may. Declared rather than
+	// inferred because the credential block is the part of the payload a client
+	// actually consumes and it was documented for six of ten clouds and asserted for
+	// none — which is how Exoscale shipped an API key with the `secret` that signs
+	// requests silently dropped (A28 in docs/audit-2026-08-22.md).
+	CredentialKeys []string
+	// OptionalCredentialKeys may be present (Azure's subscription_id is set only when
+	// the role names one).
+	OptionalCredentialKeys []string
+	// ScopeKind is the metadata.scope_kind this cloud reports, from the closed
+	// vocabulary in pkg/credenvelope. It tells a client how to read metadata.scope,
+	// which used to be one field name carrying ten different meanings.
+	ScopeKind string
+
 	// SecretType is the framework.Secret.Type string this plugin issues under, and
 	// LeaseInternalDataKeys are the internal_data keys revoke needs. Both are stated
 	// here as DATA rather than left implicit, because both are rename tripwires: the

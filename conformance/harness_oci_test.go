@@ -57,6 +57,8 @@ func ociHarness(t *testing.T) plugintest.Harness {
 			})
 		},
 		IssuePath:             issuePath,
+		CredentialKeys:        []string{"auth_token", "user_id"},
+		ScopeKind:             "identity",
 		SecretType:            "oci_auth_token",
 		LeaseInternalDataKeys: []string{"token_id", "slot_index", "role", "minter_set", "minter_id"},
 		RolePath:              rolePath,

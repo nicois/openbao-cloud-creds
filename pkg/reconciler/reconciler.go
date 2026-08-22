@@ -66,6 +66,9 @@ type Config struct {
 }
 
 type Result struct {
+	// Scanned is how many owned upstream entities the pass examined, so a response
+	// can report what is LEFT rather than only what went (A28).
+	Scanned      int
 	OrphansFound []string
 	Deleted      int
 	HitLimit     bool
@@ -112,7 +115,7 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 		return nil, err
 	}
 
-	result := &Result{}
+	result := &Result{Scanned: len(entities)}
 
 	owned, oerr := r.registry.OwnedIDs(ctx)
 	if oerr != nil {

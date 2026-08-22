@@ -6,6 +6,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/localexpiry"
+	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -56,13 +57,21 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 
 	emitOrphansFound(len(res.Expired))
 
-	return &logical.Response{
-		Data: map[string]interface{}{
-			"mode":             mode,
-			"dry_run":          dryRun,
-			"expired_found":    len(res.Expired),
-			"deleted":          res.Deleted,
-			"active_remaining": res.Scanned - res.Deleted,
-		},
-	}, nil
+	return &logical.Response{Data: reconciler.ResponseData{
+		Mode:      mode,
+		DryRun:    dryRun,
+		Target:    reconciler.TargetLocalExpired,
+		Scanned:   res.Scanned,
+		Found:     len(res.Expired),
+		Deleted:   res.Deleted,
+		Remaining: res.Scanned - res.Deleted,
+		// Nothing upstream is touched, so there is no upstream delete to fail and no
+		// per-pass delete cap to hit. Both are reported as zero/false because the pass
+		// genuinely has none, not because the field does not apply.
+		DeleteErrors: 0,
+		HitLimit:     false,
+		// No confirmation hold: these entries are pruned because the credential they
+		// track has already EXPIRED, so there is no live credential a hold would protect.
+		ConfirmationHold: 0,
+	}.Map()}, nil
 }

@@ -37,6 +37,102 @@ func RunLeaseContractSuite(t *testing.T, h Harness) {
 	t.Run("SecretTypeAndInternalDataKeysAreTheDeclaredOnes", func(t *testing.T) {
 		assertLeaseIdentifiersAreDeclared(t, h)
 	})
+	t.Run("CredentialBlockIsTheDeclaredShape", func(t *testing.T) { assertCredentialBlock(t, h) })
+	t.Run("ScopeKindIsFromTheClosedVocabulary", func(t *testing.T) { assertScopeKind(t, h) })
+}
+
+// assertCredentialBlock pins the part of the payload a client actually consumes.
+//
+// The `credential` block was documented for six of ten clouds and asserted for none,
+// and the cost of that showed up as a plain bug: Exoscale's create returns `key` AND
+// `secret`, the client struct had no secret field, so the signing half was decoded
+// away and callers got a credential they could not use. The fake hid it by returning
+// a secret-shaped value in `key` (A28).
+//
+// Exact, not "at least": an extra key is as much a contract change as a missing one,
+// and on this payload an unexpected extra key is a credential fragment nobody meant
+// to publish.
+func assertCredentialBlock(t *testing.T, h Harness) {
+	t.Helper()
+	if len(h.CredentialKeys) == 0 {
+		t.Fatalf("%s: the harness declares no CredentialKeys, so the one part of the envelope a "+
+			"client consumes is unspecified", h.Cloud)
+	}
+	b, storage := newConfiguredBackend(t, h)
+	resp, err := issue(t, b, storage, h.IssuePath)
+	if err != nil || resp == nil || resp.IsError() {
+		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
+	}
+	credential, ok := resp.Data["credential"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("envelope credential is %T, want an object", resp.Data["credential"])
+	}
+
+	allowed := make(map[string]bool, len(h.CredentialKeys)+len(h.OptionalCredentialKeys))
+	for _, key := range h.CredentialKeys {
+		allowed[key] = true
+		value, present := credential[key]
+		if !present {
+			t.Errorf("credential has no %q; a client that follows the documented shape cannot use "+
+				"this credential. Present: %v", key, keysOf(credential))
+			continue
+		}
+		if str, ok := value.(string); ok && str == "" {
+			t.Errorf("credential[%q] is empty, which for a credential field means the caller was "+
+				"handed an unusable credential rather than an error", key)
+		}
+	}
+	for _, key := range h.OptionalCredentialKeys {
+		allowed[key] = true
+	}
+	for key := range credential {
+		if !allowed[key] {
+			t.Errorf("credential carries an undeclared key %q. The credential block is the payload a "+
+				"client consumes, so an undeclared key is either an unspecified contract or a "+
+				"credential fragment nobody meant to publish", key)
+		}
+	}
+}
+
+// assertScopeKind: a client must be able to read metadata.scope without knowing
+// which cloud it is talking to, which means scope_kind has to be present and from
+// the closed vocabulary — and empty scope is only legitimate for the kind that says
+// the cloud has no per-credential boundary at all (A28).
+func assertScopeKind(t *testing.T, h Harness) {
+	t.Helper()
+	if h.ScopeKind == "" {
+		t.Fatalf("%s: the harness declares no ScopeKind", h.Cloud)
+	}
+	b, storage := newConfiguredBackend(t, h)
+	resp, err := issue(t, b, storage, h.IssuePath)
+	if err != nil || resp == nil || resp.IsError() {
+		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
+	}
+	metadata, ok := resp.Data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("envelope metadata is %T, want an object", resp.Data["metadata"])
+	}
+
+	kind, _ := metadata["scope_kind"].(string)
+	if kind != h.ScopeKind {
+		t.Fatalf("metadata.scope_kind is %q, declared %q", kind, h.ScopeKind)
+	}
+	if !credenvelope.ValidScopeKind(credenvelope.ScopeKind(kind)) {
+		t.Fatalf("scope_kind %q is not in the closed vocabulary %v: a client switching on it cannot "+
+			"know what to do", kind, credenvelope.AllScopeKinds())
+	}
+
+	scope, _ := metadata["scope"].(string)
+	accountWide := credenvelope.ScopeKind(kind) == credenvelope.ScopeKindAccount
+	switch {
+	case accountWide && scope != "":
+		t.Errorf("scope_kind is %q — the cloud offers no per-credential narrowing — but scope is %q. "+
+			"Reporting a boundary that does not exist is the failure UpCloud's `scopes` field was",
+			kind, scope)
+	case !accountWide && scope == "":
+		t.Errorf("scope_kind is %q but scope is empty, so a client is told there IS a boundary and "+
+			"not what it is", kind)
+	}
 }
 
 // assertLeaseIdentifiersAreDeclared pins the two strings an upgrade can rename

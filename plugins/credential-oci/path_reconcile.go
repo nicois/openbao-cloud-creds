@@ -6,6 +6,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
+	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -79,8 +80,14 @@ func collectKnownTokenIDs(ctx context.Context, storage logical.Storage, roleName
 
 // reconcileResult tallies a reconcile pass.
 type reconcileResult struct {
+	// scanned counts the tokens this pass examined that carry OUR owner prefix, so
+	// the response can report what is left as well as what went (A28).
+	scanned      int
 	orphansFound int
 	deleted      int
+	// deleteErrors counts deletions that failed. A failure does not abort the pass,
+	// so it has to be reported rather than inferred from the counts.
+	deleteErrors int
 }
 
 // reconcilePass bundles the inputs and running tally of a single reconcile
@@ -159,6 +166,7 @@ func (p *reconcilePass) reconcileRoleTokens(ctx context.Context, client OCIIAMCl
 		if !ownertag.Owns(p.instanceID, t.Description) {
 			continue
 		}
+		p.result.scanned++
 		// If not in our known set, it's an orphan.
 		if p.knownTokenIDs[t.ID] {
 			continue
@@ -167,6 +175,8 @@ func (p *reconcilePass) reconcileRoleTokens(ctx context.Context, client OCIIAMCl
 		if !p.dryRun && p.result.deleted < p.maxDeletes {
 			if err := client.DeleteAuthToken(ctx, role.UserOCID, t.ID); err == nil {
 				p.result.deleted++
+			} else {
+				p.result.deleteErrors++
 			}
 		}
 	}
@@ -200,13 +210,19 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 
 	emitOrphansFound(res.orphansFound)
 
-	return &logical.Response{
-		Data: map[string]interface{}{
-			"mode":          mode,
-			"dry_run":       dryRun,
-			"orphans_found": res.orphansFound,
-			"deleted":       res.deleted,
-			"hit_limit":     res.deleted >= maxDeletes,
-		},
-	}, nil
+	return &logical.Response{Data: reconciler.ResponseData{
+		Mode:         mode,
+		DryRun:       dryRun,
+		Target:       reconciler.TargetUpstreamOrphans,
+		Scanned:      res.scanned,
+		Found:        res.orphansFound,
+		Deleted:      res.deleted,
+		Remaining:    res.scanned - res.deleted,
+		DeleteErrors: res.deleteErrors,
+		HitLimit:     res.deleted >= maxDeletes,
+		// OCI's pass has no confirmation hold: a token is an orphan only if it carries
+		// our prefix AND is absent from slot storage, and a slot is written before its
+		// token is minted, so there is no create-then-track window to protect.
+		ConfirmationHold: 0,
+	}.Map()}, nil
 }

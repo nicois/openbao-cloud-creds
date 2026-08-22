@@ -91,10 +91,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		TTLSeconds:   int(role.DefaultTTL.Seconds()),
 		Renewable:    true,
 		CredentialID: tokenResp.Token.ID,
-		Scope:        role.Scopes,
-		IssuedBy:     "cloud-creds-do/v0.1",
-		MinterSet:    setName,
-		MinterID:     minterID,
+		// DO scopes are fine-grained `<resource>:<verb>` permissions the token carries.
+		Scope:     role.Scopes,
+		ScopeKind: credenvelope.ScopeKindScopes,
+		IssuedBy:  "cloud-creds-do/v0.1",
+		MinterSet: setName,
+		MinterID:  minterID,
 	})
 
 	// Track active token for reconciler

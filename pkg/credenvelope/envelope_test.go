@@ -30,8 +30,8 @@ func TestNewEnvelope(t *testing.T) {
 	if env.TTLSeconds != 900 {
 		t.Fatalf("expected ttl=900, got %d", env.TTLSeconds)
 	}
-	if env.Metadata.APIVersion != "2" {
-		t.Fatalf("expected api_version=2, got %s", env.Metadata.APIVersion)
+	if env.Metadata.APIVersion != credenvelope.APIVersion {
+		t.Fatalf("expected api_version=%s, got %s", credenvelope.APIVersion, env.Metadata.APIVersion)
 	}
 }
 
@@ -60,8 +60,8 @@ func TestEnvelopeToMap(t *testing.T) {
 	if !ok {
 		t.Fatalf("metadata not a map")
 	}
-	if meta["api_version"] != "2" {
-		t.Fatalf("expected api_version=2, got %v", meta["api_version"])
+	if meta["api_version"] != credenvelope.APIVersion {
+		t.Fatalf("expected api_version=%s, got %v", credenvelope.APIVersion, meta["api_version"])
 	}
 }
 

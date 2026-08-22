@@ -46,6 +46,8 @@ func upcloudHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, rolePath, upcloudRoleFields())
 		},
 		IssuePath:             issuePath,
+		CredentialKeys:        []string{"username", "password"},
+		ScopeKind:             "account",
 		SecretType:            "upcloud_token",
 		LeaseInternalDataKeys: []string{"upstream_token_id", "role", "minter_set", "minter_id"},
 		RolePath:              rolePath,

@@ -3,6 +3,7 @@ package credentialexoscale
 import (
 	"testing"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -11,7 +12,7 @@ const (
 	capRoleID   = "22222222-2222-2222-2222-222222222222"
 	// capMintedPrefix is the prefix the fake gives the keys it mints, so forbidding
 	// it targets rotation successors without touching operator-provided minters.
-	capMintedPrefix = "EXOsecret_fake_"
+	capMintedPrefix = fakes.MintedKeyPrefix + "exo-key-"
 )
 
 // capWriteRole writes a role bound to the default set and returns the response.

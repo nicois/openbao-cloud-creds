@@ -42,6 +42,8 @@ func doHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, rolePath, doRoleFields())
 		},
 		IssuePath:             issuePath,
+		CredentialKeys:        []string{"token", "scopes"},
+		ScopeKind:             "scopes",
 		SecretType:            "do_token",
 		LeaseInternalDataKeys: []string{"upstream_token_id", "role", "minter_set", "minter_id"},
 		RolePath:              rolePath,

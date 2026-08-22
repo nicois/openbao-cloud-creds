@@ -165,8 +165,8 @@ func TestCredsIssue(t *testing.T) {
 	if meta["minter_id"] != "minter-1" {
 		t.Fatalf("expected minter_id=minter-1, got %v", meta["minter_id"])
 	}
-	if meta["api_version"] != "2" {
-		t.Fatalf("expected api_version=2, got %v", meta["api_version"])
+	if meta["api_version"] != credenvelope.APIVersion {
+		t.Fatalf("expected api_version=%s, got %v", credenvelope.APIVersion, meta["api_version"])
 	}
 }
 

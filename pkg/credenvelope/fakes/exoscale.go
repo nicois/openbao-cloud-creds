@@ -12,6 +12,11 @@ import (
 
 const jsonKeyKeyID = "key-id"
 
+// MintedKeyPrefix is the prefix this fake gives the API keys it mints, exported so
+// a test can target minted keys (rotation successors, capability probes) without
+// touching operator-provided minters — and so the two sides cannot drift.
+const MintedKeyPrefix = "EXO"
+
 type ExoscaleServer struct {
 	*httptest.Server
 	mu         sync.Mutex
@@ -189,10 +194,13 @@ func (s *ExoscaleServer) createAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	keyID := fmt.Sprintf("exo-key-%d", s.nextID.Add(1))
-	keySecret := fmt.Sprintf("EXOsecret_fake_%s", keyID)
-
+	// Exoscale returns BOTH halves, and only on create: `key` is the API key and
+	// `secret` is what signs requests with it. The fake used to put a secret-shaped
+	// value in `key` and return no `secret` at all, which is what hid the plugin
+	// dropping the secret and handing out an unusable credential (A28).
 	apiKey := map[string]interface{}{
-		"key":        keySecret,
+		"key":        MintedKeyPrefix + keyID,
+		"secret":     fmt.Sprintf("EXOsecret_fake_%s", keyID),
 		jsonKeyKeyID: keyID,
 		jsonKeyName:  req.Name,
 		"role-id":    req.RoleID,

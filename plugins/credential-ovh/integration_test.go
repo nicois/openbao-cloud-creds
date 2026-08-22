@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -32,7 +33,7 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatal("missing expires_at")
 	}
 	meta, ok := issueResp.Data["metadata"].(map[string]interface{})
-	if !ok || meta["api_version"] != "2" {
+	if !ok || meta["api_version"] != credenvelope.APIVersion {
 		t.Fatalf("bad metadata: %v", issueResp.Data["metadata"])
 	}
 	if meta["minter_set"] != "default" || meta["minter_id"] != "minter-1" {
@@ -41,8 +42,14 @@ func TestFullLifecycle(t *testing.T) {
 	if meta["issued_by"] != "cloud-creds-ovh/v0.1" {
 		t.Fatalf("bad issued_by: %v", meta["issued_by"])
 	}
-	if meta["scope"] != "all" {
+	// OVH offers no per-token scoping, so scope is EMPTY and scope_kind says why.
+	// It used to be the literal string "all", which reads like a value rather than
+	// the absence of one (A28).
+	if meta["scope"] != "" {
 		t.Fatalf("bad scope: %v", meta["scope"])
+	}
+	if meta["scope_kind"] != string(credenvelope.ScopeKindAccount) {
+		t.Fatalf("bad scope_kind: %v", meta["scope_kind"])
 	}
 
 	// Verify credential structure

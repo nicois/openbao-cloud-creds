@@ -222,10 +222,12 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		TTLSeconds:   ttlSeconds,
 		Renewable:    false,
 		CredentialID: accessKeyID,
-		Scope:        args.role.IAMRoleARN,
-		IssuedBy:     "cloud-creds-aws/v0.1",
-		MinterSet:    args.sel.setID,
-		MinterID:     args.sel.minterID,
+		// The session ASSUMES this IAM role; its permissions are the role's.
+		Scope:     args.role.IAMRoleARN,
+		ScopeKind: credenvelope.ScopeKindRole,
+		IssuedBy:  "cloud-creds-aws/v0.1",
+		MinterSet: args.sel.setID,
+		MinterID:  args.sel.minterID,
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)

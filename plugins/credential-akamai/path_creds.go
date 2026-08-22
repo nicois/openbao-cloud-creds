@@ -123,10 +123,12 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		TTLSeconds:   int(a.role.DefaultTTL.Seconds()),
 		Renewable:    true,
 		CredentialID: a.clientResp.ClientID,
-		Scope:        a.role.APIAccess,
-		IssuedBy:     "cloud-creds-akamai/v0.1",
-		MinterSet:    a.setName,
-		MinterID:     a.minterID,
+		// Akamai apiAccess is the list of APIs the client may call.
+		Scope:     a.role.APIAccess,
+		ScopeKind: credenvelope.ScopeKindScopes,
+		IssuedBy:  "cloud-creds-akamai/v0.1",
+		MinterSet: a.setName,
+		MinterID:  a.minterID,
 	})
 
 	// Track active client for reconciler

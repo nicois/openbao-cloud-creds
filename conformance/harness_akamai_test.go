@@ -53,6 +53,8 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, rolePath, akamaiRoleFields())
 		},
 		IssuePath:             issuePath,
+		CredentialKeys:        []string{"client_token", "access_token", "client_secret", "host"},
+		ScopeKind:             "scopes",
 		SecretType:            "akamai_client",
 		LeaseInternalDataKeys: []string{"upstream_client_id", "role", "minter_set", "minter_id"},
 		RolePath:              rolePath,

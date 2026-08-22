@@ -53,12 +53,15 @@ func azureHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, azureMinterToken)))
 			plugintest.Write(t, b, storage, rolePath, azureRoleFields())
 		},
-		IssuePath:             issuePath,
-		SecretType:            "azure_client_secret",
-		LeaseInternalDataKeys: []string{"upstream_key_id", "app_object_id", "role", "minter_set", "minter_id"},
-		RolePath:              rolePath,
-		WorkersRunning:        credentialazure.WorkersRunning,
-		SetPath:               setPath,
+		IssuePath:              issuePath,
+		CredentialKeys:         []string{"client_id", "client_secret", "tenant_id"},
+		OptionalCredentialKeys: []string{"subscription_id"},
+		ScopeKind:              "identity",
+		SecretType:             "azure_client_secret",
+		LeaseInternalDataKeys:  []string{"upstream_key_id", "app_object_id", "role", "minter_set", "minter_id"},
+		RolePath:               rolePath,
+		WorkersRunning:         credentialazure.WorkersRunning,
+		SetPath:                setPath,
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, azureMinterToken)))

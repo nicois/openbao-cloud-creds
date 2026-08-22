@@ -251,11 +251,10 @@ func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
 	})
 	beforeKeys := srv.ProvisionedCount()
 
-	// The fake mints successor key secrets with the "EXOsecret_fake_" prefix; the
-	// minting minters use "EXO_key_". Failing the successor prefix rejects the
-	// successor (which authenticates AS its own key) while the minting client
-	// stays healthy.
-	srv.SetFailHealthForKeyPrefix("EXOsecret_fake_")
+	// The fake mints API keys as "EXOexo-key-<n>"; the minters seeded above use
+	// "EXO_key_". Failing the minted prefix rejects the successor (which
+	// authenticates AS its own key) while the minting client stays healthy.
+	srv.SetFailHealthForKeyPrefix(capMintedPrefix)
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,

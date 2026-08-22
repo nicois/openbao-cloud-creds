@@ -65,6 +65,8 @@ func awsHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, rolePath, awsRoleFields())
 		},
 		IssuePath:             issuePath,
+		CredentialKeys:        []string{"access_key_id", "secret_access_key", "session_token"},
+		ScopeKind:             "role",
 		SecretType:            "aws_sts_credentials",
 		LeaseInternalDataKeys: []string{"access_key_id", "role", "minter_set", "minter_id"},
 		RolePath:              rolePath,

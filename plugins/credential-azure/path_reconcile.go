@@ -92,17 +92,18 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 
 	emitOrphansFound(len(result.OrphansFound))
 
-	return &logical.Response{
-		Data: map[string]interface{}{
-			"mode":              mode,
-			"dry_run":           dryRun,
-			"confirmation_hold": effectiveHold.String(),
-			"orphans_found":     len(result.OrphansFound),
-			"deleted":           result.Deleted,
-			"hit_limit":         result.HitLimit,
-			"delete_errors":     len(result.Errors),
-		},
-	}, nil
+	return &logical.Response{Data: reconciler.ResponseData{
+		Mode:             mode,
+		DryRun:           dryRun,
+		Target:           reconciler.TargetUpstreamOrphans,
+		Scanned:          result.Scanned,
+		Found:            len(result.OrphansFound),
+		Deleted:          result.Deleted,
+		Remaining:        result.Scanned - result.Deleted,
+		DeleteErrors:     len(result.Errors),
+		HitLimit:         result.HitLimit,
+		ConfirmationHold: effectiveHold,
+	}.Map()}, nil
 }
 
 func (b *backend) getAllAppObjectIDs(ctx context.Context, storage logical.Storage) ([]string, error) {

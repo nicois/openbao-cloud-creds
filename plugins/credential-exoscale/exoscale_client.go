@@ -25,7 +25,13 @@ type createAPIKeyRequest struct {
 }
 
 type apiKeyResponse struct {
-	Key    string `json:"key"`
+	Key string `json:"key"`
+	// Secret is the signing half, returned ONLY on create. It was not in this struct
+	// at all, so it was decoded away and never reached the caller — the issued
+	// credential was the API key without the secret that makes it usable, and no test
+	// noticed because the fake returned a secret-shaped value in `key` (A28 in
+	// docs/audit-2026-08-22.md).
+	Secret string `json:"secret"`
 	KeyID  string `json:"key-id"`
 	Name   string `json:"name"`
 	RoleID string `json:"role-id"`

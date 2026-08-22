@@ -59,7 +59,7 @@ func TestReconcileEndpoint_Normal(t *testing.T) {
 		t.Fatalf("reconcile error: %v", resp)
 	}
 	// Active tokens haven't expired yet, so nothing should be cleaned
-	if resp.Data["expired_found"].(int) != 0 {
-		t.Fatalf("expected 0 expired_found (creds still active), got %v", resp.Data["expired_found"])
+	if resp.Data["found"].(int) != 0 {
+		t.Fatalf("expected found=0 (creds still active), got %v", resp.Data["found"])
 	}
 }

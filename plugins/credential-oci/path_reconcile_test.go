@@ -26,7 +26,7 @@ func TestReconcile_DryRun(t *testing.T) {
 	if resp.Data["dry_run"] != true {
 		t.Fatalf("expected dry_run=true, got %v", resp.Data["dry_run"])
 	}
-	if resp.Data["orphans_found"] == nil {
+	if resp.Data["found"] == nil {
 		t.Fatal("expected orphans_found field")
 	}
 }

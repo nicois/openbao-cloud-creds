@@ -45,6 +45,8 @@ func vultrHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, rolePath, vultrRoleFields())
 		},
 		IssuePath:             issuePath,
+		CredentialKeys:        []string{"api_key"},
+		ScopeKind:             "acl",
 		SecretType:            "vultr_user",
 		LeaseInternalDataKeys: []string{"upstream_user_id", "role", "minter_set", "minter_id"},
 		RolePath:              rolePath,

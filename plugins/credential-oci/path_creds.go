@@ -106,10 +106,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		TTLSeconds:   ttlSeconds,
 		Renewable:    false,
 		CredentialID: best.TokenID,
-		Scope:        role.UserOCID,
-		IssuedBy:     "cloud-creds-oci/v0.1",
-		MinterSet:    best.MinterSet,
-		MinterID:     best.MinterID,
+		// The auth token belongs to this OCI user.
+		Scope:     role.UserOCID,
+		ScopeKind: credenvelope.ScopeKindIdentity,
+		IssuedBy:  "cloud-creds-oci/v0.1",
+		MinterSet: best.MinterSet,
+		MinterID:  best.MinterID,
 	})
 
 	resp := b.Secret("oci_auth_token").Response(env.ToMap(), map[string]interface{}{

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	credentialoci "github.com/nicois/openbao-cloud-creds/plugins/credential-oci"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -114,7 +115,7 @@ func TestCredsRead(t *testing.T) {
 
 	// Verify metadata, including minter-set provenance recorded on the slot.
 	meta, ok := resp.Data["metadata"].(map[string]interface{})
-	if !ok || meta["api_version"] != "2" {
+	if !ok || meta["api_version"] != credenvelope.APIVersion {
 		t.Fatalf("bad metadata: %v", resp.Data["metadata"])
 	}
 	if meta["issued_by"] != "cloud-creds-oci/v0.1" {

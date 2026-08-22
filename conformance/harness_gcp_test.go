@@ -72,6 +72,8 @@ func gcpHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, rolePath, gcpRoleFields())
 		},
 		IssuePath:             issuePath,
+		CredentialKeys:        []string{"access_token", "token_type"},
+		ScopeKind:             "identity",
 		SecretType:            "gcp_access_token",
 		LeaseInternalDataKeys: []string{"credential_id", "role", "minter_set", "minter_id"},
 		RolePath:              rolePath,

@@ -7,6 +7,16 @@ import (
 )
 
 // reconcilePath and its modes are uniform across every plugin's API surface.
+// The reconcile targets, mirrored from pkg/reconciler so the shared suite does not
+// take a dependency on it purely to name two strings.
+const (
+	// TargetUpstreamOrphans: the pass deletes owner-tagged upstream credentials.
+	TargetUpstreamOrphans = "upstream_orphans"
+	// TargetLocalExpired: the pass prunes local tracking entries whose credential has
+	// already expired upstream.
+	TargetLocalExpired = "local_expired_entries"
+)
+
 const (
 	reconcilePath = "reconcile"
 	fieldMode     = "mode"
@@ -35,6 +45,54 @@ func RunReconcilerSafetySuite(t *testing.T, h Harness) {
 	t.Run("DeletesOwnedOrphansAndOnlyThose", func(t *testing.T) { assertReclaimsOnlyOwned(t, h) })
 	t.Run("DryRunDeletesNothing", func(t *testing.T) { assertDryRunDeletesNothing(t, h) })
 	t.Run("TwoMountsDoNotDeleteEachOthers", func(t *testing.T) { assertMountsAreIsolated(t, h) })
+	t.Run("ResponseIsTheOneUniformSchema", func(t *testing.T) { assertReconcileSchema(t, h) })
+}
+
+// reconcileResponseKeys is the uniform /reconcile response, asserted EXACTLY.
+//
+// The endpoint had three different response schemas behind one path and one piece of
+// documentation: six clouds reported orphans_found/hit_limit/delete_errors, the three
+// that cannot revoke reported expired_found/active_remaining instead, and OCI a third
+// subset. Each was sensible alone; together they meant a runbook or a client had to be
+// written per cloud for the endpoint whose whole purpose is being the same everywhere
+// (A28 in docs/audit-2026-08-22.md).
+//
+// The real difference between the clouds — deleting upstream credentials versus pruning
+// local tracking entries — is now the `target` field, which is data.
+var reconcileResponseKeys = []string{
+	"mode", "dry_run", "target", "scanned", "found", "deleted", "remaining",
+	"delete_errors", "hit_limit", "confirmation_hold",
+}
+
+func assertReconcileSchema(t *testing.T, h Harness) {
+	t.Helper()
+	b, storage := newConfiguredBackend(t, h)
+	if resp, err := issue(t, b, storage, h.IssuePath); err != nil || resp == nil || resp.IsError() {
+		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
+	}
+
+	for _, mode := range []string{modeNormal, modeDryRun} {
+		resp := reconcile(t, b, storage, mode)
+		got := make(map[string]bool, len(resp.Data))
+		for key := range resp.Data {
+			got[key] = true
+		}
+		for _, want := range reconcileResponseKeys {
+			if !got[want] {
+				t.Errorf("mode=%s: reconcile response has no %q. Keys: %v", mode, want, keysOf(resp.Data))
+			}
+			delete(got, want)
+		}
+		for extra := range got {
+			t.Errorf("mode=%s: reconcile response carries an undeclared key %q — one endpoint, one "+
+				"schema, or a client has to be written per cloud again", mode, extra)
+		}
+		if resp.Data["target"] != TargetUpstreamOrphans && resp.Data["target"] != TargetLocalExpired {
+			t.Errorf("mode=%s: target is %v, want one of %q/%q — it is what tells a caller whether "+
+				"`deleted` means a cloud credential is gone or a storage entry is",
+				mode, resp.Data["target"], TargetUpstreamOrphans, TargetLocalExpired)
+		}
+	}
 }
 
 // assertMountsAreIsolated is the end-to-end form of A19. The reclaim filter used to be
@@ -97,7 +155,7 @@ func assertForeignEntitySurvives(t *testing.T, h Harness) {
 	if !h.HasEntity(id) {
 		t.Fatalf("reconciler deleted foreign entity %q — the owner-tag invariant is broken", id)
 	}
-	if orphans, ok := resp.Data["orphans_found"].(int); ok && orphans != 0 {
+	if orphans, ok := resp.Data["found"].(int); ok && orphans != 0 {
 		t.Fatalf("foreign entity counted as an orphan: orphans_found=%d", orphans)
 	}
 }

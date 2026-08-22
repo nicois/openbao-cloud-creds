@@ -4,11 +4,6 @@ package credentialupcloud
 // and the "cloud" metric label.
 const cloudName = "upcloud"
 
-// scopeAccountWide is what metadata.scope reports for a cloud that offers no
-// per-credential scoping at all: the credential's privilege is the minter
-// account's. UpCloud's token API takes no scope, ACL or role parameter.
-const scopeAccountWide = "account"
-
 // Field and metric-label names that recur across schemas, responses, and
 // telemetry. Constified so the linter (goconst) has a single source of truth.
 const (

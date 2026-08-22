@@ -112,10 +112,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		TTLSeconds:   ttlSeconds,
 		Renewable:    false,
 		CredentialID: credentialID,
-		Scope:        "all",
-		IssuedBy:     "cloud-creds-ovh/v0.1",
-		MinterSet:    setName,
-		MinterID:     minterID,
+		// OVH tokens carry the whole account's privilege; there is no per-token scoping, and `scope` was the literal string "all", which read like a value rather than an absence.
+		Scope:     "",
+		ScopeKind: credenvelope.ScopeKindAccount,
+		IssuedBy:  "cloud-creds-ovh/v0.1",
+		MinterSet: setName,
+		MinterID:  minterID,
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)

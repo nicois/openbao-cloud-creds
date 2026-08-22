@@ -172,10 +172,12 @@ func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
 		TTLSeconds:   int(a.role.DefaultTTL.Seconds()),
 		Renewable:    false, // endDateTime is fixed at mint — see pathCredsRenew
 		CredentialID: a.pwResp.KeyID,
-		Scope:        a.role.AppObjectID,
-		IssuedBy:     "cloud-creds-azure/v0.1",
-		MinterSet:    a.setName,
-		MinterID:     a.minterID,
+		// The secret belongs to this app registration.
+		Scope:     a.role.AppObjectID,
+		ScopeKind: credenvelope.ScopeKindIdentity,
+		IssuedBy:  "cloud-creds-azure/v0.1",
+		MinterSet: a.setName,
+		MinterID:  a.minterID,
 	})
 }
 
