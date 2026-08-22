@@ -51,7 +51,8 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 
 // assumeRoleShape describes the mint request a role produces, for probe dedup.
 // Session tags are sorted so two roles with the same tags in a different map
-// order share one probe.
+// order share one probe. Every field that reaches STS belongs here, because each is
+// independently able to turn an allowed AssumeRole into a refused one.
 func assumeRoleShape(role *awsRole) string {
 	keys := make([]string, 0, len(role.SessionTags))
 	for k := range role.SessionTags {
@@ -62,7 +63,16 @@ func assumeRoleShape(role *awsRole) string {
 	for _, k := range keys {
 		tags = append(tags, k+"="+role.SessionTags[k])
 	}
-	return role.IAMRoleARN + "|" + role.ExternalID + "|" + strings.Join(tags, ",")
+	// Session policies are part of the mint shape: a malformed inline document, or
+	// one that exceeds the packed-policy size, makes AssumeRole fail. Two roles
+	// differing only in their narrowing must therefore not share one probe (A22).
+	return strings.Join([]string{
+		role.IAMRoleARN,
+		role.ExternalID,
+		strings.Join(tags, ","),
+		strings.Join(role.PolicyARNs, ","),
+		role.InlinePolicy,
+	}, "|")
 }
 
 // probeMint returns a probe that assumes the role's ARN for the minimum duration.

@@ -36,9 +36,11 @@ The long-lived **minter** credentials themselves are observable (an age gauge pl
 | `credential-exoscale` | JIT | Exoscale IAM API keys (`POST /api-key`) | ✅ successor with minter's role-id |
 | `credential-vultr` | JIT | Vultr sub-users (`POST /v2/users`) | — |
 | `credential-akamai` | JIT | Akamai EdgeGrid API clients (Identity Management API) | ✅ per-account apiId + RW grant |
-| `credential-oci` | Phased rotation | Oracle Cloud auth tokens (N=2 slots) | — (already slot-rotates issued tokens) |
+| `credential-oci` | Phased rotation | Oracle Cloud auth tokens (N=2 slots) — **experimental**² | — (already slot-rotates issued tokens) |
 
 The `minter-sets/<set>/rotate` endpoint exists on all ten plugins for a uniform API surface; the four marked **—** (DO, OVH, Vultr, OCI) reject it with "rotation not supported, rotate out-of-band" because their APIs cannot mint a mint-capable successor (verified — see [`docs/cloud-credential-research.md`](docs/cloud-credential-research.md)).
+
+² **`credential-oci` cannot talk to real OCI.** Its production client is four `NotImplemented` stubs — OCI request signing is unimplemented in this open-source extraction — so a role write fails with `unsupported`, and everything that passes for it exercises the in-process fake. Phased rotation, one of the two headline strategies, therefore has no working cloud. Tracked as A15 in [`docs/audit-2026-08-22.md`](docs/audit-2026-08-22.md).
 
 ¹ **`POST /v2/tokens` is neither public nor usable.** DO's public OpenAPI spec has no `/v2/tokens` path, and DO documents personal-access-token creation as a control-panel flow only. Worse, a real-account probe on 2026-08-21 found the endpoint **refused for every personal access token**: `GET`/`POST /v2/tokens` return 403 with `X-Response-From: Edge-Gateway` while eleven other endpoints on the *same* full-access token return 200 from `X-Response-From: service`. Token management is fenced off at DigitalOcean's edge as a matter of routing, not privilege — so `credential-do` cannot mint against real DigitalOcean, and there is no headless alternative (the OAuth flow needs interactive authorization; Spaces keys are a different credential type, out of scope). It is retained as the structure the other nine plugins follow and as the origin of the DO cloud fake, both of which the test layers depend on. Findings: [KI-009](docs/known-issues.md), [`docs/do-api-verification-2026-08-21.md`](docs/do-api-verification-2026-08-21.md), rationale in [`docs/decisions.md`](docs/decisions.md).
 

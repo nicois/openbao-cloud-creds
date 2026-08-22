@@ -3,6 +3,7 @@ package credentialoci
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -210,7 +211,25 @@ func (b *backend) maybeInitializeSlots(ctx context.Context, req *logical.Request
 		return nil, nil
 	}
 	if err := b.initializeSlots(ctx, req.Storage, ociR); err != nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "role saved but slot initialization failed: %v", err), nil
+		// Delete the role we just saved. Leaving it behind produced a role that
+		// exists, cannot serve a credential, and reports `internal` for what is in
+		// fact an unsupported build — see A15/A24 in docs/audit-2026-08-22.md and the
+		// signing stub in oci_client.go.
+		if delErr := req.Storage.Delete(ctx, "roles/"+ociR.Name); delErr != nil {
+			b.Logger().Warn("could not remove a role whose slots failed to initialise",
+				"cloud", cloudName, "role", ociR.Name, "error", delErr)
+		}
+		// The signing stub already returns a PluginError carrying ErrUnsupported;
+		// honour whatever code the error brought rather than flattening everything to
+		// `internal`, which told an operator to check their configuration when the
+		// real answer is "this build cannot talk to OCI".
+		code := credenvelope.Classify(credenvelope.StatusNone, err)
+		var pluginErr *credenvelope.PluginError
+		if errors.As(err, &pluginErr) {
+			code = pluginErr.Code
+		}
+		return credenvelope.ErrorResponse(code,
+			"slot initialization failed, so the role was not saved: %v", err), nil
 	}
 	return nil, nil
 }

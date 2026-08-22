@@ -144,6 +144,20 @@ func buildAssumeRoleInput(role *awsRole, roleName, reqID string) *sts.AssumeRole
 		input.ExternalId = aws.String(role.ExternalID)
 	}
 
+	// Session policies narrow the session to the INTERSECTION of the target role's
+	// permissions and these — they can only ever reduce privilege, never grant it.
+	// Without them every issued credential carried the target role's entire
+	// permission set, so privilege separation required one IAM role per level
+	// upstream while the published contract promised narrowing (A22).
+	for _, policyARN := range role.PolicyARNs {
+		input.PolicyArns = append(input.PolicyArns, ststypes.PolicyDescriptorType{
+			Arn: aws.String(policyARN),
+		})
+	}
+	if role.InlinePolicy != "" {
+		input.Policy = aws.String(role.InlinePolicy)
+	}
+
 	return input
 }
 

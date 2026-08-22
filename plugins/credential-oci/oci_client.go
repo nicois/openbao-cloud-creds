@@ -2,6 +2,7 @@ package credentialoci
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -48,24 +49,30 @@ func newSigningOCIClient(token, region string) *signingOCIClient {
 	return &signingOCIClient{token: token, region: region}
 }
 
+// errSigningNotImplemented holds the single copy of the "not implemented" text every
+// stub method reports. The code that reaches a caller is ErrUnsupported, carried on
+// the PluginError each method returns, so an operator is told "this build cannot talk
+// to OCI" rather than "check your configuration" (A15).
+var errSigningNotImplemented = errors.New("OCI request signing not implemented in this build")
+
 func (c *signingOCIClient) CreateAuthToken(_ context.Context, _, _ string) (tokenValue, tokenID string, err error) {
 	return "", "", credenvelope.NewError(credenvelope.ErrUnsupported, http.StatusNotImplemented,
-		"OCI request signing not implemented in this build")
+		errSigningNotImplemented.Error())
 }
 
 func (c *signingOCIClient) DeleteAuthToken(_ context.Context, _, _ string) error {
 	return credenvelope.NewError(credenvelope.ErrUnsupported, http.StatusNotImplemented,
-		"OCI request signing not implemented in this build")
+		errSigningNotImplemented.Error())
 }
 
 func (c *signingOCIClient) ListAuthTokens(_ context.Context, _ string) ([]AuthTokenInfo, error) {
 	return nil, credenvelope.NewError(credenvelope.ErrUnsupported, http.StatusNotImplemented,
-		"OCI request signing not implemented in this build")
+		errSigningNotImplemented.Error())
 }
 
 func (c *signingOCIClient) GetUser(_ context.Context, _ string) error {
 	return credenvelope.NewError(credenvelope.ErrUnsupported, http.StatusNotImplemented,
-		"OCI request signing not implemented in this build")
+		errSigningNotImplemented.Error())
 }
 
 // fakeOCIClient is an in-memory implementation of OCIIAMClient for testing.

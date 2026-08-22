@@ -3,6 +3,7 @@ package credentialaws
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
@@ -32,8 +33,16 @@ type awsRole struct {
 	IAMRoleARN  string            `json:"iam_role_arn"`
 	SessionTags map[string]string `json:"session_tags,omitempty"`
 	ExternalID  string            `json:"external_id,omitempty"`
-	MinterSet   string            `json:"minter_set"`
-	Disabled    bool              `json:"disabled,omitempty"`
+	// PolicyARNs and InlinePolicy narrow the session below the target role's own
+	// permissions, using STS session policies. Both were specified in techrfc.md
+	// and design.md and did not exist, so every issued credential carried the
+	// target role's ENTIRE permission set and privilege separation could only be
+	// done by creating one IAM role per level upstream (A22 in
+	// docs/audit-2026-08-22.md).
+	PolicyARNs   []string `json:"policy_arns,omitempty"`
+	InlinePolicy string   `json:"inline_policy,omitempty"`
+	MinterSet    string   `json:"minter_set"`
+	Disabled     bool     `json:"disabled,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -66,6 +75,16 @@ func (b *backend) rolePaths() []*framework.Path {
 				"external_id": {
 					Type:        framework.TypeString,
 					Description: "External ID for cross-account assume role",
+				},
+				fieldPolicyARNs: {
+					Type: framework.TypeCommaStringSlice,
+					Description: "Managed policy ARNs used as STS session policies, narrowing the " +
+						"session to the intersection of the target role's permissions and these",
+				},
+				fieldInlinePolicy: {
+					Type: framework.TypeString,
+					Description: "Inline JSON session policy, narrowing the session to the " +
+						"intersection of the target role's permissions and this document",
 				},
 				fieldMinterSet: {
 					Type:        framework.TypeString,
@@ -133,6 +152,12 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return errResp, nil
 	}
 
+	policyARNs := d.Get(fieldPolicyARNs).([]string)
+	inlinePolicy := d.Get(fieldInlinePolicy).(string)
+	if errResp := validateSessionPolicies(policyARNs, inlinePolicy); errResp != nil {
+		return errResp, nil
+	}
+
 	role := &cloudconfig.Role{
 		Name:       name,
 		Cloud:      cloudName,
@@ -164,6 +189,9 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		SessionTags: sessionTags,
 		ExternalID:  externalID,
 		MinterSet:   minterSet,
+
+		PolicyARNs:   policyARNs,
+		InlinePolicy: inlinePolicy,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -208,6 +236,12 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 	if role.SessionTags != nil {
 		data["session_tags"] = role.SessionTags
 	}
+	if len(role.PolicyARNs) > 0 {
+		data[fieldPolicyARNs] = role.PolicyARNs
+	}
+	if role.InlinePolicy != "" {
+		data[fieldInlinePolicy] = role.InlinePolicy
+	}
 	if role.ExternalID != "" {
 		data["external_id"] = role.ExternalID
 	}
@@ -229,4 +263,29 @@ func (b *backend) pathRoleList(ctx context.Context, req *logical.Request, _ *fra
 		return nil, err
 	}
 	return logical.ListResponse(entries), nil
+}
+
+// validateSessionPolicies checks the narrowing fields at role write, where the
+// operator finds out, rather than at the first credential read.
+//
+// STS caps session policies at 10 managed ARNs, and an inline policy must be JSON —
+// AWS rejects both cases at AssumeRole, which would otherwise surface as an
+// upstream_request_invalid to an unrelated caller much later.
+func validateSessionPolicies(policyARNs []string, inlinePolicy string) *logical.Response {
+	if len(policyARNs) > maxSessionPolicyARNs {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"%s accepts at most %d managed policy ARNs (STS limit), got %d",
+			fieldPolicyARNs, maxSessionPolicyARNs, len(policyARNs))
+	}
+	for _, arn := range policyARNs {
+		if !strings.HasPrefix(arn, "arn:") {
+			return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+				"%s entry %q is not an ARN", fieldPolicyARNs, arn)
+		}
+	}
+	if inlinePolicy != "" && !json.Valid([]byte(inlinePolicy)) {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"%s must be a JSON policy document", fieldInlinePolicy)
+	}
+	return nil
 }

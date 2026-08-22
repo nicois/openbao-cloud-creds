@@ -83,3 +83,13 @@ const (
 	modeNormal = "normal"
 	modeDryRun = "dry_run"
 )
+
+// Session-policy role fields. These narrow an issued session below the target IAM
+// role's own permissions; see validateSessionPolicies and A22.
+const (
+	fieldPolicyARNs   = "policy_arns"
+	fieldInlinePolicy = "inline_policy"
+
+	// maxSessionPolicyARNs is STS's documented limit on managed session policies.
+	maxSessionPolicyARNs = 10
+)

@@ -33,7 +33,7 @@ DO was the reference implementation: it exercises every load-bearing piece (enve
 
 ## Status of each plugin
 
-All ten plugins are implemented, tested, lint-clean (golangci-lint v2), build as deployable binaries, and pass the OpenBao registration smoke test (`make smoke-test`). None are scaffolds or stubs. One caveat, and it is about a cloud rather than the code: **DigitalOcean refuses the mint call for every PAT (KI-009)**, so `credential-do` is complete and correct but cannot issue against real DO — the only plugin with a confirmed upstream blocker. **AWS is now verified against real AWS** (`make test-cloud-real-aws`, 2026-08-21 — mint shape, session tags, credential usability, exact-TTL honouring; it also found KI-010). The remaining eight are unverified against their real cloud (`docs/free-account-viability.md`).
+All ten plugins are implemented, tested, lint-clean (golangci-lint v2), build as deployable binaries, and pass the OpenBao registration smoke test (`make smoke-test`). Two carry caveats. **`credential-oci` is experimental**: its production client is four `NotImplemented` stubs (OCI request signing is unimplemented here), so everything green about it measures its fake — which also means **phased rotation has no working cloud** (A15). The other caveat is about a cloud rather than the code: **DigitalOcean refuses the mint call for every PAT (KI-009)**, so `credential-do` is complete and correct but cannot issue against real DO — the only plugin with a confirmed upstream blocker. **AWS is now verified against real AWS** (`make test-cloud-real-aws`, 2026-08-21 — mint shape, session tags, credential usability, exact-TTL honouring; it also found KI-010). The remaining eight are unverified against their real cloud (`docs/free-account-viability.md`).
 
 | Plugin | Strategy | Notes |
 |--------|----------|-------|
@@ -46,7 +46,7 @@ All ten plugins are implemented, tested, lint-clean (golangci-lint v2), build as
 | `credential-exoscale` | JIT | `POST /api-key` scoped to an IAM role; **hard revoke** (`DELETE /api-key/{id}`) |
 | `credential-vultr` | JIT | sub-user creation, `POST /v2/users`; **hard revoke** (`DELETE /v2/users/{id}`) |
 | `credential-akamai` | JIT | EdgeGrid-signed API-client creation (CDN/Identity API — NOT Linode Object Storage); **hard revoke** (delete API client) |
-| `credential-oci` | Phased rotation | OCI auth tokens, N=2 slots; the only non-JIT plugin; **soft revoke** (slot lives until scheduled rotation) |
+| `credential-oci` | Phased rotation | OCI auth tokens, N=2 slots; the only non-JIT plugin; **soft revoke** (slot lives until scheduled rotation). **experimental — not usable against real OCI**: its production client is four `NotImplemented` stubs because OCI request signing is unimplemented in this open-source extraction, so a role write now fails with `unsupported` rather than saving a role that cannot serve (A15) |
 
 Revoke summary: **hard revoke** (deletes upstream on lease end) — DO, UpCloud, Azure, Exoscale, Vultr, Akamai. **No revoke** (credential expires naturally) — AWS, GCP, OVH. **Soft revoke** (phased rotation) — OCI.
 

@@ -85,7 +85,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		ttlSeconds = defaultTTLSec
 	}
 
-	expiresAt := best.NextRotationAt
+	// expires_at MUST agree with ttl_seconds. It used to be the slot's next
+	// rotation unconditionally while ttl_seconds was clamped to default_ttl, so a
+	// 15m role with three days to rotation returned ttl_seconds=900 alongside an
+	// expires_at three days out — and a client that schedules its refresh from
+	// expires_at (which the envelope invites: it is the field README points at)
+	// overstated its lease by days (A24 in docs/audit-2026-08-22.md).
+	expiresAt := now.Add(time.Duration(ttlSeconds) * time.Second)
 
 	// Provenance comes from the slot itself — the read does not call the cloud.
 	if b.accessTracker != nil && best.MinterSet != "" && best.MinterID != "" {

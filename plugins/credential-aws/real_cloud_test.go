@@ -241,6 +241,29 @@ func TestRealAWSSTS(t *testing.T) {
 		t.Logf("DurationSeconds=%d refused, as maxSTSTTL assumes", aboveSTSMaxSeconds)
 	})
 
+	// A22: the narrowing fields are new, and a session policy is the kind of thing a
+	// fake cannot validate — AWS parses the document and enforces the packed-policy
+	// size. This proves STS accepts what the plugin now sends.
+	t.Run("SessionPoliciesAreAccepted", func(t *testing.T) {
+		role := probeRole(roleARN)
+		role.PolicyARNs = []string{"arn:aws:iam::aws:policy/ReadOnlyAccess"}
+		role.InlinePolicy = `{"Version":"2012-10-17","Statement":[{"Effect":"Allow",` +
+			`"Action":"sts:GetCallerIdentity","Resource":"*"}]}`
+
+		out, err := client.AssumeRole(ctx, buildAssumeRoleInput(role, role.Name, probeReqID),
+			rec.recordOption())
+		if err != nil {
+			t.Fatalf("AssumeRole with session policies was refused: %v\n"+
+				"policy_arns and inline_policy narrow a session to the intersection of the target "+
+				"role's permissions and the policy, so a refusal here means the plugin cannot honour "+
+				"the narrowing contract it now advertises.",
+				scrubSecrets(err.Error(), rec.knownSecrets()...))
+		}
+		assertCredentialsComplete(t, out, rec)
+		t.Logf("STS accepted %d managed policy ARN(s) plus an inline session policy",
+			len(role.PolicyARNs))
+	})
+
 	t.Run("MaxSessionDurationGap", func(t *testing.T) {
 		assertMaxSessionDurationGap(t, client, rec)
 	})

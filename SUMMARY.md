@@ -6,7 +6,7 @@ A map of this repository: what each part is, where to read about it, and the cur
 
 ## Plugins
 
-All ten are implemented, tested (fake-backed), lint-clean (golangci-lint v2), build as deployable binaries, and pass `make smoke-test`. None are scaffolds.
+Nine are implemented, tested (fake-backed), lint-clean (golangci-lint v2), build as deployable binaries and pass `make smoke-test`. **`credential-oci` is experimental** — its production client is four `NotImplemented` stubs (OCI request signing is unimplemented in this extraction), so its coverage and five of its seven conformance cells measure the fake, and phased rotation therefore has no working cloud (A15 in [`docs/audit-2026-08-22.md`](docs/audit-2026-08-22.md)).
 
 | Plugin | Strategy | Upstream mechanism | Revoke | Minter self-rotation |
 |--------|----------|--------------------|--------|----------------------|
