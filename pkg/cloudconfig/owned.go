@@ -101,3 +101,66 @@ func ValidateIntervals(intervals map[string]time.Duration) error {
 	}
 	return nil
 }
+
+// PreserveLifecycle carries per-minter lifecycle state from the stored set onto an
+// incoming one, matched by minter ID, and stamps CreatedAt only on genuinely new
+// minters.
+//
+// A minter-set write reconstructs each minter from the request and persists the set
+// wholesale. Since the request body carries no `retired` / `retired_at` — they are
+// plugin bookkeeping, not operator input — any write during the 7-day retirement
+// grace silently un-retired a rotated-out minter: it re-entered issuance from a
+// credential scheduled for deletion, AND the retired-sweep (keyed off RetiredAt)
+// never fired again, so the old mint-capable upstream credential lived forever. The
+// same write re-stamped CreatedAt on every minter, resetting the age gauge on
+// minters that were years old (A13 in docs/audit-2026-08-22.md).
+//
+// Un-retiring is deliberately impossible here. If an operator genuinely wants a
+// retired minter back, that is an explicit action, not a side effect of editing a
+// set.
+func PreserveLifecycle(incoming []Minter, stored *MinterSet, now time.Time) []Minter {
+	byID := map[string]Minter{}
+	if stored != nil {
+		for i := range stored.Minters {
+			byID[stored.Minters[i].ID] = stored.Minters[i]
+		}
+	}
+	out := make([]Minter, 0, len(incoming))
+	for i := range incoming {
+		minter := incoming[i]
+		if previous, existed := byID[minter.ID]; existed {
+			minter.CreatedAt = previous.CreatedAt
+			minter.Retired = previous.Retired
+			minter.RetiredAt = previous.RetiredAt
+			if len(minter.RotationParams) == 0 {
+				minter.RotationParams = previous.RotationParams
+			}
+		} else if minter.CreatedAt.IsZero() {
+			minter.CreatedAt = now
+		}
+		out = append(out, minter)
+	}
+	return out
+}
+
+// ValidateMinterIDs rejects a set whose minter ids are empty or duplicated.
+//
+// Neither was checked. A duplicate id satisfied the (>=2 expiring, >=7d gap) rule
+// while `states[m.ID] = ...` collapsed the pair to one on load — producing exactly
+// the single-expiring-minter configuration RSK-005 exists to forbid — and an absent
+// id yielded the literal minter id "<nil>" via fmt.Sprintf("%v", nil).
+func ValidateMinterIDs(minters []Minter) error {
+	seen := make(map[string]struct{}, len(minters))
+	for i := range minters {
+		id := minters[i].ID
+		if id == "" || id == "<nil>" {
+			return fmt.Errorf("minter %d has no id; every minter needs a stable id", i)
+		}
+		if _, dup := seen[id]; dup {
+			return fmt.Errorf("minter id %q appears more than once: ids are the key minters are "+
+				"stored and selected by, so duplicates silently collapse to one", id)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}

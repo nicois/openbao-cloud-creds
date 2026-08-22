@@ -8,6 +8,7 @@ use (
 	./pkg/credenvelope
 	./pkg/localexpiry
 	./pkg/metrics
+	./pkg/mintledger
 	./pkg/metricspath
 	./pkg/plugintest
 	./pkg/reconciler

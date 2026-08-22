@@ -51,6 +51,9 @@ func (b *backend) minterSetPaths() []*framework.Path {
 // For AWS, each minter carries an access_key_id and secret_access_key; we store
 // them joined as "access_key_id:secret_access_key" in the Token field, which the
 // STS client constructor parses back apart.
+// minterSetStoragePrefix is where minter sets are persisted.
+const minterSetStoragePrefix = "minter-sets/"
+
 func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 	raw := d.Get("minters")
 	if raw == nil {
@@ -104,6 +107,19 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 	if err != nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
+	if err := cloudconfig.ValidateMinterIDs(minters); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
+	// Carry retirement and creation state forward from the stored set. Without
+	// this, editing a set during the retirement grace silently un-retires a
+	// rotated-out minter and cancels the sweep that deletes its upstream
+	// credential (A13 in docs/audit-2026-08-22.md).
+	stored, err := b.loadStoredSet(ctx, req.Storage, name)
+	if err != nil {
+		return nil, err
+	}
+	minters = cloudconfig.PreserveLifecycle(minters, stored, time.Now())
+
 	if err := cloudconfig.ValidateMinterSet(minters); err != nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "invalid minter set: %v", err), nil
 	}
@@ -435,4 +451,24 @@ func (b *backend) minterSetExists(ctx context.Context, storage logical.Storage, 
 		return false, err
 	}
 	return entry != nil, nil
+}
+
+// loadStoredSet reads the persisted minter set, or nil when it does not exist yet.
+// A storage error is returned rather than treated as "absent": silently treating an
+// unreadable set as new would discard the retirement state PreserveLifecycle exists
+// to carry forward.
+func (b *backend) loadStoredSet(ctx context.Context, storage logical.Storage, name string,
+) (*cloudconfig.MinterSet, error) {
+	entry, err := storage.Get(ctx, minterSetStoragePrefix+name)
+	if err != nil {
+		return nil, err
+	}
+	if entry == nil {
+		return nil, nil
+	}
+	var set cloudconfig.MinterSet
+	if err := json.Unmarshal(entry.Value, &set); err != nil {
+		return nil, err
+	}
+	return &set, nil
 }

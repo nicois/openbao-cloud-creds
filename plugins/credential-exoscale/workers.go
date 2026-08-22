@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -20,7 +22,20 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 	b.mu.RUnlock()
 
 	if cfg == nil {
-		return
+		// A mount can reach this with no config written: minter-set and role writes
+		// succeed without one, endpoints default, and the capability gate treats a
+		// nil config as verification-enabled. Returning here meant such a mount
+		// issued credentials happily with NO health check, metrics flush, reconciler
+		// or retired-sweep — and since a successful health check is the only exit
+		// from AuthFailing, one transient blip then withdrew a minter permanently
+		// (A14 in docs/audit-2026-08-22.md).
+		//
+		// Defaults are the honest behaviour: the operator who never wrote config did
+		// not ask for "no background work", they just did not express a preference.
+		cfg = cloudconfig.DefaultConfig(cloudName)
+		b.Logger().Info("starting workers with default intervals: no config has been written",
+			"cloud", cloudName, "flush_interval", cfg.FlushInterval,
+			"reconcile_cadence", cfg.ReconcileCadence)
 	}
 
 	wm := worker.New(worker.WithErrorHandler(b.workerErrorHandler()))
@@ -86,7 +101,7 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		return err
 	}
 
-	lister := &exoscaleCloudLister{client: client}
+	lister := &exoscaleCloudLister{client: client, storage: storage}
 	registry := &leaseRegistry{storage: storage}
 
 	b.mu.RLock()
@@ -104,6 +119,16 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 
 	if _, err = reconciler.New(cfg, lister, registry).WithLogger(cloudName, b.Logger()).Run(ctx, time.Now()); err != nil {
 		return err
+	}
+
+	// Keep the ledger bounded. Pruned by AGE, never by revocation: an entry that
+	// followed the tracking entry would be gone exactly when a leaked credential
+	// needed it (A5).
+	if pruned, pruneErr := mintledger.Prune(ctx, storage, time.Now()); pruneErr != nil {
+		b.Logger().Warn("could not prune the mint ledger", "cloud", cloudName, "error", pruneErr)
+	} else if pruned > 0 {
+		b.Logger().Info("pruned mint-ledger entries past retention",
+			"cloud", cloudName, "pruned", pruned)
 	}
 
 	// Reclaim upstream keys of minters retired past the grace. Runs on the

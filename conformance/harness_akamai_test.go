@@ -92,7 +92,7 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 			srv.AddRawClient(foreignEntityID, foreignEntityName)
 			return foreignEntityID
 		},
-		SeedAgedOrphans: func() (string, string) {
+		SeedAgedOrphans: func(_ *testing.T, _ logical.Storage) (string, string) {
 			srv.AddRawClientWithCreatedDate(agedForeignID, agedForeignName, agedTimestamp)
 			srv.AddRawClientWithCreatedDate(agedOwnedID, agedOwnedName, agedTimestamp)
 			return agedForeignID, agedOwnedID

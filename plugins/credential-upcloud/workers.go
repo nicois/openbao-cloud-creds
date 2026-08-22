@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -20,7 +21,20 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 	b.mu.RUnlock()
 
 	if cfg == nil {
-		return
+		// A mount can reach this with no config written: minter-set and role writes
+		// succeed without one, endpoints default, and the capability gate treats a
+		// nil config as verification-enabled. Returning here meant such a mount
+		// issued credentials happily with NO health check, metrics flush, reconciler
+		// or retired-sweep — and since a successful health check is the only exit
+		// from AuthFailing, one transient blip then withdrew a minter permanently
+		// (A14 in docs/audit-2026-08-22.md).
+		//
+		// Defaults are the honest behaviour: the operator who never wrote config did
+		// not ask for "no background work", they just did not express a preference.
+		cfg = cloudconfig.DefaultConfig(cloudName)
+		b.Logger().Info("starting workers with default intervals: no config has been written",
+			"cloud", cloudName, "flush_interval", cfg.FlushInterval,
+			"reconcile_cadence", cfg.ReconcileCadence)
 	}
 
 	wm := worker.New(worker.WithErrorHandler(b.workerErrorHandler()))

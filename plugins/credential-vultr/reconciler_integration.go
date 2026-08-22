@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -13,6 +14,9 @@ const userPrefix = "cloud-creds-"
 
 type vultrCloudLister struct {
 	client *vultrClient
+	// storage is needed to read the mint ledger, which supplies the creation
+	// time this cloud's list API does not report (A5).
+	storage logical.Storage
 }
 
 func (l *vultrCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler.UpstreamEntity, error) {
@@ -27,6 +31,10 @@ func (l *vultrCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler
 			entities = append(entities, reconciler.UpstreamEntity{
 				ID:   u.ID,
 				Name: u.Name,
+				// This cloud's list API reports no creation time, so the age the
+				// reconciler needs comes from our own mint ledger. Absent from the
+				// ledger means unconfirmable, which means it survives (A5).
+				CreatedAt: mintledger.CreatedAt(ctx, l.storage, u.ID),
 			})
 		}
 	}

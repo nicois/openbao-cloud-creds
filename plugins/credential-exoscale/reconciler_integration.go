@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -14,6 +15,9 @@ const keyPrefix = "cloud-creds-"
 
 type exoscaleCloudLister struct {
 	client *exoscaleClient
+	// storage is needed to read the mint ledger, which supplies the creation
+	// time this cloud's list API does not report (A5).
+	storage logical.Storage
 }
 
 func (l *exoscaleCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler.UpstreamEntity, error) {
@@ -28,6 +32,10 @@ func (l *exoscaleCloudLister) ListTaggedEntities(ctx context.Context) ([]reconci
 			entities = append(entities, reconciler.UpstreamEntity{
 				ID:   k.KeyID,
 				Name: k.Name,
+				// This cloud's list API reports no creation time, so the age the
+				// reconciler needs comes from our own mint ledger. Absent from the
+				// ledger means unconfirmable, which means it survives (A5).
+				CreatedAt: mintledger.CreatedAt(ctx, l.storage, k.KeyID),
 			})
 		}
 	}

@@ -85,7 +85,7 @@ func upcloudHarness(t *testing.T) plugintest.Harness {
 			srv.AddRawToken(foreignEntityID, foreignEntityName)
 			return foreignEntityID
 		},
-		SeedAgedOrphans: func() (string, string) {
+		SeedAgedOrphans: func(_ *testing.T, _ logical.Storage) (string, string) {
 			srv.AddRawTokenWithCreatedAt(agedForeignID, agedForeignName, agedTimestamp)
 			srv.AddRawTokenWithCreatedAt(agedOwnedID, agedOwnedName, agedTimestamp)
 			return agedForeignID, agedOwnedID

@@ -140,9 +140,10 @@ type Harness struct {
 	// CLAUDE.md calls load-bearing passed with the prefix filter deleted outright,
 	// and DeleteEntity was never called once across 10 clouds x 7 categories (A9).
 	//
-	// A cloud whose list API returns no creation timestamp cannot supply this; it
-	// leaves the field nil and the suite prints why, which is the same fact as A5.
-	SeedAgedOrphans func() (foreignID, ownedOrphanID string)
+	// storage is passed because a cloud whose list API reports no creation time
+	// supplies it from the mint ledger instead (A5), which lives in storage. A cloud
+	// that can do neither leaves the field nil and the suite prints why.
+	SeedAgedOrphans func(t *testing.T, storage logical.Storage) (foreignID, ownedOrphanID string)
 
 	// --- Error taxonomy ---
 

@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"testing"
+	"time"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -109,3 +110,10 @@ const (
 	agedOwnedID   = "aged-owned-orphan-1"
 	agedOwnedName = "cloud-creds-test-role-stale-req"
 )
+
+// agedLedgerTime is when the mint-ledger-backed clouds pretend their owned orphan was
+// minted: far enough back to clear any confirmation hold, and well inside
+// mintledger.Retention so the entry has not been pruned.
+func agedLedgerTime() time.Time {
+	return time.Now().Add(-48 * time.Hour)
+}

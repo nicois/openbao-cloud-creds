@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
+	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
 	"github.com/nicois/openbao-cloud-creds/pkg/plugintest"
 	credentialexoscale "github.com/nicois/openbao-cloud-creds/plugins/credential-exoscale"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -88,6 +89,17 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 		SeedForeignEntity: func() string {
 			srv.AddRawAPIKey(foreignEntityID, foreignEntityName)
 			return foreignEntityID
+		},
+		// This cloud's list API reports no creation time, so the confirmable age comes
+		// from the mint ledger (A5). The foreign entity gets NO ledger entry, which is
+		// exactly why it must survive.
+		SeedAgedOrphans: func(t *testing.T, storage logical.Storage) (string, string) {
+			srv.AddRawAPIKey(agedForeignID, agedForeignName)
+			srv.AddRawAPIKey(agedOwnedID, agedOwnedName)
+			if err := mintledger.Record(t.Context(), storage, agedOwnedID, agedLedgerTime()); err != nil {
+				t.Fatalf("seeding the mint ledger: %v", err)
+			}
+			return agedForeignID, agedOwnedID
 		},
 		HasEntity: srv.HasAPIKey,
 	}

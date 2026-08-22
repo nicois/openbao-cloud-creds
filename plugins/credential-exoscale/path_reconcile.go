@@ -60,7 +60,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "cannot reconcile: %v", err), nil
 	}
 
-	lister := &exoscaleCloudLister{client: client}
+	lister := &exoscaleCloudLister{client: client, storage: req.Storage}
 	registry := &leaseRegistry{storage: req.Storage}
 
 	cfg := reconciler.Config{

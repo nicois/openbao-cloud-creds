@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -105,6 +106,16 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	})
 
 	// Track active user for reconciler
+	// Record the mint in the ledger BEFORE the tracking entry. The ledger is what
+	// makes this credential reclaimable later: this cloud's list API reports no
+	// creation time, and the reconciler will not delete an entity whose age it
+	// cannot confirm (A5). Unlike the tracking entry, the ledger entry is not
+	// deleted on revoke — the leak worth cleaning up is precisely the one where the
+	// upstream delete failed and the tracking entry went away.
+	if err := mintledger.Record(ctx, req.Storage, userResp.User.ID, now); err != nil {
+		b.Logger().Warn("could not record the mint in the ledger; this credential will not be "+
+			"automatically reclaimable if it leaks", "cloud", cloudName, "id", userResp.User.ID, "error", err)
+	}
 	activeEntry, _ := logical.StorageEntryJSON("active-users/"+userResp.User.ID, map[string]interface{}{
 		fieldRole: roleName,
 		"minter":  minterID,

@@ -66,16 +66,16 @@ func assertForeignEntitySurvives(t *testing.T, h Harness) {
 func assertReclaimsOnlyOwned(t *testing.T, h Harness) {
 	t.Helper()
 	if h.SeedAgedOrphans == nil {
-		t.Skipf("%s: this cloud's list API returns no creation timestamp, so an entity whose age "+
-			"clears the confirmation hold cannot be planted — and for the same reason the plugin "+
-			"cannot reclaim orphans at all (A5)", h.Cloud)
+		t.Skipf("%s: this cloud can supply no confirmable creation time for an upstream entity, "+
+			"neither from its list API nor from a mint ledger, so orphan reclamation cannot be "+
+			"exercised (A5)", h.Cloud)
 	}
 	b, storage := newConfiguredBackend(t, h)
 	if resp, err := issue(t, b, storage, h.IssuePath); err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
 	}
 
-	foreign, owned := h.SeedAgedOrphans()
+	foreign, owned := h.SeedAgedOrphans(t, storage)
 	resp := reconcile(t, b, storage, modeNormal)
 
 	if h.HasEntity(owned) {

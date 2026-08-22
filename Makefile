@@ -1,7 +1,15 @@
 MODULE_PREFIX := github.com/nicois/openbao-cloud-creds
 
 PLUGIN_DIRS := $(patsubst plugins/%/cmd,%,$(wildcard plugins/*/cmd))
-LINT_DIRS := pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/localexpiry pkg/worker pkg/plugintest pkg/telemetry pkg/metricspath conformance $(addprefix plugins/,$(PLUGIN_DIRS))
+# LINT_DIRS is DERIVED from go.work, not listed. A hand-maintained list drifts: it
+# had already lost pkg/capability — the package that gates every configuration write
+# — so that package was unlinted while `make lint` reported success, and CI kept a
+# third copy of the list that omitted more. Deriving it means adding a module to the
+# workspace is enough (A21/A31 in docs/audit-2026-08-22.md).
+#
+# e2e is excluded here because it compiles only under its build tag and is covered by
+# TAGGED_LINT_TARGETS below; linting it untagged would find no files.
+LINT_DIRS := $(filter-out e2e,$(shell sed -n 's|^[[:space:]]*\./||p' go.work))
 
 # Code behind a build tag is invisible to a lint run that does not pass the tag, so
 # each tagged surface gets its own pass rather than being left unlinted. Format is
