@@ -185,7 +185,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 
 	roleNames, err := req.Storage.List(ctx, "roles/")
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 
 	maxDeletes := b.maxDeletesForPass()

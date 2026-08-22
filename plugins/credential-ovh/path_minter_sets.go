@@ -118,7 +118,7 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 	// credential (A13 in docs/audit-2026-08-22.md).
 	stored, err := b.loadStoredSet(ctx, req.Storage, name)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err), nil
 	}
 	minters = cloudconfig.PreserveLifecycle(minters, stored, time.Now())
 
@@ -135,10 +135,10 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 	}
 	entry, err := logical.StorageEntryJSON("minter-sets/"+name, set)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "encoding an entry for storage", err), nil
 	}
 	if err := req.Storage.Put(ctx, entry); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "writing to storage", err), nil
 	}
 	b.loadMinterSet(set)
 	go b.startWorkers(b.baseCtx, req.Storage)
@@ -149,14 +149,14 @@ func (b *backend) pathMinterSetRead(ctx context.Context, req *logical.Request, d
 	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "minter-sets/"+name)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	if entry == nil {
 		return nil, nil
 	}
 	var set cloudconfig.MinterSet
 	if err := json.Unmarshal(entry.Value, &set); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "parsing a stored entry", err), nil
 	}
 	ids := make([]string, 0, len(set.Minters))
 	for i := range set.Minters {
@@ -170,7 +170,7 @@ func (b *backend) pathMinterSetRead(ctx context.Context, req *logical.Request, d
 func (b *backend) pathMinterSetDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
 	if err := req.Storage.Delete(ctx, "minter-sets/"+name); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "deleting from storage", err), nil
 	}
 	b.mu.Lock()
 	delete(b.minterSets, name)
@@ -181,7 +181,7 @@ func (b *backend) pathMinterSetDelete(ctx context.Context, req *logical.Request,
 func (b *backend) pathMinterSetList(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	entries, err := req.Storage.List(ctx, "minter-sets/")
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	return logical.ListResponse(entries), nil
 }

@@ -47,32 +47,32 @@ func (b *backend) secretExoscale() *framework.Secret {
 //
 // Exactly one of role/errResp is non-nil when err is nil.
 func (b *backend) loadIssuableRole(ctx context.Context, req *logical.Request, roleName string,
-) (*exoscaleRole, *logical.Response, error) {
+) (*exoscaleRole, *logical.Response) {
 	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
 	if err != nil {
-		return nil, nil, err
+		return nil, credenvelope.InternalResponse(b.Logger().Warn, "loading the role", err)
 	}
 	if entry == nil {
 		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound,
-			"role %q does not exist", roleName), nil
+			"role %q does not exist", roleName)
 	}
 	var role exoscaleRole
 	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, nil, err
+		return nil, credenvelope.InternalResponse(b.Logger().Warn, "parsing the stored role", err)
 	}
 	if role.Disabled {
 		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled,
-			"role %q is disabled", roleName), nil
+			"role %q is disabled", roleName)
 	}
-	return &role, nil, nil
+	return &role, nil
 }
 
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
 
-	role, errResp, err := b.loadIssuableRole(ctx, req, roleName)
-	if err != nil || errResp != nil {
-		return errResp, err
+	role, errResp := b.loadIssuableRole(ctx, req, roleName)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	now := time.Now()

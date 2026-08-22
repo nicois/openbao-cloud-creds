@@ -93,14 +93,14 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
 	minterSet := d.Get(fieldMinterSet).(string)
 
-	if errResp, err := b.validateRoleWriteParams(ctx, req, roleWriteParams{
+	if errResp := b.validateRoleWriteParams(ctx, req, roleWriteParams{
 		userOCID:       userOCID,
 		minterSet:      minterSet,
 		slotCount:      slotCount,
 		rotationPeriod: rotationPeriod,
 		defaultTTL:     defaultTTL,
-	}); errResp != nil || err != nil {
-		return errResp, err
+	}); errResp != nil {
+		return errResp, nil
 	}
 
 	// Use the shared role validator for basic TTL checks
@@ -137,10 +137,10 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	}
 	entry, err := logical.StorageEntryJSON("roles/"+name, ociR)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "encoding an entry for storage", err), nil
 	}
 	if err := req.Storage.Put(ctx, entry); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "writing to storage", err), nil
 	}
 
 	// Initialize slots if they don't exist yet and the role's bound set has a
@@ -161,29 +161,29 @@ type roleWriteParams struct {
 // order as the original inline checks. It returns a non-nil *logical.Response
 // for a client-facing validation error, or a non-nil error for a storage
 // failure; both nil means the parameters are valid.
-func (b *backend) validateRoleWriteParams(ctx context.Context, req *logical.Request, p roleWriteParams) (*logical.Response, error) {
+func (b *backend) validateRoleWriteParams(ctx context.Context, req *logical.Request, p roleWriteParams) *logical.Response {
 	if p.userOCID == "" {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "user_ocid is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "user_ocid is required")
 	}
 
 	if p.minterSet == "" {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required")
 	}
 	exists, err := b.minterSetExists(ctx, req.Storage, p.minterSet)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err)
 	}
 	if !exists {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", p.minterSet), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", p.minterSet)
 	}
 
 	if p.slotCount < 1 || p.slotCount > maxSlotCount {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "slot_count must be between 1 and %d", maxSlotCount), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "slot_count must be between 1 and %d", maxSlotCount)
 	}
 
 	// Validate rotation period is reasonable
 	if p.rotationPeriod < 1*time.Hour {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "rotation_period must be at least 1 hour"), nil
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "rotation_period must be at least 1 hour")
 	}
 
 	// Validate default_ttl <= rotation_period / slot_count
@@ -191,10 +191,10 @@ func (b *backend) validateRoleWriteParams(ctx context.Context, req *logical.Requ
 	if p.defaultTTL > rotationInterval {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
 			"default_ttl (%v) must be <= rotation_period/slot_count (%v)",
-			p.defaultTTL, rotationInterval), nil
+			p.defaultTTL, rotationInterval)
 	}
 
-	return nil, nil
+	return nil
 }
 
 // maybeInitializeSlots provisions slots for a freshly written role when its
@@ -238,7 +238,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "roles/"+name)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	if entry == nil {
 		return nil, nil
@@ -246,7 +246,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 
 	var role ociRole
 	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "parsing a stored entry", err), nil
 	}
 
 	// Load slot status
@@ -283,7 +283,7 @@ func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *f
 	// Load role to get slot count for cleanup
 	entry, err := req.Storage.Get(ctx, "roles/"+name)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	if entry != nil {
 		var role ociRole
@@ -293,7 +293,7 @@ func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *f
 	}
 
 	if err := req.Storage.Delete(ctx, "roles/"+name); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "deleting from storage", err), nil
 	}
 	return nil, nil
 }
@@ -320,7 +320,7 @@ func (b *backend) cleanupRoleSlots(ctx context.Context, storage logical.Storage,
 func (b *backend) pathRoleList(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	entries, err := req.Storage.List(ctx, "roles/")
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	return logical.ListResponse(entries), nil
 }

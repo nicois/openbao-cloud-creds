@@ -81,7 +81,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	}
 	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err), nil
 	}
 	if !exists {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", minterSet), nil
@@ -117,10 +117,10 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 	entry, err := logical.StorageEntryJSON("roles/"+name, doR)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "encoding an entry for storage", err), nil
 	}
 	if err := req.Storage.Put(ctx, entry); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "writing to storage", err), nil
 	}
 
 	return nil, nil
@@ -130,7 +130,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 	name := d.Get(fieldName).(string)
 	entry, err := req.Storage.Get(ctx, "roles/"+name)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	if entry == nil {
 		return nil, nil
@@ -138,7 +138,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 
 	var role doRole
 	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "parsing a stored entry", err), nil
 	}
 
 	return &logical.Response{
@@ -155,7 +155,7 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
 	if err := req.Storage.Delete(ctx, "roles/"+name); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "deleting from storage", err), nil
 	}
 	return nil, nil
 }
@@ -163,7 +163,7 @@ func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *f
 func (b *backend) pathRoleList(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	entries, err := req.Storage.List(ctx, "roles/")
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	return logical.ListResponse(entries), nil
 }

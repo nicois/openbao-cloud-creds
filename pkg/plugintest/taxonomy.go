@@ -87,6 +87,29 @@ func RunErrorTaxonomySuite(t *testing.T, h Harness) {
 			"a cloud rejecting the request's content is permanent and is not the credential's fault")
 	})
 
+	// The case the category structurally could not reach before: a storage fault.
+	// Handlers return a bare `return nil, err` at 229 sites, which OpenBao renders
+	// as a code-less 500 — the same defect as the 166 code-less responses, at a
+	// larger count, through a door forbidigo does not watch (A7).
+	t.Run("StorageFailureStillCarriesACode", func(t *testing.T) {
+		b, storage := newBackend(t, h)
+		h.Configure(t, b, storage)
+
+		// Fail reads only: the request has been accepted and the handler is now
+		// trying to load the role it needs. This is raft quorum loss, or a stored
+		// entry that will not parse.
+		faulty := &FailingStorage{Storage: storage, FailReads: true}
+		resp, err := b.HandleRequest(t.Context(), &logical.Request{
+			Operation: logical.ReadOperation, Path: h.IssuePath, Storage: faulty,
+		})
+		if err != nil {
+			t.Fatalf("a storage failure produced a bare Go error, which core renders as a 500 with "+
+				"NO error_code — a client cannot distinguish it from any other failure, and API-002 "+
+				"promises a code on every path: %v", err)
+		}
+		assertCode(t, resp, credenvelope.ErrInternal, "issuing while storage reads fail")
+	})
+
 	t.Run("CapabilityRejectionIsConfigInvalid", func(t *testing.T) {
 		if h.ConfigureProbe == nil || h.WriteProbeRole == nil || h.DenyMint == nil {
 			t.Skipf("%s: capability probe not wired, so its rejection code cannot be asserted here; "+

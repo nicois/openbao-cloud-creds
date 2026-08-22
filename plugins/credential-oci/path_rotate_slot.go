@@ -43,7 +43,7 @@ func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *f
 	// Load role
 	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	if entry == nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role_not_found: role %q does not exist", roleName), nil
@@ -51,7 +51,7 @@ func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *f
 
 	var role ociRole
 	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "parsing a stored entry", err), nil
 	}
 
 	if slotIndex < 0 || slotIndex >= role.SlotCount {
@@ -66,7 +66,7 @@ func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *f
 	// Load the updated slot to return its state
 	updated, err := loadSlot(ctx, req.Storage, roleName, slotIndex)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err), nil
 	}
 
 	return &logical.Response{

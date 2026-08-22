@@ -52,9 +52,9 @@ func (b *backend) secretGCP() *framework.Secret {
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
 
-	role, errResp, err := b.loadRole(ctx, req, roleName)
-	if err != nil || errResp != nil {
-		return errResp, err
+	role, errResp := b.loadRole(ctx, req, roleName)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	now := time.Now()
@@ -206,22 +206,22 @@ func leaseTTL(remainingSeconds int) time.Duration {
 // parsed role, or an *logical.Response describing why issuance can't proceed
 // (role missing/disabled), or a hard error. Exactly one of role/errResp is
 // non-nil when err is nil.
-func (b *backend) loadRole(ctx context.Context, req *logical.Request, roleName string) (*gcpRole, *logical.Response, error) {
+func (b *backend) loadRole(ctx context.Context, req *logical.Request, roleName string) (*gcpRole, *logical.Response) {
 	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
 	if err != nil {
-		return nil, nil, err
+		return nil, credenvelope.InternalResponse(b.Logger().Warn, "loading the role", err)
 	}
 	if entry == nil {
-		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName)
 	}
 	var role gcpRole
 	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, nil, err
+		return nil, credenvelope.InternalResponse(b.Logger().Warn, "parsing the stored role", err)
 	}
 	if role.Disabled {
-		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName)
 	}
-	return &role, nil, nil
+	return &role, nil
 }
 
 // buildIAMClient creates an IAM Credentials client from a minter. The token

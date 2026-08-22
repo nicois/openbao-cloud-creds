@@ -47,7 +47,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Load role from storage
 	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "loading the role", err), nil
 	}
 	if entry == nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
@@ -55,7 +55,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	var role ociRole
 	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "parsing the stored role", err), nil
 	}
 
 	if role.Disabled {
@@ -65,7 +65,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Load all slots and find the freshest active one
 	slots, err := loadAllSlots(ctx, req.Storage, roleName, role.SlotCount)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err), nil
 	}
 
 	now := time.Now()

@@ -131,10 +131,10 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	entry, err := logical.StorageEntryJSON(pathConfig, cfg)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "encoding an entry for storage", err), nil
 	}
 	if err := req.Storage.Put(ctx, entry); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "writing to storage", err), nil
 	}
 
 	region := d.Get(fieldRegion).(string)
@@ -149,10 +149,10 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		fieldSTSEndpoint: stsEndpoint,
 	})
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "encoding an entry for storage", err), nil
 	}
 	if err := req.Storage.Put(ctx, metaEntry); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "writing to storage", err), nil
 	}
 
 	b.mu.Lock()
@@ -208,7 +208,7 @@ func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *framework.FieldData) (*logical.Response, error) {
 	entry, err := req.Storage.Get(ctx, pathConfig)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	if entry == nil {
 		return nil, nil
@@ -216,7 +216,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 
 	var cfg cloudconfig.PluginConfig
 	if err := json.Unmarshal(entry.Value, &cfg); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "parsing a stored entry", err), nil
 	}
 
 	return &logical.Response{

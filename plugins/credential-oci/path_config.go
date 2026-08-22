@@ -115,10 +115,10 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	entry, err := logical.StorageEntryJSON(pathConfig, cfg)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "encoding an entry for storage", err), nil
 	}
 	if err := req.Storage.Put(ctx, entry); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "writing to storage", err), nil
 	}
 
 	// Store rotation_check_interval separately
@@ -138,20 +138,20 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	}
 	rEntry, err := logical.StorageEntryJSON(configRotationCheckKey, rotationCheckInterval)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "encoding an entry for storage", err), nil
 	}
 	if err := req.Storage.Put(ctx, rEntry); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "writing to storage", err), nil
 	}
 
 	// Store region
 	region := d.Get("region").(string)
 	regionEntry, err := logical.StorageEntryJSON(configRegionKey, region)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "encoding an entry for storage", err), nil
 	}
 	if err := req.Storage.Put(ctx, regionEntry); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "writing to storage", err), nil
 	}
 
 	b.mu.Lock()
@@ -200,7 +200,7 @@ func (b *backend) loadConfig(ctx context.Context, storage logical.Storage) error
 func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	entry, err := req.Storage.Get(ctx, pathConfig)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	if entry == nil {
 		return nil, nil
@@ -208,13 +208,13 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	var cfg cloudconfig.PluginConfig
 	if err := json.Unmarshal(entry.Value, &cfg); err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "parsing a stored entry", err), nil
 	}
 
 	// Load region
 	regionEntry, err := req.Storage.Get(ctx, configRegionKey)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	region := defaultRegion
 	if regionEntry != nil {
@@ -224,7 +224,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 	// Load rotation check interval
 	rEntry, err := req.Storage.Get(ctx, configRotationCheckKey)
 	if err != nil {
-		return nil, err
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
 	}
 	rotationCheckInterval := defaultRotationCheckIntervalSeconds
 	if rEntry != nil {

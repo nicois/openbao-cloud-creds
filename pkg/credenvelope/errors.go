@@ -258,3 +258,22 @@ func ResponseFor(err error) *logical.Response {
 	}
 	return ErrorResponse(ErrInternal, "%s", err.Error())
 }
+
+// InternalResponse renders a failure that is genuinely ours — a storage fault, an
+// entry that will not parse — as a coded response rather than a bare Go error.
+//
+// A bare `return nil, err` from a handler is rendered by core as a 500 with NO
+// error_code, which is the same defect as the 166 code-less responses fixed earlier,
+// at a larger count (229 sites) and through a door the forbidigo rule does not watch.
+// A client switching on the code cannot tell raft quorum loss from anything else
+// (A7 in docs/audit-2026-08-22.md).
+//
+// The upstream detail goes to the caller only as a class, never verbatim: the
+// operator's log gets the error, per the same split as the capability gate (A4).
+func InternalResponse(logger func(msg string, args ...interface{}), what string, err error,
+) *logical.Response {
+	if logger != nil {
+		logger("plugin-internal failure", "operation", what, "error", err)
+	}
+	return ErrorResponse(ErrInternal, "%s failed inside the plugin; see the OpenBao server log", what)
+}
