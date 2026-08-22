@@ -55,6 +55,11 @@ const (
 	// It reaches AWS inside the session name, so it stays owner-prefixed.
 	probeRoleName = "cloudreal"
 
+	// probeOwnerPrefix stands in for a real mount's instance-scoped owner prefix. The
+	// exact value does not matter to STS; what matters is that the probe carries one,
+	// because a real deployment's does (A19).
+	probeOwnerPrefix = "cloud-creds-testinstance-"
+
 	// probeReqID stands in for the core-assigned request id in a session name.
 	probeReqID = "probe"
 
@@ -155,7 +160,7 @@ func TestRealAWSSTS(t *testing.T) {
 	// A1 + A2 + A3 at the probe's own shape: exactly what capability verification
 	// sends at minter-set and role write.
 	t.Run("CapabilityProbeShapeIsAccepted", func(t *testing.T) {
-		input := probeAssumeRoleInput(probeRole(roleARN))
+		input := probeAssumeRoleInput(probeOwnerPrefix, probeRole(roleARN))
 		out, err := client.AssumeRole(ctx, input, rec.recordOption())
 		if err != nil {
 			t.Fatalf("the capability probe's own AssumeRole was refused: %v\n"+
@@ -172,7 +177,7 @@ func TestRealAWSSTS(t *testing.T) {
 	// matters to a client: it asks for the role's real TTL rather than the floor.
 	t.Run("IssuanceShapeHonoursRequestedTTL", func(t *testing.T) {
 		role := probeRole(roleARN)
-		input := buildAssumeRoleInput(role, role.Name, probeReqID)
+		input := buildAssumeRoleInput(probeOwnerPrefix, role, role.Name, probeReqID)
 		out, err := client.AssumeRole(ctx, input, rec.recordOption())
 		if err != nil {
 			t.Fatalf("issuance-shape AssumeRole failed: %v",
@@ -183,7 +188,7 @@ func TestRealAWSSTS(t *testing.T) {
 
 		// The session name is the plugin's only mark on an STS session, and the
 		// reconciler's owner-prefix reasoning assumes it survives to AWS intact.
-		wantSession := "cloud-creds-" + probeRoleName + "-" + probeReqID
+		wantSession := probeOwnerPrefix + probeRoleName + "-" + probeReqID
 		if arn := aws.ToString(out.AssumedRoleUser.Arn); !strings.HasSuffix(arn, "/"+wantSession) {
 			t.Errorf("assumed-role ARN is %q, which does not end in the session name %q the plugin "+
 				"sent — the owner prefix does not survive to AWS", redactIdentifiers(arn), wantSession)
@@ -193,7 +198,7 @@ func TestRealAWSSTS(t *testing.T) {
 	// A2, the half a fake cannot reach: does the credential WORK?
 	t.Run("MintedCredentialAuthenticates", func(t *testing.T) {
 		role := probeRole(roleARN)
-		out, err := client.AssumeRole(ctx, buildAssumeRoleInput(role, role.Name, probeReqID),
+		out, err := client.AssumeRole(ctx, buildAssumeRoleInput(probeOwnerPrefix, role, role.Name, probeReqID),
 			rec.recordOption())
 		if err != nil {
 			t.Fatalf("AssumeRole failed: %v", scrubSecrets(err.Error(), rec.knownSecrets()...))
@@ -228,7 +233,7 @@ func TestRealAWSSTS(t *testing.T) {
 	// A4: the bound path_roles.go enforces at role write is AWS's own.
 	t.Run("DurationAboveSTSMaxIsRefused", func(t *testing.T) {
 		role := probeRole(roleARN)
-		input := buildAssumeRoleInput(role, role.Name, probeReqID)
+		input := buildAssumeRoleInput(probeOwnerPrefix, role, role.Name, probeReqID)
 		duration := int32(aboveSTSMaxSeconds)
 		input.DurationSeconds = &duration
 
@@ -250,7 +255,7 @@ func TestRealAWSSTS(t *testing.T) {
 		role.InlinePolicy = `{"Version":"2012-10-17","Statement":[{"Effect":"Allow",` +
 			`"Action":"sts:GetCallerIdentity","Resource":"*"}]}`
 
-		out, err := client.AssumeRole(ctx, buildAssumeRoleInput(role, role.Name, probeReqID),
+		out, err := client.AssumeRole(ctx, buildAssumeRoleInput(probeOwnerPrefix, role, role.Name, probeReqID),
 			rec.recordOption())
 		if err != nil {
 			t.Fatalf("AssumeRole with session policies was refused: %v\n"+
@@ -353,13 +358,13 @@ func assertMaxSessionDurationGap(t *testing.T, client STSClient, rec *recordingT
 	}
 
 	role := probeRole(lowCapARN)
-	probeInput := probeAssumeRoleInput(role)
+	probeInput := probeAssumeRoleInput(probeOwnerPrefix, role)
 	if _, err := client.AssumeRole(t.Context(), probeInput, rec.recordOption()); err != nil {
 		t.Fatalf("the 900s capability probe failed against the low-cap role, so this case cannot "+
 			"demonstrate the gap: %v", scrubSecrets(err.Error(), rec.knownSecrets()...))
 	}
 
-	issueInput := buildAssumeRoleInput(role, role.Name, probeReqID)
+	issueInput := buildAssumeRoleInput(probeOwnerPrefix, role, role.Name, probeReqID)
 	_, err := client.AssumeRole(t.Context(), issueInput, rec.recordOption())
 	if err == nil {
 		t.Errorf("the %s issuance succeeded against a role expected to cap sessions below it — either "+

@@ -13,15 +13,14 @@
 // read — requests carry MountPoint, workers have no request — so the mount mints its
 // own on first use.
 //
-// # Migration
+// # No compatibility with the old scheme
 //
-// The prefix changes shape, so credentials issued under the old scheme
-// (`cloud-creds-<role>-<id>`) no longer match this mount's filter. They therefore
-// **survive**, which is the safe direction: they become unmanaged rather than deleted.
-// An operator upgrading should expect to clean those up by hand once their leases have
-// expired; `docs/audit-2026-08-22.md` records the procedure. The alternative —
-// matching both shapes for a release — was rejected because it would preserve exactly
-// the cross-mount deletion this exists to stop.
+// The project is alpha and has no users, so the previous bare-prefix scheme is simply
+// gone rather than supported alongside this one. That was the right trade even had
+// there been users: matching both shapes would have preserved exactly the cross-mount
+// deletion this exists to stop. A name carrying the base prefix but no recognised
+// instance id is treated as somebody else's and left alone, which is the safe
+// direction if such a name is ever encountered.
 package ownertag
 
 import (

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -57,7 +58,7 @@ func TestPathReconcile_FloorsSubMinHold(t *testing.T) {
 	b, storage := setupConfiguredBackend(t, srv.URL)
 
 	// Plant a cloud-creds-prefixed upstream orphan NOT tracked in active-tokens/.
-	srv.AddRawAPIKey("orphan-1", "cloud-creds-test-role-orphan")
+	srv.AddRawAPIKey("orphan-1", ownertag.CredentialName(ownerInstanceForTest(t, storage), "test-role", "orphan"))
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
@@ -129,4 +130,16 @@ func TestReconcileEndpoint_DryRun(t *testing.T) {
 	if resp != nil && resp.IsError() {
 		t.Fatalf("reconcile error: %v", resp)
 	}
+}
+
+// ownerInstanceForTest resolves (and on first call mints) the mount's owner instance id
+// from the same storage the backend reads it from, so a seeded orphan carries the prefix
+// the reconciler will actually match (A19).
+func ownerInstanceForTest(t *testing.T, storage logical.Storage) string {
+	t.Helper()
+	id, err := ownertag.InstanceID(t.Context(), storage)
+	if err != nil {
+		t.Fatalf("resolving the owner instance id: %v", err)
+	}
+	return id
 }

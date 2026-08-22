@@ -9,6 +9,8 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -64,7 +66,7 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 func (b *backend) probeMint(apiURL string, minter cloudconfig.Minter, roleName, scopes string) func(context.Context) error {
 	return func(ctx context.Context) error {
 		client := newDOClient(apiURL, minter.Token)
-		resp, status, err := client.CreateToken(ctx, capability.ProbeName(roleName), strings.Split(scopes, ","))
+		resp, status, err := client.CreateToken(ctx, capability.ProbeName(ownertag.Prefix(b.ownerInstance()), roleName), strings.Split(scopes, ","))
 		if err != nil {
 			if status == http.StatusForbidden {
 				return fmt.Errorf("probe mint returned %d (%w): %s", status, err, forbiddenMintHint)
@@ -82,12 +84,24 @@ func (b *backend) probeMint(apiURL string, minter cloudconfig.Minter, roleName, 
 // verifySetCapability gates a minter-set write on every active minter being able
 // to mint for every role already bound to the set.
 func (b *backend) verifySetCapability(ctx context.Context, storage logical.Storage, set *cloudconfig.MinterSet) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifySet(ctx, storage, set, b.capabilityChecks)
 }
 
 // verifyRoleCapability gates a role write on the minters of the set it binds to
 // being able to mint what it asks for.
 func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Storage, role *doRole) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifyRole(ctx, storage, role.MinterSet, capability.RoleJSON(role), b.capabilityChecks)
 }
 

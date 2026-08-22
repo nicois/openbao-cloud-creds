@@ -90,9 +90,9 @@ func azureHarness(t *testing.T) plugintest.Harness {
 			srv.AddRawPassword(foreignEntityID, foreignEntityName)
 			return foreignEntityID
 		},
-		SeedAgedOrphans: func(_ *testing.T, _ logical.Storage) (string, string) {
+		SeedAgedOrphans: func(t *testing.T, storage logical.Storage) (string, string) {
 			srv.AddRawPasswordWithStartDateTime(agedForeignID, agedForeignName, agedTimestamp)
-			srv.AddRawPasswordWithStartDateTime(agedOwnedID, agedOwnedName, agedTimestamp)
+			srv.AddRawPasswordWithStartDateTime(agedOwnedID, agedOwnedName(t, storage), agedTimestamp)
 			return agedForeignID, agedOwnedID
 		},
 		HasEntity: srv.HasPassword,

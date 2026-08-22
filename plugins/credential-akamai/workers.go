@@ -100,7 +100,11 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		return err
 	}
 
-	lister := &akamaiCloudLister{client: client}
+	instanceID, err := b.ownerInstanceID(ctx, storage)
+	if err != nil {
+		return err
+	}
+	lister := &akamaiCloudLister{client: client, instanceID: instanceID}
 	registry := &leaseRegistry{storage: storage}
 
 	b.mu.RLock()

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 )
 
@@ -20,11 +21,11 @@ func TestReconcile_PopulatesCreatedAt(t *testing.T) {
 	// Seed a cloud-creds-prefixed token via the create path so the fake emits
 	// a created_at on the subsequent list.
 	client := newDOClient(srv.URL, "fake-minter-token")
-	if _, _, err := client.CreateToken(t.Context(), tokenPrefix+"role-abc", []string{"read"}); err != nil {
+	if _, _, err := client.CreateToken(t.Context(), ownertag.Prefix(testOwnerInstance)+"role-abc", []string{"read"}); err != nil {
 		t.Fatalf("seed create: %v", err)
 	}
 
-	lister := &doCloudLister{client: client}
+	lister := &doCloudLister{client: client, instanceID: testOwnerInstance}
 	ents, err := lister.ListTaggedEntities(t.Context())
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -65,9 +66,9 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 			client := newDOClient(srv.URL, "fake-minter-token")
 			// Plant an orphan (cloud-creds- named, not in the lease registry)
 			// with a controlled created_at.
-			srv.AddRawTokenWithCreatedAt("orphan-1", tokenPrefix+"role-x", tc.createdAt.UTC().Format(time.RFC3339))
+			srv.AddRawTokenWithCreatedAt("orphan-1", ownertag.Prefix(testOwnerInstance)+"role-x", tc.createdAt.UTC().Format(time.RFC3339))
 
-			lister := &doCloudLister{client: client}
+			lister := &doCloudLister{client: client, instanceID: testOwnerInstance}
 			rec := reconciler.New(reconciler.Config{
 				MaxDeletesPerPass: 10,
 				ConfirmationHold:  time.Hour,
@@ -92,7 +93,7 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 func TestDeleteEntity_404IsSuccess(t *testing.T) {
 	srv := fakes.NewDOServer()
 	defer srv.Close()
-	lister := &doCloudLister{client: newDOClient(srv.URL, "minter-token")}
+	lister := &doCloudLister{client: newDOClient(srv.URL, "minter-token"), instanceID: testOwnerInstance}
 	if err := lister.DeleteEntity(t.Context(), "nonexistent-id"); err != nil {
 		t.Fatalf("DeleteEntity should treat upstream 404 as success, got: %v", err)
 	}
@@ -104,3 +105,6 @@ type allOrphansRegistry struct{}
 func (allOrphansRegistry) OwnedIDs(context.Context) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
+
+// testOwnerInstance stands in for a mount's persisted owner instance id (A19).
+const testOwnerInstance = "testinstance"

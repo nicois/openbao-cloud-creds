@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -160,8 +161,9 @@ func TestCapability_ProbeUsesRoleShapeAndMinimumDuration(t *testing.T) {
 	if input.DurationSeconds == nil || *input.DurationSeconds != probeDurationSeconds {
 		t.Fatalf("probe duration is %v, want the %ds floor", input.DurationSeconds, probeDurationSeconds)
 	}
-	if !strings.HasPrefix(*input.RoleSessionName, "cloud-creds-"+capRoleName+"-probe-") {
-		t.Fatalf("probe session name %q does not carry the owner prefix", *input.RoleSessionName)
+	if !strings.Contains(*input.RoleSessionName, capRoleName+"-probe-") ||
+		!strings.HasPrefix(*input.RoleSessionName, ownertag.Base) {
+		t.Fatalf("probe session name %q does not carry this mount's owner prefix and role", *input.RoleSessionName)
 	}
 }
 

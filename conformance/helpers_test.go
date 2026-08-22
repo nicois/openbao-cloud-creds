@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -106,9 +107,11 @@ const (
 	agedForeignName = "operator-created-do-not-touch"
 
 	// Inside the owner-tag scheme and referenced by no lease: must be reclaimed,
-	// which is what stops the invariant assertion above being vacuous.
-	agedOwnedID   = "aged-owned-orphan-1"
-	agedOwnedName = "cloud-creds-test-role-stale-req"
+	// which is what stops the invariant assertion above being vacuous. Its NAME is
+	// computed per mount by agedOwnedName, because the scheme is instance-scoped
+	// now — a hardcoded name would be foreign by construction and the case would
+	// prove nothing (A19).
+	agedOwnedID = "aged-owned-orphan-1"
 )
 
 // agedLedgerTime is when the mint-ledger-backed clouds pretend their owned orphan was
@@ -116,4 +119,17 @@ const (
 // mintledger.Retention so the entry has not been pruned.
 func agedLedgerTime() time.Time {
 	return time.Now().Add(-48 * time.Hour)
+}
+
+// agedOwnedName names the planted orphan with the MOUNT's own owner prefix, read from
+// the same storage the plugin reads it from. Hardcoding it would make the entity
+// foreign, and "the reconciler did not delete a foreign entity" is the assertion the
+// other case already makes.
+func agedOwnedName(t *testing.T, storage logical.Storage) string {
+	t.Helper()
+	id, err := ownertag.InstanceID(t.Context(), storage)
+	if err != nil {
+		t.Fatalf("resolving the owner instance id: %v", err)
+	}
+	return ownertag.CredentialName(id, "test-role", "stale-req")
 }

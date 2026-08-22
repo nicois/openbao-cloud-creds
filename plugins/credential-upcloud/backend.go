@@ -6,6 +6,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/metrics"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -18,6 +19,9 @@ via the UpCloud /1.3/account/tokens API (JIT strategy).
 `
 
 type backend struct {
+	// instanceID identifies THIS mount in the names of the upstream credentials it
+	// creates; see ownerInstanceID. Guarded by mu.
+	instanceID string
 	*framework.Backend
 	mu sync.RWMutex
 	// workerLifecycleMu serializes startWorkers so a manager is never Wait()ed
@@ -137,4 +141,37 @@ func machinesOf(states map[string]*minterState) []*recovery.StateMachine {
 		}
 	}
 	return machines
+}
+
+// ownerInstanceID returns this mount's owner instance id, minting and persisting one on
+// first use. It is cached because the id is immutable for the life of the mount, and
+// because the reconciler's lister and the capability probe both need it in places that
+// have no storage handle.
+//
+// The id is what stops two mounts against one cloud account deleting each other's live
+// credentials: the reclaim filter used to be the bare `cloud-creds-` prefix, which
+// identifies the product rather than the instance (A19 in docs/audit-2026-08-22.md).
+func (b *backend) ownerInstanceID(ctx context.Context, storage logical.Storage) (string, error) {
+	b.mu.RLock()
+	cached := b.instanceID
+	b.mu.RUnlock()
+	if cached != "" {
+		return cached, nil
+	}
+	id, err := ownertag.InstanceID(ctx, storage)
+	if err != nil {
+		return "", err
+	}
+	b.mu.Lock()
+	b.instanceID = id
+	b.mu.Unlock()
+	return id, nil
+}
+
+// ownerInstance returns the cached id without touching storage, for call sites that run
+// after a handler has already resolved it.
+func (b *backend) ownerInstance() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.instanceID
 }

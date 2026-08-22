@@ -7,6 +7,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -295,8 +296,8 @@ func TestRetireSweep_DropsAfterGraceKeepsBeforeGrace(t *testing.T) {
 
 	// Plant upstream secrets the sweep should removePassword, and record their
 	// keyIds in the retired minters' rotation params.
-	srv.AddRawPassword("old-key", "cloud-creds-minter-old-expired")
-	srv.AddRawPassword("recent-key", "cloud-creds-minter-recent")
+	srv.AddRawPassword("old-key", ownertag.CredentialName(ownerInstanceForTest(t, storage), "minter-old", "expired"))
+	srv.AddRawPassword("recent-key", ownertag.CredentialName(ownerInstanceForTest(t, storage), "minter", "recent"))
 	if !srv.HasPassword("old-key") || !srv.HasPassword("recent-key") {
 		t.Fatal("setup: planted passwords missing")
 	}
@@ -352,4 +353,16 @@ func TestRetireSweep_DropsAfterGraceKeepsBeforeGrace(t *testing.T) {
 	if !ids["active-1"] {
 		t.Fatal("active-1 should still be in the set")
 	}
+}
+
+// ownerInstanceForTest resolves (and on first call mints) the mount's owner instance id
+// from the same storage the backend reads it from, so a seeded orphan carries the prefix
+// the reconciler will actually match (A19).
+func ownerInstanceForTest(t *testing.T, storage logical.Storage) string {
+	t.Helper()
+	id, err := ownertag.InstanceID(t.Context(), storage)
+	if err != nil {
+		t.Fatalf("resolving the owner instance id: %v", err)
+	}
+	return id
 }

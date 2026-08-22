@@ -8,6 +8,8 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -45,7 +47,7 @@ func (b *backend) probeMint(minter cloudconfig.Minter, role *vultrRole) func(con
 		// The probe name carries the owner prefix, and the email is formed from it
 		// in the role's own domain, so the request differs from a real issuance only
 		// in the identifier — the ACL list, which is what Vultr checks, is identical.
-		probeName := capability.ProbeName(role.Name)
+		probeName := capability.ProbeName(ownertag.Prefix(b.ownerInstance()), role.Name)
 		email := probeName + "@" + emailDomainFor(role)
 		user, status, err := client.CreateUser(ctx, probeName, email, parseACLs(role.ACLs))
 		if err != nil {
@@ -69,6 +71,12 @@ func (b *backend) clientForMinter(m cloudconfig.Minter) *vultrClient {
 // verifySetCapability gates a minter-set write on every active minter being able
 // to mint for every role already bound to the set.
 func (b *backend) verifySetCapability(ctx context.Context, storage logical.Storage, set *cloudconfig.MinterSet) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifySet(ctx, storage, set, b.capabilityChecks)
 }
 
@@ -76,6 +84,12 @@ func (b *backend) verifySetCapability(ctx context.Context, storage logical.Stora
 // being able to mint what it asks for. On Vultr that is what catches a role whose
 // ACL list exceeds what the set's minters can delegate.
 func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Storage, role *vultrRole) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifyRole(ctx, storage, role.MinterSet, capability.RoleJSON(role), b.capabilityChecks)
 }
 

@@ -40,6 +40,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 )
 
 const (
@@ -63,9 +65,10 @@ const (
 	realDOBaseURL = "https://api.digitalocean.com"
 
 	// probeNamePrefix keeps every token this test creates inside the owner-tag
-	// scheme the reconciler already understands, so a token left behind by a
-	// crashed run is reclaimable rather than mysterious.
-	probeNamePrefix = "cloud-creds-cirun-probe-"
+	// scheme, so a token left behind by a crashed run is recognisable rather than
+	// mysterious. It uses a fixed pseudo-instance rather than a real mount's id
+	// because this probe drives the cloud client directly and has no mount (A19).
+	probeNamePrefix = ownertag.Base + "cirun-probe-"
 
 	// revokeVisibilityTimeout bounds how long the probe waits for a deleted
 	// token to stop working. Immediate is expected; a lag here would be a real

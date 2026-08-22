@@ -3,17 +3,19 @@ package credentialvultr
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
-const userPrefix = "cloud-creds-"
-
 type vultrCloudLister struct {
-	client *vultrClient
+	// instanceID scopes the reclaim filter to THIS mount. Matching the bare
+	// cloud-creds- prefix meant two mounts against one cloud account each saw the
+	// other's LIVE credentials as orphans and deleted them (A19).
+	instanceID string
+	client     *vultrClient
 	// storage is needed to read the mint ledger, which supplies the creation
 	// time this cloud's list API does not report (A5).
 	storage logical.Storage
@@ -27,7 +29,7 @@ func (l *vultrCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler
 
 	var entities []reconciler.UpstreamEntity
 	for _, u := range users {
-		if strings.HasPrefix(u.Name, userPrefix) {
+		if ownertag.Owns(l.instanceID, u.Name) {
 			entities = append(entities, reconciler.UpstreamEntity{
 				ID:   u.ID,
 				Name: u.Name,

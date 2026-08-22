@@ -66,7 +66,11 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "cannot list roles: %v", err), nil
 	}
 
-	lister := &azureCloudLister{client: client, appObjectIDs: appObjectIDs}
+	instanceID, err := b.ownerInstanceID(ctx, req.Storage)
+	if err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err), nil
+	}
+	lister := &azureCloudLister{client: client, appObjectIDs: appObjectIDs, instanceID: instanceID}
 	registry := &leaseRegistry{storage: req.Storage}
 
 	cfg := reconciler.Config{

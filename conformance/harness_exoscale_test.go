@@ -95,7 +95,7 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 		// exactly why it must survive.
 		SeedAgedOrphans: func(t *testing.T, storage logical.Storage) (string, string) {
 			srv.AddRawAPIKey(agedForeignID, agedForeignName)
-			srv.AddRawAPIKey(agedOwnedID, agedOwnedName)
+			srv.AddRawAPIKey(agedOwnedID, agedOwnedName(t, storage))
 			if err := mintledger.Record(t.Context(), storage, agedOwnedID, agedLedgerTime()); err != nil {
 				t.Fatalf("seeding the mint ledger: %v", err)
 			}

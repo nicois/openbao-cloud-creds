@@ -34,10 +34,6 @@ import (
 // rolesPrefix is the storage prefix every plugin stores its roles under.
 const rolesPrefix = "roles/"
 
-// ownerPrefix is the owner-tag prefix the reconciler reclaims by. Probe
-// credentials carry it so a probe whose own delete failed is still reclaimable.
-const ownerPrefix = "cloud-creds-"
-
 // ErrUnsupported reports that a cloud cannot be probed safely, so its capability
 // is taken on trust. Only OCI returns it: its 2-auth-tokens-per-user quota means
 // a probe mint would consume a rotation slot and could itself break issuance.
@@ -214,11 +210,14 @@ func RolesBoundTo(ctx context.Context, storage logical.Storage, setName string) 
 // probeSeq disambiguates two probes minted inside the same nanosecond.
 var probeSeq atomic.Uint64
 
-// ProbeName returns a unique name for a throwaway probe credential, carrying the
-// cloud-creds-<role>- owner prefix so that if the probe's own delete fails the
-// owner-tag reconciler still reclaims it. Probe credentials are never recorded
-// in lease tracking, so the reconciler sees them as orphans by construction.
-func ProbeName(role string) string {
+// ProbeName returns a unique name for a throwaway probe credential.
+//
+// ownerPrefix must be THIS mount's prefix (ownertag.Prefix), so that a probe whose own
+// delete failed is reclaimed by the mount that created it and by no other. Probe
+// credentials are never recorded in lease tracking, so the reconciler sees them as
+// orphans by construction — which is the point, and which is also why the prefix has
+// to be instance-scoped (A19 in docs/audit-2026-08-22.md).
+func ProbeName(ownerPrefix, role string) string {
 	return ownerPrefix + role + "-probe-" +
 		strconv.FormatInt(time.Now().UnixNano(), 36) +
 		strconv.FormatUint(probeSeq.Add(1), 36)

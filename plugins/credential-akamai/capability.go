@@ -9,6 +9,8 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -59,7 +61,7 @@ func (b *backend) probeMint(minter cloudconfig.Minter, role *akamaiRole) func(co
 			return fmt.Errorf("probe client could not be built: %w", err)
 		}
 		apiAccess, groupAccess := roleAccess(role)
-		created, status, err := client.CreateClient(ctx, capability.ProbeName(role.Name), apiAccess, groupAccess)
+		created, status, err := client.CreateClient(ctx, capability.ProbeName(ownertag.Prefix(b.ownerInstance()), role.Name), apiAccess, groupAccess)
 		if err != nil {
 			return fmt.Errorf("probe api-client creation returned %d: %w", status, err)
 		}
@@ -74,18 +76,36 @@ func (b *backend) probeMint(minter cloudconfig.Minter, role *akamaiRole) func(co
 // verifySetCapability gates a minter-set write on every active minter being able
 // to mint for every role already bound to the set.
 func (b *backend) verifySetCapability(ctx context.Context, storage logical.Storage, set *cloudconfig.MinterSet) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifySet(ctx, storage, set, b.capabilityChecks)
 }
 
 // verifyRoleCapability gates a role write on the minters of the set it binds to
 // being able to mint what it asks for.
 func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Storage, role *akamaiRole) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifyRole(ctx, storage, role.MinterSet, capability.RoleJSON(role), b.capabilityChecks)
 }
 
 // verifySuccessorCapability gates a rotation commit on the successor being able
 // to mint for every role bound to the set — not merely on it being live.
 func (b *backend) verifySuccessorCapability(ctx context.Context, storage logical.Storage, setName string, successor cloudconfig.Minter) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifySuccessor(ctx, storage, setName, successor, b.capabilityChecks)
 }
 

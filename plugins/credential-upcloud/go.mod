@@ -66,6 +66,7 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/metrics v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/metricspath v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.0.0
@@ -113,3 +114,5 @@ replace github.com/nicois/openbao-cloud-creds/plugins/credential-oci => ../crede
 replace github.com/nicois/openbao-cloud-creds/plugins/credential-ovh => ../credential-ovh
 
 replace github.com/nicois/openbao-cloud-creds/plugins/credential-vultr => ../credential-vultr
+
+replace github.com/nicois/openbao-cloud-creds/pkg/ownertag => ../../pkg/ownertag

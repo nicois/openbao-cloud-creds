@@ -10,6 +10,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -69,7 +70,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
-	userName, userEmail, acls := buildUserIdentity(roleName, req.ID, role)
+	ownerPrefix, errResp := b.ownerPrefix(ctx, req)
+	if errResp != nil {
+		return errResp, nil
+	}
+	userName, userEmail, acls := buildUserIdentity(ownerPrefix, roleName, req.ID, role)
 
 	// Create sub-user via Vultr API
 	userResp, httpStatus, err := client.CreateUser(ctx, userName, userEmail, acls)
@@ -89,20 +94,9 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	emitLeaseIssued(roleName)
 
 	expiresAt := now.Add(role.DefaultTTL)
-	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
-		Cloud: cloudName,
-		Role:  roleName,
-		Credential: map[string]interface{}{
-			"api_key": userResp.User.APIKey,
-		},
-		ExpiresAt:    expiresAt,
-		TTLSeconds:   int(role.DefaultTTL.Seconds()),
-		Renewable:    true,
-		CredentialID: userResp.User.ID,
-		Scope:        role.ACLs,
-		IssuedBy:     "cloud-creds-vultr/v0.1",
-		MinterSet:    setName,
-		MinterID:     minterID,
+	env := b.buildEnvelope(envelopeArgs{
+		role: role, roleName: roleName, resp: userResp,
+		setName: setName, minterID: minterID, expiresAt: expiresAt,
 	})
 
 	// Track active user for reconciler
@@ -251,13 +245,16 @@ func (b *backend) loadRole(ctx context.Context, req *logical.Request, roleName s
 // buildUserIdentity derives the generated sub-user name, email, and trimmed ACL
 // list for a given role and lease ID. The lease ID is truncated to keep the
 // generated identifiers short while remaining unique-enough per lease.
-func buildUserIdentity(roleName, leaseID string, role *vultrRole) (userName, userEmail string, acls []string) {
+func buildUserIdentity(ownerPrefix, roleName, leaseID string, role *vultrRole,
+) (userName, userEmail string, acls []string) {
 	leaseShortID := leaseID
 	if len(leaseShortID) > leaseShortIDLen {
 		leaseShortID = leaseShortID[:leaseShortIDLen]
 	}
-	userName = fmt.Sprintf("cloud-creds-%s-%s", roleName, leaseShortID)
-	userEmail = fmt.Sprintf("cloud-creds-%s-%s@%s", roleName, leaseShortID, emailDomainFor(role))
+	// The generated name and email are this cloud's owner tag; both must carry the
+	// mount's instance so another mount's reconciler leaves them alone (A19).
+	userName = ownerPrefix + roleName + "-" + leaseShortID
+	userEmail = userName + "@" + emailDomainFor(role)
 
 	return userName, userEmail, parseACLs(role.ACLs)
 }
@@ -366,4 +363,45 @@ func (b *backend) issuanceError(httpStatus int, err error, attempt telemetry.Iss
 	b.Logger().Warn("upstream credential issuance failed", attempt.LogFields(httpStatus, err)...)
 	return credenvelope.ErrorResponse(credenvelope.Classify(httpStatus, err),
 		"upstream credential issuance failed")
+}
+
+// ownerPrefix resolves this mount's owner prefix. The generated sub-user name and email
+// ARE the owner tag here, so both must carry it (A19).
+func (b *backend) ownerPrefix(ctx context.Context, req *logical.Request) (string, *logical.Response) {
+	instanceID, err := b.ownerInstanceID(ctx, req.Storage)
+	if err != nil {
+		return "", credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
+	return ownertag.Prefix(instanceID), nil
+}
+
+// buildEnvelope assembles the response envelope. Extracted so pathCredsRead stays within
+// the function-length limit; it is pure assembly with no upstream calls.
+// envelopeArgs collects the envelope inputs, so the helper stays within the
+// argument limit and the call site reads as named fields.
+type envelopeArgs struct {
+	role      *vultrRole
+	roleName  string
+	resp      *userResponse
+	setName   string
+	minterID  string
+	expiresAt time.Time
+}
+
+func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
+	return credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
+		Cloud: cloudName,
+		Role:  a.roleName,
+		Credential: map[string]interface{}{
+			"api_key": a.resp.User.APIKey,
+		},
+		ExpiresAt:    a.expiresAt,
+		TTLSeconds:   int(a.role.DefaultTTL.Seconds()),
+		Renewable:    true,
+		CredentialID: a.resp.User.ID,
+		Scope:        a.role.ACLs,
+		IssuedBy:     "cloud-creds-vultr/v0.1",
+		MinterSet:    a.setName,
+		MinterID:     a.minterID,
+	})
 }

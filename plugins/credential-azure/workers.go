@@ -105,7 +105,11 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		return err
 	}
 
-	lister := &azureCloudLister{client: client, appObjectIDs: appObjectIDs}
+	instanceID, err := b.ownerInstanceID(ctx, storage)
+	if err != nil {
+		return err
+	}
+	lister := &azureCloudLister{client: client, appObjectIDs: appObjectIDs, instanceID: instanceID}
 	registry := &leaseRegistry{storage: storage}
 
 	b.mu.RLock()

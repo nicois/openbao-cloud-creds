@@ -3,14 +3,12 @@ package credentialoci
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
-
-const ociTokenPrefix = "cloud-creds-"
 
 func (b *backend) reconcilePaths() []*framework.Path {
 	return []*framework.Path{
@@ -88,6 +86,9 @@ type reconcileResult struct {
 // reconcilePass bundles the inputs and running tally of a single reconcile
 // sweep so the per-role/per-token helpers stay within the argument limit.
 type reconcilePass struct {
+	// instanceID scopes the "ours by prefix" test to THIS mount, so two mounts against
+	// one tenancy cannot reclaim each other's slot tokens (A19).
+	instanceID    string
 	knownTokenIDs map[string]bool
 	dryRun        bool
 	maxDeletes    int
@@ -105,10 +106,16 @@ type reconcilePass struct {
 // inside the helpers (maxDeletesForPass, reconcileOrphans -> selectMinterForSet),
 // never held across this body, so there is no lock-ordering deadlock.
 func (b *backend) runReconcilePass(ctx context.Context, storage logical.Storage, roleNames []string, dryRun bool) reconcileResult {
+	instanceID, err := b.ownerInstanceID(ctx, storage)
+	if err != nil {
+		b.Logger().Warn("skipping the reconcile pass: cannot resolve the owner instance id",
+			"cloud", cloudName, "error", err)
+		return reconcileResult{}
+	}
 	b.rotateReconcileMu.Lock()
 	defer b.rotateReconcileMu.Unlock()
 
-	pass := &reconcilePass{
+	pass := &reconcilePass{instanceID: instanceID,
 		knownTokenIDs: collectKnownTokenIDs(ctx, storage, roleNames),
 		dryRun:        dryRun,
 		maxDeletes:    b.maxDeletesForPass(),
@@ -149,7 +156,7 @@ func (b *backend) reconcileOrphans(ctx context.Context, storage logical.Storage,
 func (p *reconcilePass) reconcileRoleTokens(ctx context.Context, client OCIIAMClient, role *ociRole, tokens []AuthTokenInfo) {
 	for _, t := range tokens {
 		// Only consider tokens with our prefix.
-		if !strings.HasPrefix(t.Description, ociTokenPrefix) {
+		if !ownertag.Owns(p.instanceID, t.Description) {
 			continue
 		}
 		// If not in our known set, it's an orphan.

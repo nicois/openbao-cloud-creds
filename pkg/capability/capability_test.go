@@ -117,12 +117,13 @@ func TestRolesBoundTo_FiltersBySetAndSkipsDisabled(t *testing.T) {
 	}
 }
 
-// Probe credentials must carry the owner prefix: if the probe's own delete
-// fails, the owner-tag reconciler is what reclaims them.
+// Probe credentials must carry THIS MOUNT's owner prefix: if the probe's own delete
+// fails, the reconciler is what reclaims them — and only the mount that created it may
+// (A19).
 func TestProbeName_IsOwnerTaggedAndUnique(t *testing.T) {
-	first, second := ProbeName("my-role"), ProbeName("my-role")
+	first, second := ProbeName("cloud-creds-testinstance-", "my-role"), ProbeName("cloud-creds-testinstance-", "my-role")
 	for _, name := range []string{first, second} {
-		if !strings.HasPrefix(name, "cloud-creds-my-role-") {
+		if !strings.HasPrefix(name, "cloud-creds-testinstance-my-role-") {
 			t.Fatalf("probe name %q lacks the owner prefix", name)
 		}
 	}

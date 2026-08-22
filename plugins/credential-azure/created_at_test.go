@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 )
 
@@ -23,11 +24,11 @@ func TestReconcile_PopulatesCreatedAt(t *testing.T) {
 	defer srv.Close()
 
 	client := testAzureClient(srv.URL)
-	if _, _, err := client.AddPassword(t.Context(), fakeAppObjectID, keyPrefix+"role-abc", time.Now().Add(time.Hour)); err != nil {
+	if _, _, err := client.AddPassword(t.Context(), fakeAppObjectID, ownertag.Prefix(testOwnerInstance)+"role-abc", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("seed addPassword: %v", err)
 	}
 
-	lister := &azureCloudLister{client: client, appObjectIDs: []string{fakeAppObjectID}}
+	lister := &azureCloudLister{client: client, appObjectIDs: []string{fakeAppObjectID}, instanceID: testOwnerInstance}
 	ents, err := lister.ListTaggedEntities(t.Context())
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -62,9 +63,9 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 			defer srv.Close()
 
 			client := testAzureClient(srv.URL)
-			srv.AddRawPasswordWithStartDateTime("orphan-1", keyPrefix+"role-x", tc.createdAt.UTC().Format(time.RFC3339))
+			srv.AddRawPasswordWithStartDateTime("orphan-1", ownertag.Prefix(testOwnerInstance)+"role-x", tc.createdAt.UTC().Format(time.RFC3339))
 
-			lister := &azureCloudLister{client: client, appObjectIDs: []string{fakeAppObjectID}}
+			lister := &azureCloudLister{client: client, appObjectIDs: []string{fakeAppObjectID}, instanceID: testOwnerInstance}
 			rec := reconciler.New(reconciler.Config{
 				MaxDeletesPerPass: 10,
 				ConfirmationHold:  time.Hour,
@@ -87,3 +88,6 @@ type allOrphansRegistry struct{}
 func (allOrphansRegistry) OwnedIDs(context.Context) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
+
+// testOwnerInstance stands in for a mount's persisted owner instance id (A19).
+const testOwnerInstance = "testinstance"

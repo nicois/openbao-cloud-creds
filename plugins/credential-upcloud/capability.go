@@ -9,6 +9,8 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -49,7 +51,7 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 func (b *backend) probeMint(minter cloudconfig.Minter, roleName string) func(context.Context) error {
 	return func(ctx context.Context) error {
 		client := b.newClientForMinter(minter)
-		tok, status, err := client.CreateToken(ctx, capability.ProbeName(roleName), probeExpiresIn.String())
+		tok, status, err := client.CreateToken(ctx, capability.ProbeName(ownertag.Prefix(b.ownerInstance()), roleName), probeExpiresIn.String())
 		if err != nil {
 			return fmt.Errorf("probe token creation returned %d: %w", status, err)
 		}
@@ -64,12 +66,24 @@ func (b *backend) probeMint(minter cloudconfig.Minter, roleName string) func(con
 // verifySetCapability gates a minter-set write on every active minter being able
 // to mint for every role already bound to the set.
 func (b *backend) verifySetCapability(ctx context.Context, storage logical.Storage, set *cloudconfig.MinterSet) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifySet(ctx, storage, set, b.capabilityChecks)
 }
 
 // verifyRoleCapability gates a role write on the minters of the set it binds to
 // being able to mint what it asks for.
 func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Storage, role *upcloudRole) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifyRole(ctx, storage, role.MinterSet, capability.RoleJSON(role), b.capabilityChecks)
 }
 
@@ -77,6 +91,12 @@ func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Stor
 // to mint — not merely on it being live. On UpCloud that is the difference
 // between a successor created with can_create_tokens and one without.
 func (b *backend) verifySuccessorCapability(ctx context.Context, storage logical.Storage, setName string, successor cloudconfig.Minter) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifySuccessor(ctx, storage, setName, successor, b.capabilityChecks)
 }
 

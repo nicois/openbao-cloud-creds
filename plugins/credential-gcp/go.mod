@@ -52,6 +52,7 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/capability v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/metricspath v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.0.0
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/openbao/go-kms-wrapping/v2 v2.8.0 // indirect
@@ -108,3 +109,5 @@ replace github.com/nicois/openbao-cloud-creds/plugins/credential-ovh => ../crede
 replace github.com/nicois/openbao-cloud-creds/plugins/credential-upcloud => ../credential-upcloud
 
 replace github.com/nicois/openbao-cloud-creds/plugins/credential-vultr => ../credential-vultr
+
+replace github.com/nicois/openbao-cloud-creds/pkg/ownertag => ../../pkg/ownertag

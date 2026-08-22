@@ -9,6 +9,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -88,7 +89,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
 	// Mint API key via Exoscale API
-	keyName := fmt.Sprintf("cloud-creds-%s-%s", roleName, req.ID)
+	keyName, errResp := b.credentialName(ctx, req, roleName, req.ID)
+	if errResp != nil {
+		return errResp, nil
+	}
 
 	keyResp, httpStatus, err := client.CreateAPIKey(ctx, keyName, role.RoleID)
 	if err != nil {
@@ -355,4 +359,16 @@ func (b *backend) issuanceError(httpStatus int, err error, attempt telemetry.Iss
 	b.Logger().Warn("upstream credential issuance failed", attempt.LogFields(httpStatus, err)...)
 	return credenvelope.ErrorResponse(credenvelope.Classify(httpStatus, err),
 		"upstream credential issuance failed")
+}
+
+// credentialName resolves this mount's owner instance and builds the upstream name for
+// one issued credential. The name IS the owner tag: it is what the reconciler matches on
+// and what distinguishes this mount's credentials from another mount's (A19).
+func (b *backend) credentialName(ctx context.Context, req *logical.Request, roleName, suffix string,
+) (string, *logical.Response) {
+	instanceID, err := b.ownerInstanceID(ctx, req.Storage)
+	if err != nil {
+		return "", credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
+	return ownertag.CredentialName(instanceID, roleName, suffix), nil
 }

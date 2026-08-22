@@ -88,7 +88,7 @@ func vultrHarness(t *testing.T) plugintest.Harness {
 		// exactly why it must survive.
 		SeedAgedOrphans: func(t *testing.T, storage logical.Storage) (string, string) {
 			srv.AddRawUser(agedForeignID, agedForeignName)
-			srv.AddRawUser(agedOwnedID, agedOwnedName)
+			srv.AddRawUser(agedOwnedID, agedOwnedName(t, storage))
 			if err := mintledger.Record(t.Context(), storage, agedOwnedID, agedLedgerTime()); err != nil {
 				t.Fatalf("seeding the mint ledger: %v", err)
 			}

@@ -5,10 +5,9 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
-
-const akamaiClientPrefix = "cloud-creds-"
 
 // runReconcile drives the manual reconcile path and returns the response.
 func runReconcile(t *testing.T, b logical.Backend, storage logical.Storage, data map[string]interface{}) *logical.Response {
@@ -34,7 +33,7 @@ func TestPathReconcile_FloorsSubMinHold(t *testing.T) {
 	defer srv.Close()
 
 	b, storage := setupConfiguredBackend(t, srv.URL)
-	srv.AddRawClientWithCreatedDate("orphan-1", akamaiClientPrefix+"role-x", time.Now().Add(-1*time.Minute).UTC().Format(time.RFC3339))
+	srv.AddRawClientWithCreatedDate("orphan-1", ownertag.CredentialName(ownerInstanceForTest(t, storage), "role-x", "seed"), time.Now().Add(-1*time.Minute).UTC().Format(time.RFC3339))
 
 	resp := runReconcile(t, b, storage, map[string]interface{}{"mode": "normal", "confirmation_hold": 0})
 
@@ -57,7 +56,7 @@ func TestPathReconcile_DeletesOldOrphanAboveFloor(t *testing.T) {
 	defer srv.Close()
 
 	b, storage := setupConfiguredBackend(t, srv.URL)
-	srv.AddRawClientWithCreatedDate("orphan-1", akamaiClientPrefix+"role-x", time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
+	srv.AddRawClientWithCreatedDate("orphan-1", ownertag.CredentialName(ownerInstanceForTest(t, storage), "role-x", "seed"), time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
 
 	resp := runReconcile(t, b, storage, map[string]interface{}{"mode": "normal", "confirmation_hold": 0})
 
@@ -77,7 +76,7 @@ func TestPathReconcile_DefaultHoldIsOneHour(t *testing.T) {
 	defer srv.Close()
 
 	b, storage := setupConfiguredBackend(t, srv.URL)
-	srv.AddRawClientWithCreatedDate("orphan-1", akamaiClientPrefix+"role-x", time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
+	srv.AddRawClientWithCreatedDate("orphan-1", ownertag.CredentialName(ownerInstanceForTest(t, storage), "role-x", "seed"), time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
 
 	resp := runReconcile(t, b, storage, map[string]interface{}{"mode": "normal"})
 
@@ -150,4 +149,16 @@ func TestReconcileEndpoint_DryRun(t *testing.T) {
 	if resp != nil && resp.IsError() {
 		t.Fatalf("reconcile error: %v", resp)
 	}
+}
+
+// ownerInstanceForTest resolves (and on first call mints) the mount's owner instance id
+// from the same storage the backend reads it from, so a seeded orphan carries the prefix
+// the reconciler will actually match (A19).
+func ownerInstanceForTest(t *testing.T, storage logical.Storage) string {
+	t.Helper()
+	id, err := ownertag.InstanceID(t.Context(), storage)
+	if err != nil {
+		t.Fatalf("resolving the owner instance id: %v", err)
+	}
+	return id
 }

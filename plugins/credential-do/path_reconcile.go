@@ -60,7 +60,11 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed, "cannot reconcile: %v", err), nil
 	}
 
-	lister := &doCloudLister{client: client}
+	instanceID, err := b.ownerInstanceID(ctx, req.Storage)
+	if err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err), nil
+	}
+	lister := &doCloudLister{client: client, instanceID: instanceID}
 	registry := &leaseRegistry{storage: req.Storage}
 
 	cfg := reconciler.Config{

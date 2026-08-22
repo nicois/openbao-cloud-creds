@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -117,6 +119,10 @@ func freshestSlot(slots []*slot, now time.Time) *slot {
 // initializeSlots provisions the initial credential slots for a role.
 // This is called on first role write when slots don't exist yet.
 func (b *backend) initializeSlots(ctx context.Context, storage logical.Storage, role *ociRole) error {
+	instanceID, err := b.ownerInstanceID(ctx, storage)
+	if err != nil {
+		return err
+	}
 	minterID, client, err := b.selectMinterForSet(role.MinterSet)
 	if err != nil {
 		return err
@@ -126,7 +132,7 @@ func (b *backend) initializeSlots(ctx context.Context, storage logical.Storage, 
 	rotationInterval := role.RotationPeriod / time.Duration(role.SlotCount)
 
 	for i := 0; i < role.SlotCount; i++ {
-		description := fmt.Sprintf("cloud-creds-%s-slot-%d", role.Name, i)
+		description := ownertag.Prefix(instanceID) + role.Name + "-slot-" + strconv.Itoa(i)
 
 		tokenValue, tokenID, err := client.CreateAuthToken(ctx, role.UserOCID, description)
 		if err != nil {
@@ -164,6 +170,10 @@ func (b *backend) initializeSlots(ctx context.Context, storage logical.Storage, 
 // slot storage (audit F4). rotateReconcileMu is the outermost lock; b.mu is only
 // taken-and-released inside the helper calls below, never across this body.
 func (b *backend) rotateSlot(ctx context.Context, storage logical.Storage, role *ociRole, slotIndex int) error {
+	instanceID, err := b.ownerInstanceID(ctx, storage)
+	if err != nil {
+		return err
+	}
 	b.rotateReconcileMu.Lock()
 	defer b.rotateReconcileMu.Unlock()
 
@@ -182,7 +192,7 @@ func (b *backend) rotateSlot(ctx context.Context, storage logical.Storage, role 
 	}
 
 	// Create new token
-	description := fmt.Sprintf("cloud-creds-%s-slot-%d", role.Name, slotIndex)
+	description := ownertag.Prefix(instanceID) + role.Name + "-slot-" + strconv.Itoa(slotIndex)
 	tokenValue, tokenID, err := client.CreateAuthToken(ctx, role.UserOCID, description)
 	if err != nil {
 		return fmt.Errorf("failed to create replacement auth token for slot %d: %w", slotIndex, err)

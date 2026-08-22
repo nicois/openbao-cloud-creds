@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -66,7 +67,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
 	// Mint token via UpCloud API
-	tokenName := fmt.Sprintf("cloud-creds-%s-%s", roleName, req.ID)
+	tokenName, errResp := b.credentialName(ctx, req, roleName, req.ID)
+	if errResp != nil {
+		return errResp, nil
+	}
 	expiresIn := fmt.Sprintf("%ds", int(role.DefaultTTL.Seconds()))
 	tokenResp, httpStatus, err := client.CreateToken(ctx, tokenName, expiresIn)
 	if err != nil {
@@ -84,12 +88,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	emitLeaseIssued(roleName)
 
-	// Parse expires_at from UpCloud response
-	expiresAt, err := time.Parse(time.RFC3339, tokenResp.ExpiresAt)
-	if err != nil {
-		// Fallback to computed expiry
-		expiresAt = now.Add(role.DefaultTTL)
-	}
+	expiresAt := upstreamExpiry(tokenResp.ExpiresAt, now, role.DefaultTTL)
 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
@@ -318,4 +317,26 @@ func (b *backend) issuanceError(httpStatus int, err error, attempt telemetry.Iss
 	b.Logger().Warn("upstream credential issuance failed", attempt.LogFields(httpStatus, err)...)
 	return credenvelope.ErrorResponse(credenvelope.Classify(httpStatus, err),
 		"upstream credential issuance failed")
+}
+
+// credentialName resolves this mount's owner instance and builds the upstream name for
+// one issued credential. The name IS the owner tag: it is what the reconciler matches on
+// and what distinguishes this mount's credentials from another mount's (A19).
+func (b *backend) credentialName(ctx context.Context, req *logical.Request, roleName, suffix string,
+) (string, *logical.Response) {
+	instanceID, err := b.ownerInstanceID(ctx, req.Storage)
+	if err != nil {
+		return "", credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
+	return ownertag.CredentialName(instanceID, roleName, suffix), nil
+}
+
+// upstreamExpiry parses UpCloud's reported expiry, falling back to the computed one so a
+// malformed timestamp cannot make the lease unbounded. Extracted to keep pathCredsRead
+// within the function-length limit.
+func upstreamExpiry(reported string, now time.Time, ttl time.Duration) time.Time {
+	if parsed, err := time.Parse(time.RFC3339, reported); err == nil {
+		return parsed
+	}
+	return now.Add(ttl)
 }

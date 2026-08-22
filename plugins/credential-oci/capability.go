@@ -6,6 +6,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -42,6 +43,12 @@ func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) 
 // verifySetCapability is the uniform minter-set-write hook. On OCI it only
 // records the skip.
 func (b *backend) verifySetCapability(ctx context.Context, storage logical.Storage, set *cloudconfig.MinterSet) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifySet(ctx, storage, set, b.capabilityChecks)
 }
 
@@ -49,6 +56,12 @@ func (b *backend) verifySetCapability(ctx context.Context, storage logical.Stora
 // skip — but it still enforces the shared precondition that the named minter set
 // exists before a role may bind to it.
 func (b *backend) verifyRoleCapability(ctx context.Context, storage logical.Storage, role *ociRole) *logical.Response {
+	// Resolve the owner instance while we still have storage: the probe closure
+	// runs later and only has a context, and its credential name must carry THIS
+	// mount's prefix so a failed delete is reclaimable by us and nobody else (A19).
+	if _, err := b.ownerInstanceID(ctx, storage); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
+	}
 	return b.gate().VerifyRole(ctx, storage, role.MinterSet, capability.RoleJSON(role), b.capabilityChecks)
 }
 

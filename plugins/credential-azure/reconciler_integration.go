@@ -4,16 +4,18 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
-const keyPrefix = "cloud-creds-"
-
 type azureCloudLister struct {
+	// instanceID scopes the reclaim filter to THIS mount. Matching the bare
+	// cloud-creds- prefix meant two mounts against one cloud account each saw the
+	// other's LIVE credentials as orphans and deleted them (A19).
+	instanceID   string
 	client       *azureClient
 	appObjectIDs []string
 }
@@ -28,7 +30,7 @@ func (l *azureCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler
 		}
 
 		for _, pw := range app.PasswordCredentials {
-			if strings.HasPrefix(pw.DisplayName, keyPrefix) {
+			if ownertag.Owns(l.instanceID, pw.DisplayName) {
 				entities = append(entities, reconciler.UpstreamEntity{
 					ID:        pw.KeyID,
 					Name:      pw.DisplayName,

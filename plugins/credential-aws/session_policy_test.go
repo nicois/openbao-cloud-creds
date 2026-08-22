@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 )
 
 // TestSessionPoliciesReachAssumeRole is the regression guard for A22. techrfc.md and
@@ -20,7 +21,7 @@ func TestSessionPoliciesReachAssumeRole(t *testing.T) {
 		PolicyARNs:   []string{"arn:aws:iam::aws:policy/ReadOnlyAccess"},
 		InlinePolicy: `{"Version":"2012-10-17","Statement":[]}`,
 	}
-	input := buildAssumeRoleInput(role, role.Name, "req1")
+	input := buildAssumeRoleInput(ownertag.Prefix("testinstance"), role, role.Name, "req1")
 
 	if len(input.PolicyArns) != 1 {
 		t.Fatalf("PolicyArns has %d entries, want 1: without them the session carries the target "+
@@ -47,7 +48,7 @@ func TestNarrowingIsPartOfTheProbeShape(t *testing.T) {
 			"one is never actually probed (A22)")
 	}
 
-	probe := probeAssumeRoleInput(narrowed)
+	probe := probeAssumeRoleInput(ownertag.Prefix("testinstance"), narrowed)
 	if aws.ToString(probe.Policy) != narrowed.InlinePolicy {
 		t.Error("the capability probe does not send the role's inline policy, so it proves a mint " +
 			"shape the plugin will not use")

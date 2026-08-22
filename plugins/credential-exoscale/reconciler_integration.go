@@ -3,18 +3,20 @@ package credentialexoscale
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
-const keyPrefix = "cloud-creds-"
-
 type exoscaleCloudLister struct {
-	client *exoscaleClient
+	// instanceID scopes the reclaim filter to THIS mount. Matching the bare
+	// cloud-creds- prefix meant two mounts against one cloud account each saw the
+	// other's LIVE credentials as orphans and deleted them (A19).
+	instanceID string
+	client     *exoscaleClient
 	// storage is needed to read the mint ledger, which supplies the creation
 	// time this cloud's list API does not report (A5).
 	storage logical.Storage
@@ -28,7 +30,7 @@ func (l *exoscaleCloudLister) ListTaggedEntities(ctx context.Context) ([]reconci
 
 	var entities []reconciler.UpstreamEntity
 	for _, k := range keys {
-		if strings.HasPrefix(k.Name, keyPrefix) {
+		if ownertag.Owns(l.instanceID, k.Name) {
 			entities = append(entities, reconciler.UpstreamEntity{
 				ID:   k.KeyID,
 				Name: k.Name,

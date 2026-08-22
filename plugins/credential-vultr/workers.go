@@ -101,7 +101,11 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 		return err
 	}
 
-	lister := &vultrCloudLister{client: client, storage: storage}
+	instanceID, err := b.ownerInstanceID(ctx, storage)
+	if err != nil {
+		return err
+	}
+	lister := &vultrCloudLister{client: client, storage: storage, instanceID: instanceID}
 	registry := &leaseRegistry{storage: storage}
 
 	b.mu.RLock()

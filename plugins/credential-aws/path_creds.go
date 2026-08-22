@@ -18,6 +18,7 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -75,7 +76,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ResponseFor(err), nil
 	}
 
-	output, err := sel.client.AssumeRole(ctx, buildAssumeRoleInput(role, roleName, req.ID))
+	instanceID, err := b.ownerInstanceID(ctx, req.Storage)
+	if err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err), nil
+	}
+
+	output, err := sel.client.AssumeRole(ctx,
+		buildAssumeRoleInput(ownertag.Prefix(instanceID), role, roleName, req.ID))
 	if err != nil {
 		status := classifyAWSError(err)
 		b.recordMinterError(sel.setID, sel.minterID, status, err, now)
@@ -113,8 +120,10 @@ type credsResponseArgs struct {
 
 // buildAssumeRoleInput assembles the STS AssumeRoleInput for a role, including
 // the truncated session name, optional session tags, and optional external ID.
-func buildAssumeRoleInput(role *awsRole, roleName, reqID string) *sts.AssumeRoleInput {
-	sessionName := fmt.Sprintf("cloud-creds-%s-%s", roleName, reqID)
+func buildAssumeRoleInput(ownerPrefix string, role *awsRole, roleName, reqID string) *sts.AssumeRoleInput {
+	// The session name is this cloud's owner tag: it is what CloudTrail shows and what
+	// distinguishes this mount's sessions from another mount's (A19).
+	sessionName := ownerPrefix + roleName + "-" + reqID
 	// AWS session name max 64 chars, alphanumeric + =,.@-_
 	if len(sessionName) > maxSessionNameLen {
 		sessionName = sessionName[:maxSessionNameLen]

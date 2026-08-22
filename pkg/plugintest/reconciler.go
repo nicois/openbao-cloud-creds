@@ -34,6 +34,51 @@ func RunReconcilerSafetySuite(t *testing.T, h Harness) {
 	t.Run("NeverDeletesForeignEntity", func(t *testing.T) { assertForeignEntitySurvives(t, h) })
 	t.Run("DeletesOwnedOrphansAndOnlyThose", func(t *testing.T) { assertReclaimsOnlyOwned(t, h) })
 	t.Run("DryRunDeletesNothing", func(t *testing.T) { assertDryRunDeletesNothing(t, h) })
+	t.Run("TwoMountsDoNotDeleteEachOthers", func(t *testing.T) { assertMountsAreIsolated(t, h) })
+}
+
+// assertMountsAreIsolated is the end-to-end form of A19. The reclaim filter used to be
+// the bare `cloud-creds-` prefix while the owned-set was a per-mount storage view, so
+// two mounts against ONE cloud account each classified the other's LIVE credentials as
+// orphans and deleted up to ten per pass, silently. decisions.md recommended multiple
+// mounts as an isolation strategy.
+//
+// Both backends here share one fake — one cloud account — with separate storage, which
+// is exactly the deployment shape that broke.
+func assertMountsAreIsolated(t *testing.T, h Harness) {
+	t.Helper()
+	if h.SeedAgedOrphans == nil {
+		t.Skipf("%s: no confirmable creation time is available for an upstream entity, so a "+
+			"reclaiming pass cannot be driven here (A5)", h.Cloud)
+	}
+
+	// Mount A issues a credential and keeps its lease, so the credential is live.
+	backendA, storageA := newConfiguredBackend(t, h)
+	respA, err := issue(t, backendA, storageA, h.IssuePath)
+	if err != nil || respA == nil || respA.IsError() {
+		t.Fatalf("mount A issue failed: err=%v resp=%v", err, respA)
+	}
+	// Mount B is a second mount of the same plugin against the same upstream. Give it
+	// a real orphan of its own so its pass genuinely deletes something.
+	backendB, storageB := newConfiguredBackend(t, h)
+	_, ownedByB := h.SeedAgedOrphans(t, storageB)
+
+	// Counted AFTER seeding, since seeding itself adds entities: the question is what
+	// mount B's pass changes, not what the setup did.
+	before := h.ProvisionedCount()
+
+	reconcile(t, backendB, storageB, modeNormal)
+
+	if h.HasEntity(ownedByB) {
+		t.Errorf("mount B did not reclaim its own orphan %q, so this test cannot show whether it "+
+			"would have taken A's credential too", ownedByB)
+	}
+	if after := h.ProvisionedCount(); after != before-1 {
+		t.Errorf("upstream count went %d -> %d across mount B's pass; expected exactly one deletion, "+
+			"its own orphan. Anything more means mount B also took a credential belonging to mount A "+
+			"— two mounts against one cloud account destroying each other's live credentials (A19)",
+			before, after)
+	}
 }
 
 func assertForeignEntitySurvives(t *testing.T, h Harness) {

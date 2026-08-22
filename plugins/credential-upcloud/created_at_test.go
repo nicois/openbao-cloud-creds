@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
+	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 )
 
@@ -17,11 +18,11 @@ func TestReconcile_PopulatesCreatedAt(t *testing.T) {
 	defer srv.Close()
 
 	client := newUpCloudClient(srv.URL, "user", "pass")
-	if _, _, err := client.CreateToken(t.Context(), tokenPrefix+"role-abc", "1h"); err != nil {
+	if _, _, err := client.CreateToken(t.Context(), ownertag.Prefix(testOwnerInstance)+"role-abc", "1h"); err != nil {
 		t.Fatalf("seed create: %v", err)
 	}
 
-	lister := &upcloudCloudLister{client: client}
+	lister := &upcloudCloudLister{client: client, instanceID: testOwnerInstance}
 	ents, err := lister.ListTaggedEntities(t.Context())
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -56,9 +57,9 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 			defer srv.Close()
 
 			client := newUpCloudClient(srv.URL, "user", "pass")
-			srv.AddRawTokenWithCreatedAt("orphan-1", tokenPrefix+"role-x", tc.createdAt.UTC().Format(time.RFC3339))
+			srv.AddRawTokenWithCreatedAt("orphan-1", ownertag.Prefix(testOwnerInstance)+"role-x", tc.createdAt.UTC().Format(time.RFC3339))
 
-			lister := &upcloudCloudLister{client: client}
+			lister := &upcloudCloudLister{client: client, instanceID: testOwnerInstance}
 			rec := reconciler.New(reconciler.Config{
 				MaxDeletesPerPass: 10,
 				ConfirmationHold:  time.Hour,
@@ -81,3 +82,6 @@ type allOrphansRegistry struct{}
 func (allOrphansRegistry) OwnedIDs(context.Context) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
+
+// testOwnerInstance stands in for a mount's persisted owner instance id (A19).
+const testOwnerInstance = "testinstance"
