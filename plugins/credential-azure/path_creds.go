@@ -84,10 +84,6 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
-	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
-	}
-
 	emitLeaseIssued(roleName)
 
 	env := b.buildEnvelope(envelopeArgs{

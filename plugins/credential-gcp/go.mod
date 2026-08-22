@@ -9,7 +9,6 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/metrics v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/worker v0.0.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
@@ -51,7 +50,6 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/capability v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/metricspath v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.0.0
 	github.com/oklog/run v1.2.0 // indirect
@@ -75,14 +73,11 @@ replace (
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../../pkg/cloudconfig
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../../pkg/credenvelope
 	github.com/nicois/openbao-cloud-creds/pkg/localexpiry => ../../pkg/localexpiry
-	github.com/nicois/openbao-cloud-creds/pkg/metrics => ../../pkg/metrics
 	github.com/nicois/openbao-cloud-creds/pkg/recovery => ../../pkg/recovery
 	github.com/nicois/openbao-cloud-creds/pkg/worker => ../../pkg/worker
 )
 
 replace github.com/nicois/openbao-cloud-creds/pkg/capability => ../../pkg/capability
-
-replace github.com/nicois/openbao-cloud-creds/pkg/metricspath => ../../pkg/metricspath
 
 replace github.com/nicois/openbao-cloud-creds/pkg/telemetry => ../../pkg/telemetry
 

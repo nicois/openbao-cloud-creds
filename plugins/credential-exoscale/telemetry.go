@@ -39,6 +39,7 @@ func (b *backend) emitMinterMetrics() {
 				{Name: fieldMinterSet, Value: setName},
 				{Name: "cred_id", Value: id},
 			}
+			labels = withCloudKey(labels, cloudconfig.CloudKeyID(ms.minter, fieldKeyID))
 
 			emit.Gauge("minter_age_seconds", float32(now.Sub(ms.minter.CreatedAt).Seconds()), labels)
 
@@ -61,7 +62,8 @@ func (b *backend) emitMinterMetrics() {
 				}
 				if expiresIn > 0 && expiresIn < warnThreshold {
 					b.Logger().Warn("minter nearing expiry",
-						"cloud", cloudName, "minter_set", setName, "minter_id", id,
+						"cloud", cloudName,
+						"cloud_key_id", cloudconfig.CloudKeyID(ms.minter, fieldKeyID), "minter_set", setName, "minter_id", id,
 						"expires_in_seconds", int(expiresIn.Seconds()),
 						"warn_threshold_seconds", int(warnThreshold.Seconds()))
 				}
@@ -75,4 +77,14 @@ func (b *backend) workerErrorHandler() worker.ErrorHandler {
 		b.Logger().Warn("worker error", "worker", name, "error", err)
 		emit.WorkerError(name, err)
 	}
+}
+
+// withCloudKey appends the identifier the CLOUD knows a minter by, which is what an
+// escalation quotes — cred_id is the operator's own name for it and appears in no cloud
+// audit log (A23). Omitted rather than emitted empty when the cloud gives us none.
+func withCloudKey(labels []metrics.Label, cloudKey string) []metrics.Label {
+	if cloudKey == "" {
+		return labels
+	}
+	return append(labels, metrics.Label{Name: "cloud_key_id", Value: cloudKey})
 }

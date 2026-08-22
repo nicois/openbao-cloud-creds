@@ -102,9 +102,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Cloud != "do" {
 		t.Errorf("Cloud = %q, want %q", cfg.Cloud, "do")
 	}
-	if cfg.FlushInterval != 15*time.Minute {
-		t.Errorf("FlushInterval = %v, want %v", cfg.FlushInterval, 15*time.Minute)
-	}
 	if cfg.ReconcileCadence != 6*time.Hour {
 		t.Errorf("ReconcileCadence = %v, want %v", cfg.ReconcileCadence, 6*time.Hour)
 	}

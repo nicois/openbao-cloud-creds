@@ -55,8 +55,6 @@ const (
 	defaultRoleTTLSeconds          = 900
 	defaultReconcileCadenceSeconds = 21600
 	defaultRoleMaxTTLSeconds       = 3600
-	defaultStaleAfterSeconds       = 604800
-	defaultFlushIntervalSeconds    = 900
 	// defaultMinterExpiryWarnSeconds is the default near-expiry warn threshold (7d),
 	// matching cloudconfig.MinMinterGap.
 	defaultMinterExpiryWarnSeconds = 604800
@@ -87,7 +85,6 @@ const (
 // Operational interval field names, constified because they appear in the schema,
 // the write handler, the interval validation and the read response.
 const (
-	fieldFlushInterval    = "flush_interval"
 	fieldReconcileCadence = "reconcile_cadence"
 	fieldMinterExpiryWarn = "minter_expiry_warn"
 )

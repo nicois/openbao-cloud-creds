@@ -69,11 +69,7 @@ replace github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../pkg/cloudcon
 
 replace github.com/nicois/openbao-cloud-creds/pkg/localexpiry => ../pkg/localexpiry
 
-replace github.com/nicois/openbao-cloud-creds/pkg/metrics => ../pkg/metrics
-
 replace github.com/nicois/openbao-cloud-creds/pkg/mintledger => ../pkg/mintledger
-
-replace github.com/nicois/openbao-cloud-creds/pkg/metricspath => ../pkg/metricspath
 
 replace github.com/nicois/openbao-cloud-creds/pkg/plugintest => ../pkg/plugintest
 

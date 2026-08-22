@@ -64,8 +64,6 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/capability v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/metrics v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/metricspath v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/mintledger v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.0.0
@@ -79,10 +77,6 @@ replace github.com/nicois/openbao-cloud-creds/pkg/capability => ../../pkg/capabi
 replace github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../../pkg/cloudconfig
 
 replace github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../../pkg/credenvelope
-
-replace github.com/nicois/openbao-cloud-creds/pkg/metrics => ../../pkg/metrics
-
-replace github.com/nicois/openbao-cloud-creds/pkg/metricspath => ../../pkg/metricspath
 
 replace github.com/nicois/openbao-cloud-creds/pkg/mintledger => ../../pkg/mintledger
 

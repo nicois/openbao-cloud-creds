@@ -104,10 +104,6 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
-	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
-	}
-
 	emitLeaseIssued(roleName)
 
 	// Exoscale keys don't have native TTL, so we compute expiry from default_ttl

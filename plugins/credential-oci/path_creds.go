@@ -93,11 +93,6 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// overstated its lease by days (A24 in docs/audit-2026-08-22.md).
 	expiresAt := now.Add(time.Duration(ttlSeconds) * time.Second)
 
-	// Provenance comes from the slot itself — the read does not call the cloud.
-	if b.accessTracker != nil && best.MinterSet != "" && best.MinterID != "" {
-		b.accessTracker.RecordAccess(best.MinterSet+"/"+best.MinterID, roleName, now)
-	}
-
 	emitLeaseIssued(roleName)
 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{

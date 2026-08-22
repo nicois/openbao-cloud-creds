@@ -99,20 +99,4 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatalf("reconcile failed: err=%v resp=%v", err, reconcileResp)
 	}
 
-	// 6. Metrics query
-	metricsReq := &logical.Request{
-		Operation: logical.ReadOperation,
-		Path:      "metrics/entity/default/minter-1",
-		Storage:   storage,
-	}
-	metricsResp, err := b.HandleRequest(t.Context(), metricsReq)
-	if err != nil {
-		t.Fatalf("metrics query failed: %v", err)
-	}
-	if metricsResp == nil {
-		t.Fatal("expected metrics data")
-	}
-	if metricsResp.Data["access_count"] == nil {
-		t.Fatal("expected access_count in metrics response")
-	}
 }

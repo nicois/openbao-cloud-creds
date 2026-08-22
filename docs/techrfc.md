@@ -148,6 +148,9 @@ Each plugin instance accumulates access events in memory and flushes to a per-no
 | `cloud-creds/<cloud>/rotate-slot/<role>/<slot_id>` | write | Force immediate rotation (phased-rotation only) |
 | `cloud-creds/<cloud>/reconcile` | write | Trigger reconciliation; supports `mode=dry_run` |
 | `cloud-creds/<cloud>/metrics/entity/<entity_id>` | read | Query access metrics for one entity |
+
+> **Removed 2026-08-22 (A23).** The access-metrics endpoints (`metrics/entity`, `metrics/stale`) and the `flush_interval` config field are **gone**, along with `pkg/metrics` and `pkg/metricspath`. Their whole purpose was deciding whether an upstream entity was still in use before deleting it — and a minting credential handed to this plugin is not used anywhere else, so it can be rotated and deleted without that check. What an escalation actually needs is the identifier the *cloud* knows: minter metrics and the near-expiry warning now carry `cloud_key_id`. See [`audit-2026-08-22.md`](audit-2026-08-22.md) A23.
+
 | `cloud-creds/<cloud>/metrics/stale` | list | List entities not accessed within `older_than` |
 
 ## Storage layouts

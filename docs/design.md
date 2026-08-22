@@ -336,6 +336,9 @@ A "client request" includes both initial `bao read .../creds/<role>` and every `
 
 ```
 bao read cloud-creds/<cloud>/metrics/entity/<entity_id>
+
+> **Removed 2026-08-22 (A23).** The access-metrics endpoints (`metrics/entity`, `metrics/stale`) and the `flush_interval` config field are **gone**, along with `pkg/metrics` and `pkg/metricspath`. Their whole purpose was deciding whether an upstream entity was still in use before deleting it — and a minting credential handed to this plugin is not used anywhere else, so it can be rotated and deleted without that check. What an escalation actually needs is the identifier the *cloud* knows: minter metrics and the near-expiry warning now carry `cloud_key_id`. See [`audit-2026-08-22.md`](audit-2026-08-22.md) A23.
+
 → {
     last_access_at: "2026-05-29T13:42:11Z",
     access_count: 47,

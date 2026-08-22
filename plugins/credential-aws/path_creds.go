@@ -93,10 +93,6 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	b.recordMinterSuccess(sel.setID, sel.minterID, now)
 
-	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(sel.setID+"/"+sel.minterID, roleName, now)
-	}
-
 	emitLeaseIssued(roleName)
 
 	return b.buildCredsResponse(ctx, req, credsResponseArgs{

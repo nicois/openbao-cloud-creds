@@ -2,7 +2,6 @@ package credentialgcp
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -80,16 +79,23 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	}
 	b.recordMinterSuccess(setName, minterID, now)
 
-	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(setName+"/"+minterID, roleName, now)
-	}
-
 	emitLeaseIssued(roleName)
 
 	ttlSeconds := int(time.Until(expiresAt).Seconds())
 
-	// Generate a credential ID from a hash of the token prefix (for tracking without exposing the token)
-	credentialID := hashTokenPrefix(accessToken)
+	// GCP and OVH issue OAuth2 access tokens, which carry NO upstream identifier —
+	// unlike the other eight clouds, whose credential_id is the cloud's own id. This
+	// used to be an unsalted SHA-256 of the token's own first 16 characters, which was
+	// worse than useless: it correlates with nothing in any cloud's records, two
+	// credentials sharing a prefix collide, and it published a digest of secret
+	// material as an identifier (A29 in docs/audit-2026-08-22.md).
+	//
+	// The request id is used instead. It is not a cloud identifier and does not pretend
+	// to be one — cloud-side correlation on these two clouds goes through the target
+	// entity plus the time window — but it does join this credential to the OpenBao
+	// audit device and to this plugin's own log lines, which is a question that can
+	// actually be answered.
+	credentialID := credenvelope.OpaqueCredentialID(req.ID)
 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
@@ -313,16 +319,4 @@ func classifyGCPError(err error) int {
 		}
 	}
 	return credenvelope.StatusNone
-}
-
-// hashTokenPrefix generates a short opaque identifier from the leading
-// characters of a token. Only the first credentialIDPrefixLen characters are
-// hashed so the full secret token is never fed through the digest.
-func hashTokenPrefix(token string) string {
-	prefix := token
-	if len(prefix) > credentialIDPrefixLen {
-		prefix = prefix[:credentialIDPrefixLen]
-	}
-	h := sha256.Sum256([]byte(prefix))
-	return fmt.Sprintf("%x", h[:8])
 }

@@ -70,7 +70,6 @@ const metricNamespace = "cloud_creds"
 
 // TTL defaults (seconds), surfaced in path field schemas. Values unchanged.
 const (
-	defaultFlushIntervalSeconds    = 900    // metrics flush interval
 	defaultReconcileCadenceSeconds = 21600  // reconciliation cadence
 	defaultRoleTTLSeconds          = 900    // role default lease TTL
 	defaultRoleMaxTTLSeconds       = 3600   // role maximum lease TTL
@@ -114,7 +113,6 @@ const leaseShortIDLen = 8
 // Operational interval field names, constified because they appear in the schema,
 // the write handler, the interval validation and the read response.
 const (
-	fieldFlushInterval    = "flush_interval"
 	fieldReconcileCadence = "reconcile_cadence"
 	fieldMinterExpiryWarn = "minter_expiry_warn"
 )

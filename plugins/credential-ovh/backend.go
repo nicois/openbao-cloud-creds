@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
-	"github.com/nicois/openbao-cloud-creds/pkg/metrics"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -28,7 +27,6 @@ type backend struct {
 	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
 	region            string
 	tokenEndpoint     string
-	accessTracker     *metrics.AccessTracker
 	workerMgr         *worker.Manager
 	workerCancel      context.CancelFunc
 	// baseCtx is the parent context for all worker goroutines; baseCancel is
@@ -80,7 +78,6 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 			b.rolePaths(),
 			b.credsPaths(),
 			b.reconcilePaths(),
-			b.metricsPaths(),
 		),
 		Secrets: []*framework.Secret{
 			b.secretOVH(),
@@ -90,12 +87,6 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 	if err := b.Setup(ctx, conf); err != nil {
 		return nil, err
 	}
-
-	var store metrics.MetricsStore = metrics.NewInMemoryStore()
-	if conf.StorageView != nil {
-		store = metrics.NewStorageBackedStore(conf.StorageView)
-	}
-	b.accessTracker = metrics.NewAccessTracker(metrics.ResolveNodeID(), store)
 
 	if conf.StorageView != nil {
 		_ = b.loadConfig(ctx, conf.StorageView)

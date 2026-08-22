@@ -21,11 +21,6 @@ func (b *backend) configPaths() []*framework.Path {
 					Default:     "",
 					Description: "GCP project ID (for context/documentation)",
 				},
-				fieldFlushInterval: {
-					Type:        framework.TypeDurationSecond,
-					Default:     defaultFlushIntervalSeconds,
-					Description: "Metrics flush interval in seconds",
-				},
 				fieldReconcileCadence: {
 					Type:        framework.TypeDurationSecond,
 					Default:     defaultReconcileCadenceSeconds,
@@ -56,16 +51,14 @@ func (b *backend) configPaths() []*framework.Path {
 }
 
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	flushInterval := time.Duration(d.Get(fieldFlushInterval).(int)) * time.Second
 	reconcileCadence := time.Duration(d.Get(fieldReconcileCadence).(int)) * time.Second
 	minterExpiryWarn := time.Duration(d.Get(fieldMinterExpiryWarn).(int)) * time.Second
 	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
 
 	// Reject a non-positive interval here, where the operator finds out. A zero
-	// flush_interval used to panic the plugin process and crash-loop every mount
-	// in the binary (A2); worker.Register now clamps too, but silently.
+	// interval used to panic the plugin process and crash-loop every mount in the
+	// binary (A2); worker.Register now clamps too, but silently.
 	if err := cloudconfig.ValidateIntervals(map[string]time.Duration{
-		fieldFlushInterval:     flushInterval,
 		fieldReconcileCadence:  reconcileCadence,
 		fieldMinterExpiryWarn:  minterExpiryWarn,
 		fieldMinterRetireGrace: minterRetireGrace,
@@ -76,7 +69,6 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
-		FlushInterval:     flushInterval,
 		ReconcileCadence:  reconcileCadence,
 		BootstrapDelay:    reconcilerBootstrapDelay,
 		MaxDeletesPerPass: maxDeletesPerPass,
@@ -169,7 +161,6 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 		Data: map[string]interface{}{
 			fieldCloud:             cfg.Cloud,
 			fieldProject:           b.getProject(),
-			fieldFlushInterval:     int(cfg.FlushInterval.Seconds()),
 			fieldReconcileCadence:  int(cfg.ReconcileCadence.Seconds()),
 			fieldMinterExpiryWarn:  int(cfg.MinterExpiryWarn.Seconds()),
 			fieldMinterRetireGrace: int(cfg.MinterRetireGrace.Seconds()),

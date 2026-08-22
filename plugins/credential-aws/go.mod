@@ -74,8 +74,6 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/metrics v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/metricspath v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.0.0
@@ -89,10 +87,6 @@ replace github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../../pkg/cloud
 replace github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../../pkg/credenvelope
 
 replace github.com/nicois/openbao-cloud-creds/pkg/localexpiry => ../../pkg/localexpiry
-
-replace github.com/nicois/openbao-cloud-creds/pkg/metrics => ../../pkg/metrics
-
-replace github.com/nicois/openbao-cloud-creds/pkg/metricspath => ../../pkg/metricspath
 
 replace github.com/nicois/openbao-cloud-creds/pkg/recovery => ../../pkg/recovery
 

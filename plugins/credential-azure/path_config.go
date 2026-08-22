@@ -12,8 +12,6 @@ import (
 )
 
 const (
-	// Schema defaults are expressed in seconds (framework.TypeDurationSecond).
-	defaultFlushIntervalSeconds    = 900   // 15m
 	defaultReconcileCadenceSeconds = 21600 // 6h
 
 	// defaultMinterExpiryWarnSeconds is the default near-expiry warn threshold (7d),
@@ -51,11 +49,6 @@ func (b *backend) configPaths() []*framework.Path {
 				fieldTenantID: {
 					Type:        framework.TypeString,
 					Description: "Azure AD tenant ID",
-				},
-				fieldFlushInterval: {
-					Type:        framework.TypeDurationSecond,
-					Default:     defaultFlushIntervalSeconds,
-					Description: "Metrics flush interval in seconds",
 				},
 				fieldReconcileCadence: {
 					Type:        framework.TypeDurationSecond,
@@ -111,16 +104,14 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "tenant_id is required"), nil
 	}
 
-	flushInterval := time.Duration(d.Get(fieldFlushInterval).(int)) * time.Second
 	reconcileCadence := time.Duration(d.Get(fieldReconcileCadence).(int)) * time.Second
 	minterExpiryWarn := time.Duration(d.Get(fieldMinterExpiryWarn).(int)) * time.Second
 	minterRetireGrace := time.Duration(d.Get(fieldMinterRetireGrace).(int)) * time.Second
 
 	// Reject a non-positive interval here, where the operator finds out. A zero
-	// flush_interval used to panic the plugin process and crash-loop every mount
-	// in the binary (A2); worker.Register now clamps too, but silently.
+	// interval used to panic the plugin process and crash-loop every mount in the
+	// binary (A2); worker.Register now clamps too, but silently.
 	if err := cloudconfig.ValidateIntervals(map[string]time.Duration{
-		fieldFlushInterval:     flushInterval,
 		fieldReconcileCadence:  reconcileCadence,
 		fieldMinterExpiryWarn:  minterExpiryWarn,
 		fieldMinterRetireGrace: minterRetireGrace,
@@ -131,7 +122,6 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 
 	cfg := &cloudconfig.PluginConfig{
 		Cloud:             cloudName,
-		FlushInterval:     flushInterval,
 		ReconcileCadence:  reconcileCadence,
 		BootstrapDelay:    reconcilerBootstrapDelay,
 		MaxDeletesPerPass: maxDeletesPerPass,
@@ -229,7 +219,6 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 	return &logical.Response{
 		Data: map[string]interface{}{
 			fieldCloud:             cfg.Cloud,
-			fieldFlushInterval:     int(cfg.FlushInterval.Seconds()),
 			fieldReconcileCadence:  int(cfg.ReconcileCadence.Seconds()),
 			fieldMinterExpiryWarn:  int(cfg.MinterExpiryWarn.Seconds()),
 			fieldMinterRetireGrace: int(cfg.MinterRetireGrace.Seconds()),

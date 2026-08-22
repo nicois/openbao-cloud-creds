@@ -50,7 +50,10 @@ func TestConcurrent_IssueDuringWorkerActivity(t *testing.T) {
 		}()
 	}
 
-	// Readers: concurrently read the metrics endpoint for the issuing minter.
+	// Readers: concurrently read the minter set, which now carries per-minter health
+	// (A27). This replaced a read of the deleted metrics/entity endpoint; the point of
+	// the test is concurrent reads racing worker activity, and this is the read-side
+	// surface that exists.
 	wg.Add(readers)
 	for i := 0; i < readers; i++ {
 		go func() {
@@ -58,7 +61,7 @@ func TestConcurrent_IssueDuringWorkerActivity(t *testing.T) {
 			for j := 0; j < issuesPerGoroutine; j++ {
 				req := &logical.Request{
 					Operation: logical.ReadOperation,
-					Path:      "metrics/entity/default/minter-1",
+					Path:      "minter-sets/default",
 					Storage:   storage,
 				}
 				if _, err := b.HandleRequest(t.Context(), req); err != nil {

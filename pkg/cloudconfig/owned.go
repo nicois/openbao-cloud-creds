@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -163,4 +164,31 @@ func ValidateMinterIDs(minters []Minter) error {
 		seen[id] = struct{}{}
 	}
 	return nil
+}
+
+// CloudKeyID returns the identifier the CLOUD knows a minter by, or "" when this cloud
+// gives us none.
+//
+// `Minter.ID` is a label the operator invented; the cloud has never heard of it. When a
+// provider or a security team escalates, they quote something from a cloud audit log —
+// an access key id, a client id, a token id — and nothing mapped that back to a mount,
+// set or role. So metrics and log lines carry this alongside the operator's label.
+//
+// Two sources, in order:
+//
+//   - RotationParams, where a rotation successor records the upstream id it was given.
+//   - The non-secret half of a composite token. Several clouds store a minter as
+//     "<public id>:<secret>" — AWS access-key-id, Azure client id, Akamai client token —
+//     and the part before the first colon is a cloud identifier that is safe to publish.
+//     Only that part is ever returned; a single-secret token (DO, UpCloud) yields "".
+func CloudKeyID(m Minter, rotationParamKeys ...string) string {
+	for _, key := range rotationParamKeys {
+		if id := m.RotationParams[key]; id != "" {
+			return id
+		}
+	}
+	if public, _, composite := strings.Cut(m.Token, ":"); composite && public != "" {
+		return public
+	}
+	return ""
 }

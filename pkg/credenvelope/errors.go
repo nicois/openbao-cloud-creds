@@ -2,6 +2,8 @@ package credenvelope
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -276,4 +278,33 @@ func InternalResponse(logger func(msg string, args ...interface{}), what string,
 		logger("plugin-internal failure", "operation", what, "error", err)
 	}
 	return ErrorResponse(ErrInternal, "%s failed inside the plugin; see the OpenBao server log", what)
+}
+
+// opaqueIDBytes is the length of a generated fallback credential id: enough that two
+// credentials issued in the same instant cannot collide, short enough to read in a log.
+const opaqueIDBytes = 8
+
+// OpaqueCredentialID returns a non-secret identifier for a credential the cloud does
+// not identify.
+//
+// Two clouds (GCP, OVH) issue OAuth2 access tokens with no upstream id. Their
+// credential_id used to be an unsalted SHA-256 of the token's own first 16 characters,
+// which correlated with nothing in any cloud's records, collided for tokens sharing a
+// prefix, and published a digest of secret material as an identifier (A29).
+//
+// The request id is preferred, because it joins the credential to the OpenBao audit
+// device and to this plugin's log lines. A random value is used when there is no request
+// id — core assigns one in production, but the field must never be empty, since clients
+// key on it and an empty key silently collapses distinct credentials into one.
+func OpaqueCredentialID(requestID string) string {
+	if requestID != "" {
+		return requestID
+	}
+	buf := make([]byte, opaqueIDBytes)
+	if _, err := rand.Read(buf); err != nil {
+		// Cannot happen on any supported platform; a fixed marker is still better
+		// than an empty id, and it is visibly not a real identifier.
+		return "unidentified-credential"
+	}
+	return hex.EncodeToString(buf)
 }

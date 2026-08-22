@@ -9,8 +9,6 @@ use (
 	./pkg/cloudconfig
 	./pkg/credenvelope
 	./pkg/localexpiry
-	./pkg/metrics
-	./pkg/metricspath
 	./pkg/ownertag
 	./pkg/mintledger
 	./pkg/plugintest

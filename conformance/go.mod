@@ -68,8 +68,6 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/capability v0.0.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.0.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/metrics v0.0.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/metricspath v0.0.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.0.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.0.0 // indirect
@@ -122,10 +120,6 @@ replace github.com/nicois/openbao-cloud-creds/pkg/capability => ../pkg/capabilit
 replace github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../pkg/cloudconfig
 
 replace github.com/nicois/openbao-cloud-creds/pkg/localexpiry => ../pkg/localexpiry
-
-replace github.com/nicois/openbao-cloud-creds/pkg/metrics => ../pkg/metrics
-
-replace github.com/nicois/openbao-cloud-creds/pkg/metricspath => ../pkg/metricspath
 
 replace github.com/nicois/openbao-cloud-creds/pkg/reconciler => ../pkg/reconciler
 

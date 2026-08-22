@@ -33,17 +33,12 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 		// not ask for "no background work", they just did not express a preference.
 		cfg = cloudconfig.DefaultConfig(cloudName)
 		b.Logger().Info("starting workers with default intervals: no config has been written",
-			"cloud", cloudName, "flush_interval", cfg.FlushInterval,
-			"reconcile_cadence", cfg.ReconcileCadence)
+			"cloud", cloudName, "reconcile_cadence", cfg.ReconcileCadence)
 	}
 
 	wm := worker.New(worker.WithErrorHandler(b.workerErrorHandler()))
 
 	wm.Register("health-check", healthCheckInterval, worker.Opts{}, b.healthCheckWorker)
-
-	wm.Register("metrics-flush", cfg.FlushInterval, worker.Opts{}, func(ctx context.Context) error {
-		return b.accessTracker.Flush(ctx, time.Now())
-	})
 
 	// Rotation worker: checks all roles for slots needing rotation
 	rotationInterval := 1 * time.Hour

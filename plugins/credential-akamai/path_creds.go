@@ -76,10 +76,6 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrInternal, "no credentials returned from Akamai"), nil
 	}
 
-	if b.accessTracker != nil {
-		b.accessTracker.RecordAccess(sel.setID+"/"+sel.minterID, roleName, now)
-	}
-
 	emitLeaseIssued(roleName)
 
 	return b.buildCredsResponse(ctx, req, credsResponseArgs{
