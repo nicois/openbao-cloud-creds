@@ -81,28 +81,5 @@ replace github.com/nicois/openbao-cloud-creds/pkg/capability => ../../pkg/capabi
 
 replace github.com/nicois/openbao-cloud-creds/pkg/telemetry => ../../pkg/telemetry
 
-replace github.com/nicois/openbao-cloud-creds/pkg/mintledger => ../../pkg/mintledger
-
-replace github.com/nicois/openbao-cloud-creds/pkg/plugintest => ../../pkg/plugintest
-
 replace github.com/nicois/openbao-cloud-creds/pkg/reconciler => ../../pkg/reconciler
 
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-akamai => ../credential-akamai
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-aws => ../credential-aws
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-azure => ../credential-azure
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-do => ../credential-do
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-exoscale => ../credential-exoscale
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-gcp => ../credential-gcp
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-oci => ../credential-oci
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-upcloud => ../credential-upcloud
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-vultr => ../credential-vultr
-
-replace github.com/nicois/openbao-cloud-creds/pkg/ownertag => ../../pkg/ownertag

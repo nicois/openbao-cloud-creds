@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/baotest"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/api/v2"
 )
@@ -18,27 +19,27 @@ const upstreamPollAttempts = 40
 
 // runCase drives one cloud through the whole scenario. Each step is a named
 // helper so a failure names the property that broke, not a line number.
-func runCase(t *testing.T, c *cluster, p e2ePlugin) {
+func runCase(t *testing.T, c *baotest.Cluster, p e2ePlugin) {
 	tc := p.New(t)
 	mount := mountFor(p.Cloud)
-	c.enable(pluginBinary(p.Cloud), mount)
-	t.Cleanup(func() { c.unmount(mount) })
+	c.Enable(pluginBinary(p.Cloud), mount)
+	t.Cleanup(func() { c.Unmount(mount) })
 
-	c.write(mount+"/"+configPath, tc.Config)
-	c.write(mount+"/"+setPath, tc.MinterSet)
-	c.write(mount+"/"+rolePath, tc.Role)
+	c.Write(mount+"/"+configPath, tc.Config)
+	c.Write(mount+"/"+setPath, tc.MinterSet)
+	c.Write(mount+"/"+rolePath, tc.Role)
 
 	// Baseline AFTER configuration: a minter-set write and a role write each run
 	// a capability probe, which mints and deletes.
 	want := upstreamCount(tc)
 
-	first := c.read(mount + "/" + issuePath)
+	first := c.Read(mount + "/" + issuePath)
 	assertLease(t, tc, mount, first)
 	assertEnvelope(t, tc, first)
 	want++
 	assertUpstream(t, tc, want)
 
-	second := c.read(mount + "/" + issuePath)
+	second := c.Read(mount + "/" + issuePath)
 	assertDistinctIssuance(t, first, second)
 	want++
 	assertUpstream(t, tc, want)
@@ -146,9 +147,9 @@ func assertDistinctIssuance(t *testing.T, first, second *api.Secret) {
 	}
 }
 
-func assertLeaseIsTracked(t *testing.T, c *cluster, leaseID string) {
+func assertLeaseIsTracked(t *testing.T, c *baotest.Cluster, leaseID string) {
 	t.Helper()
-	secret, err := c.client.Sys().Lookup(leaseID)
+	secret, err := c.Client().Sys().Lookup(leaseID)
 	if err != nil {
 		t.Fatalf("the expiration manager does not know lease %q: %v", leaseID, err)
 	}
@@ -157,9 +158,9 @@ func assertLeaseIsTracked(t *testing.T, c *cluster, leaseID string) {
 	}
 }
 
-func assertRenewContract(t *testing.T, c *cluster, tc e2eCase, leaseID string) {
+func assertRenewContract(t *testing.T, c *baotest.Cluster, tc e2eCase, leaseID string) {
 	t.Helper()
-	renewed, err := c.client.Sys().Renew(leaseID, 0)
+	renewed, err := c.Client().Sys().Renew(leaseID, 0)
 	if tc.Renewable {
 		if err != nil {
 			t.Errorf("renewing a renewable lease failed: %v", err)
@@ -178,12 +179,12 @@ func assertRenewContract(t *testing.T, c *cluster, tc e2eCase, leaseID string) {
 
 // assertRevoke revokes through the expiration manager — the production path,
 // where in-process tests call the plugin's revoke callback directly.
-func assertRevoke(t *testing.T, c *cluster, tc e2eCase, leaseID string, want int) {
+func assertRevoke(t *testing.T, c *baotest.Cluster, tc e2eCase, leaseID string, want int) {
 	t.Helper()
-	if err := c.client.Sys().Revoke(leaseID); err != nil {
+	if err := c.Client().Sys().Revoke(leaseID); err != nil {
 		t.Fatalf("revoking lease %q failed: %v", leaseID, err)
 	}
-	if _, err := c.client.Sys().Lookup(leaseID); err == nil {
+	if _, err := c.Client().Sys().Lookup(leaseID); err == nil {
 		t.Errorf("lease %q still resolves after revocation", leaseID)
 	}
 	assertUpstream(t, tc, want)
@@ -191,23 +192,23 @@ func assertRevoke(t *testing.T, c *cluster, tc e2eCase, leaseID string, want int
 	// A second revoke must be a clean no-op. KI-002 was exactly this wedging
 	// forever, and the retry that wedged was the expiration manager's, which
 	// only exists at this layer.
-	if err := c.client.Sys().Revoke(leaseID); err != nil {
+	if err := c.Client().Sys().Revoke(leaseID); err != nil {
 		t.Errorf("revoking lease %q a second time errored (KI-002 class): %v", leaseID, err)
 	}
 }
 
 // assertReloadThenIssue is KI-001 through core: the backend is rebuilt from
 // storage alone, with no config write, and must still issue.
-func assertReloadThenIssue(t *testing.T, c *cluster, tc e2eCase, mount string, want int) {
+func assertReloadThenIssue(t *testing.T, c *baotest.Cluster, tc e2eCase, mount string, want int) {
 	t.Helper()
-	c.reload(pluginBinary(tc.Cloud))
+	c.Reload(pluginBinary(tc.Cloud))
 
-	role := c.read(mount + "/" + rolePath)
+	role := c.Read(mount + "/" + rolePath)
 	if got := str(t, role.Data, fieldMinterSet); got != defaultSet {
 		t.Errorf("after reload the role's minter_set is %q, want %q", got, defaultSet)
 	}
 
-	secret := c.read(mount + "/" + issuePath)
+	secret := c.Read(mount + "/" + issuePath)
 	assertLease(t, tc, mount, secret)
 	assertEnvelope(t, tc, secret)
 	assertUpstream(t, tc, want)
@@ -234,7 +235,7 @@ func assertUpstream(t *testing.T, tc e2eCase, want int) {
 		if got == want {
 			return
 		}
-		time.Sleep(pollInterval)
+		time.Sleep(upstreamPollInterval)
 	}
 	t.Errorf("the fake holds %d credentials, want %d", got, want)
 }
@@ -247,14 +248,14 @@ func assertUpstream(t *testing.T, tc e2eCase, want int) {
 //
 // Returns the updated upstream count, since a served read mints and a refused one must
 // not.
-func assertCredentialKindPin(t *testing.T, c *cluster, tc e2eCase, mount string,
+func assertCredentialKindPin(t *testing.T, c *baotest.Cluster, tc e2eCase, mount string,
 	issued *api.Secret, want int,
 ) int {
 	t.Helper()
 	kind := str(t, nested(t, issued.Data, "metadata"), "credential_kind")
 
 	// Pinning what this role serves must be served — and must be the same shape.
-	pinned := c.readWithData(mount+"/"+issuePath, map[string][]string{"credential_kind": {kind}})
+	pinned := c.ReadWithData(mount+"/"+issuePath, map[string][]string{"credential_kind": {kind}})
 	want++
 	if got := str(t, nested(t, pinned.Data, "metadata"), "credential_kind"); got != kind {
 		t.Errorf("a read pinned to %q returned credential_kind %q", kind, got)
@@ -268,7 +269,7 @@ func assertCredentialKindPin(t *testing.T, c *cluster, tc e2eCase, mount string,
 	if kind == wrong {
 		wrong = "oauth2_bearer"
 	}
-	err := c.readExpectingError(mount+"/"+issuePath, map[string][]string{"credential_kind": {wrong}})
+	err := c.ReadExpectingError(mount+"/"+issuePath, map[string][]string{"credential_kind": {wrong}})
 	if !strings.Contains(err.Error(), string(credenvelope.ErrCredentialKindUnsupported)) {
 		t.Errorf("a refused pin reported %v, which does not carry %q — a client that can parse "+
 			"another shape has no way to know it should ask for one",

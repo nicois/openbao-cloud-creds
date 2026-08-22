@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // Paths inside a mount. Uniform across the plugins by design (CLAUDE.md), so a
@@ -126,3 +127,13 @@ func keys(data map[string]interface{}) string {
 	}
 	return fmt.Sprintf("%v", names)
 }
+
+// upstreamPollInterval paces the wait for a fake's count to settle: the plugin's HTTP
+// call to the fake completes asynchronously with respect to the client's response, so
+// the assertion polls rather than reading once.
+const upstreamPollInterval = 250 * time.Millisecond
+
+// modulePrefix is this module path's root, used to name the Go package each plugin
+// binary is built from. It lives here rather than in pkg/baotest because the harness
+// must not assume it is being used from this repository.
+const modulePrefix = "github.com/nicois/openbao-cloud-creds"

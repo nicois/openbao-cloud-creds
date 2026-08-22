@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/baotest"
 )
 
 // e2eCase is one cloud's translation of the shared end-to-end scenario: the
@@ -80,13 +82,19 @@ var registry = []e2ePlugin{
 // TestE2E drives every registered, non-skipped plugin through the full scenario
 // against one live dev server.
 func TestE2E(t *testing.T) {
-	driven := make([]string, 0, len(registry))
+	// The package to build is named here rather than derived inside the harness, so a
+	// caller in another repository (or another module path) supplies its own.
+	driven := make([]baotest.Plugin, 0, len(registry))
 	for _, p := range registry {
 		if p.Skip == "" {
-			driven = append(driven, pluginBinary(p.Cloud))
+			name := pluginBinary(p.Cloud)
+			driven = append(driven, baotest.Plugin{
+				Name:    name,
+				Package: modulePrefix + "/plugins/" + name + "/cmd",
+			})
 		}
 	}
-	cluster := startCluster(t, driven...)
+	cluster := baotest.Start(t, driven...)
 
 	for _, p := range registry {
 		if p.Skip != "" {

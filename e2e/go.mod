@@ -28,6 +28,7 @@ require (
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-testing-interface v1.14.2-0.20210821155943-2d9075ca8770 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/baotest v0.0.0
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/openbao/go-kms-wrapping/v2 v2.8.0 // indirect
 	github.com/openbao/openbao/sdk/v2 v2.6.2 // indirect
@@ -63,40 +64,4 @@ require (
 
 replace github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../pkg/credenvelope
 
-replace github.com/nicois/openbao-cloud-creds/pkg/capability => ../pkg/capability
-
-replace github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../pkg/cloudconfig
-
-replace github.com/nicois/openbao-cloud-creds/pkg/localexpiry => ../pkg/localexpiry
-
-replace github.com/nicois/openbao-cloud-creds/pkg/mintledger => ../pkg/mintledger
-
-replace github.com/nicois/openbao-cloud-creds/pkg/plugintest => ../pkg/plugintest
-
-replace github.com/nicois/openbao-cloud-creds/pkg/reconciler => ../pkg/reconciler
-
-replace github.com/nicois/openbao-cloud-creds/pkg/recovery => ../pkg/recovery
-
-replace github.com/nicois/openbao-cloud-creds/pkg/telemetry => ../pkg/telemetry
-
-replace github.com/nicois/openbao-cloud-creds/pkg/worker => ../pkg/worker
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-akamai => ../plugins/credential-akamai
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-aws => ../plugins/credential-aws
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-azure => ../plugins/credential-azure
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-do => ../plugins/credential-do
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-exoscale => ../plugins/credential-exoscale
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-gcp => ../plugins/credential-gcp
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-oci => ../plugins/credential-oci
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-ovh => ../plugins/credential-ovh
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-upcloud => ../plugins/credential-upcloud
-
-replace github.com/nicois/openbao-cloud-creds/plugins/credential-vultr => ../plugins/credential-vultr
+replace github.com/nicois/openbao-cloud-creds/pkg/baotest => ../pkg/baotest

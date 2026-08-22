@@ -280,3 +280,34 @@ invisible to every pre-existing test and were found within an hour of the `e2e/`
 layer existing. The third (G3) was found by reading what the new layer *could not*
 reach. That is the argument for keeping all three layers rather than treating the
 conformance table as sufficient.
+
+## The harness is importable (2026-08-23)
+
+The live-server harness now lives in **`pkg/baotest`** as an ordinary package, and
+`e2e/` is a consumer of it. Before, all of it was in `e2e/`'s `_test.go` files, which
+means no other module could reach it — including a separate repository holding a plugin
+that has to satisfy the same contract.
+
+That matters because a harness which cannot be imported gets copied, and a copy
+diverges silently. It is the same reason the conformance suites live in
+`pkg/plugintest` rather than in `conformance/`.
+
+What an external consumer needs:
+
+| Want | Import | Internal deps to `replace` |
+|---|---|---|
+| The eight conformance categories | `pkg/plugintest` | `pkg/credenvelope` |
+| The ten cloud fakes | `pkg/credenvelope/fakes` | (part of the `credenvelope` module) |
+| A live OpenBao with plugin binaries | `pkg/baotest` | none (only the OpenBao API) |
+
+`baotest.Plugin` names the **Go package** to build rather than deriving it from this
+repo's module path, so a caller in another module builds its own binary. `Cluster`
+exposes `Client()` deliberately: the lease APIs (`Sys().Lookup/Renew/Revoke`) are the
+point of the layer, and wrapping each would add nothing.
+
+Note the Go rule this depends on: a `replace` in a *dependency's* go.mod is ignored —
+only the main module's replaces count. This repo has no published tags, so a consumer
+must `require` **and** `replace` every internal module in the transitive graph. The
+inert replaces have been removed from every module's go.mod (321 of them, none matching
+a require), so what remains is an honest statement of what each module actually needs:
+`pkg/plugintest` needs exactly one.

@@ -5,6 +5,7 @@ toolchain go1.26.6
 use (
 	./conformance
 	./e2e
+	./pkg/baotest
 	./pkg/capability
 	./pkg/cloudconfig
 	./pkg/credenvelope
