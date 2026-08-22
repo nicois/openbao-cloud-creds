@@ -20,18 +20,19 @@ plugins/<x>/*_test  only what is true of <x> alone.
 
 `pkg/plugintest` must never import a plugin (that would be an import cycle, since every plugin imports `pkg/plugintest`). The `conformance/` module is where the two meet; it is test-only, so plugin-module isolation still holds.
 
-## The seven categories
+## The eight categories
 
 `plugintest.AllCategories()` is the list. Each is one shared suite over one `Harness`:
 
 | Category | What it protects |
 |---|---|
-| `reload` | config written by `pathConfigWrite` is re-read by `Factory`, and `InitializeFunc` rehydrates + starts workers idempotently (KI-001, KI-007) |
-| `lease` | the response envelope and the lease core acts on agree — renewability and TTL — and `internal_data` survives JSON (KI-008) |
+| `reload` | config written by `pathConfigWrite` is re-read by `Factory`, `InitializeFunc` rehydrates + starts workers idempotently (KI-001, KI-007), and a persisted minter set that is invalid or from a newer schema is refused rather than loaded fail-open (A29, A30) |
+| `lease` | the response envelope and the lease core acts on agree — renewability and TTL — `internal_data` survives JSON (KI-008), and the declared `SecretType`/`LeaseInternalDataKeys`/`CredentialKeys`/`ScopeKind` are what the plugin actually emits (A28, A30) |
 | `perturbation` | a lease survives its minter disappearing mid-life (KI-002 class) |
-| `revoke` | revoke is idempotent; a second revoke is a clean no-op |
-| `capability` | the mint-then-delete probe rejects an incapable minter at *write* time, leaves no residue, respects `verify_minter_capability=false`, and skips disabled roles |
-| `reconciler-safety` | the reconciler never touches an entity outside the owner-tag scheme, and `dry_run` deletes nothing |
+| `revoke` | revoke is idempotent; a second revoke is a clean no-op; and a revoke that *cannot* succeed (an `internal_data` key a newer binary renamed) releases the lease instead of retrying forever |
+| `capability` | the mint-then-delete probe rejects an incapable minter at *write* time, leaves no residue, respects `verify_minter_capability=false`, skips disabled roles, reuses a recent verdict rather than re-minting, and is refused while the cloud is throttling us (A29) |
+| `minter-visibility` | a minter's recovery state is durable and readable from the minter-set endpoint, so an operator can see WHICH minter is failing (A25, A27) |
+| `reconciler-safety` | the reconciler never touches an entity outside the owner-tag scheme, `dry_run` deletes nothing, two mounts sharing one cloud account never reclaim each other's live credentials (A19), and `/reconcile` answers in the one uniform schema (A28) |
 | `error-taxonomy` | every error a client can receive carries a code from `credenvelope.AllCodes()`, and the code says what the client should *do* |
 
 `error-taxonomy` is the second category **no cloud may opt out of** (its `requires`
