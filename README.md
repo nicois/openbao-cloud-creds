@@ -60,7 +60,7 @@ bao write cloud-creds/<cloud>/roles/<role> minter_set=<set> <role fields>
 
 Minters live in named **minter sets**, not in `config`. Every role is bound to a required `minter_set` and mints only from that set's credentials — the isolation boundary for least-privilege and audit provenance. Each issued credential records its `minter_set` and `minter_id` in the response envelope metadata (`api_version` 2). Each set must independently satisfy the minter-validation rule (at least one `never_expires` minter, or at least two with ≥7-day expiry separation) — evaluated over the set's **active** (non-retired) minters.
 
-The `config` endpoint's operational fields include `flush_interval`, `reconcile_cadence`, `max_deletes_per_pass`, `minter_expiry_warn` (the near-expiry warning threshold, default 7 days), `minter_retire_grace` (how long a rotated-out minter stays usable before deletion, default 7 days — see below), and `verify_minter_capability` (default **true** — see below).
+The `config` endpoint's operational fields include `reconcile_cadence`, `max_deletes_per_pass`, `minter_expiry_warn` (the near-expiry warning threshold, default 7 days), `minter_retire_grace` (how long a rotated-out minter stays usable before deletion, default 7 days — see below), `verify_minter_capability` (default **true** — see below), and `capability_cache_ttl` (how long a successful capability probe stands in for a fresh one, default 1h; 0 re-probes on every write). `minter_retire_grace` is **refused** on DO/OVH/Vultr/OCI, where minters cannot self-rotate and nothing is ever retired.
 
 ### Minter capability is verified, not assumed
 
