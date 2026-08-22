@@ -1,10 +1,12 @@
 name: CI
 
+# Every branch, not just main. The branch carrying the capability probes, the
+# conformance layer, the e2e layer and minter rotation had never been through CI at
+# all — main's last run predated all of it (A21 in docs/audit-2026-08-22.md).
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -14,7 +16,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.3'
+          go-version: '1.26.6'
 
       - name: Build
         run: go build github.com/nicois/openbao-cloud-creds/...
@@ -42,6 +44,18 @@ jobs:
       - name: Lint
         run: make lint
 
+      # A module that does not build without the workspace cannot be consumed by
+      # anyone outside this checkout — `go install .../cmd@tag`, a fork building one
+      # plugin, or a per-module SBOM or licence scan. Eight of ten plugins were in
+      # that state (A20).
+      - name: Build every module standalone
+        run: make build-standalone
+
+      # Prove the release path works and produces hashes, so the instruction in
+      # README's Installing section cannot rot.
+      - name: Release artifacts
+        run: make dist
+
   govulncheck:
     runs-on: ubuntu-latest
     steps:
@@ -49,21 +63,27 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.3'
+          go-version: '1.26.6'
 
+      # Pinned. This tool decides the security verdict, and it was the only @latest
+      # in the workflow — so the verdict could change without a commit here.
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
-      - name: Run govulncheck (per module)
+      # The module list is DERIVED from go.work. This step used to keep a third
+      # hardcoded copy, which had already drifted: it omitted pkg/capability — the
+      # package that gates every configuration write — plus conformance and e2e.
+      - name: Run govulncheck (per module, scanned standalone)
         run: |
-          for dir in pkg/credenvelope pkg/recovery pkg/metrics pkg/reconciler pkg/cloudconfig pkg/localexpiry pkg/worker pkg/plugintest pkg/telemetry pkg/metricspath \
-                     plugins/credential-akamai plugins/credential-aws plugins/credential-azure \
-                     plugins/credential-do plugins/credential-exoscale plugins/credential-gcp \
-                     plugins/credential-oci plugins/credential-ovh plugins/credential-upcloud \
-                     plugins/credential-vultr; do
+          fail=0
+          for dir in $(sed -n 's|^[[:space:]]*\./||p' go.work); do
             echo "=== govulncheck $dir ==="
-            (cd "$dir" && govulncheck ./...)
+            # GOWORK=off so each module is scanned as a CONSUMER sees it. Under the
+            # workspace, MVS raises versions across every module at once, which hid a
+            # finding that is real for anyone building one module on its own (A20).
+            (cd "$dir" && GOWORK=off govulncheck ./...) || fail=1
           done
+          exit $fail
 
   registration-smoke-test:
     runs-on: ubuntu-latest
@@ -72,15 +92,21 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.3'
+          go-version: '1.26.6'
 
       - name: Install OpenBao
         run: |
           # Release assets are named openbao_<ver>_linux_amd64.deb (not bao_…),
           # and v2.5.3 shipped no .deb (404). Use 2.5.4 (matches the spike cluster).
           BAO_VERSION=2.5.4
-          curl -fsSL -o /tmp/bao.deb \
-            "https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}/openbao_${BAO_VERSION}_linux_amd64.deb"
+          base="https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}"
+          curl -fsSL -o /tmp/bao.deb "${base}/openbao_${BAO_VERSION}_linux_amd64.deb"
+          # Verify before installing. This was an unverified `dpkg -i` of a remote
+          # package into the job that then builds and tests the plugins (A21).
+          curl -fsSL -o /tmp/bao.sums "${base}/openbao_${BAO_VERSION}_SHA256SUMS"
+          ( cd /tmp && grep "openbao_${BAO_VERSION}_linux_amd64.deb$" bao.sums | sed 's|  .*/|  |' > bao.deb.sum \
+            && sed -i "s|openbao_${BAO_VERSION}_linux_amd64.deb|bao.deb|" bao.deb.sum \
+            && sha256sum -c bao.deb.sum )
           sudo dpkg -i /tmp/bao.deb
           bao version
 

@@ -29,3 +29,4 @@ go.sum.bak
 
 # Superpowers worktrees / local agent scratch
 .claude/
+dist/

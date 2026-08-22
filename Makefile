@@ -18,10 +18,32 @@ TAGGED_LINT_TARGETS := e2e:e2e plugins/credential-do:cloud_real plugins/credenti
 E2E_BUILD_TAG := e2e
 CLOUD_REAL_BUILD_TAG := cloud_real
 
-.PHONY: build test test-conformance test-e2e test-cloud-real-do test-cloud-real-aws lint fmt clean smoke-test
+.PHONY: build build-standalone dist test test-conformance test-e2e test-cloud-real-do test-cloud-real-aws lint fmt clean smoke-test
 
 build:
 	go build $(MODULE_PREFIX)/...
+
+# Every module must build WITHOUT the workspace, because that is how anyone who is
+# not standing in this checkout consumes it: `go install .../cmd@<tag>`, a fork
+# building one plugin, or a per-module SCA or licence scan. None of that worked —
+# eight of ten plugins declared none of the sibling pkg/ modules they import, three
+# had no go.sum at all, and a build-tagged TEST module was silently raising the
+# shipped binaries' dependency versions through workspace MVS, so a binary's
+# dependency set existed in no single file (A20 in docs/audit-2026-08-22.md).
+build-standalone:
+	@fail=0; for dir in $(LINT_DIRS) e2e; do 		printf '%-34s ' "$$dir"; 		if (cd $$dir && GOWORK=off go build ./... >/dev/null 2>&1); then echo ok; 		else echo FAILS; fail=1; fi; 	done; 	if [ $$fail -ne 0 ]; then 		echo; echo "A module that does not build standalone cannot be consumed outside this"; 		echo "checkout. Fix its go.mod (require + replace for each sibling) and go.sum."; 		exit 1; 	fi
+
+# Build every plugin as a verifiable artifact and publish the hashes an operator must
+# check before `bao plugin register -sha256=...`. There was no release target at all,
+# `make build` produced no artifact, and the README never told anyone to verify one —
+# for a secrets engine holding long-lived cloud minter credentials, that was the most
+# consequential missing instruction in the repo (A20).
+dist:
+	@rm -rf dist && mkdir -p dist
+	@for plugin in $(PLUGIN_DIRS); do 		echo "building $$plugin"; 		CGO_ENABLED=0 go build -trimpath -buildvcs=true 			-o dist/$$plugin $(MODULE_PREFIX)/plugins/$$plugin/cmd || exit 1; 	done
+	@cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+	@echo
+	@echo "Register with:  bao plugin register -sha256=<hash from SHA256SUMS> secret <name>"
 
 test:
 	go test $(MODULE_PREFIX)/...

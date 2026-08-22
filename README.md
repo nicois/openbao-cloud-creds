@@ -83,6 +83,31 @@ The long-lived minter credentials are the highest-value secrets at rest, so the 
 - **Observability.** On the health-check cadence each plugin emits `cloud_creds_minter_age_seconds` for **every** minter (including `never_expires` ones, which otherwise carry no lifetime signal), and logs a `minter nearing expiry` warning when an expiring minter is within `minter_expiry_warn` of its expiry.
 - **Self-rotation.** `bao write cloud-creds/<cloud>/minter-sets/<set>/rotate minter_id=<id>` mints a successor minter (a new long-lived credential of the same kind, itself mint-capable), health-checks it, **capability-probes it against every role bound to the set**, and only then swaps it into the set and marks the old minter *retired*. The old credential is **not** deleted immediately: it stays upstream-alive for `minter_retire_grace` (default 7 days) so other nodes in a raft cluster — which cache the minter set in memory until they reload — keep working; a background sweep deletes the old upstream credential once the grace elapses. A retired minter is excluded from new issuance and from set validation the moment it is retired. Rotation is refused up front if retiring the chosen minter would leave the set unable to validate. Supported on the clouds marked ✅ above; the rest reject with a clear message.
 
+## Installing
+
+Build verifiable artifacts and the hashes to check them against:
+
+```bash
+make dist            # builds every plugin into dist/ with -trimpath, plus SHA256SUMS
+```
+
+Then register each plugin with its hash. OpenBao refuses to run a plugin whose hash
+does not match, which is what makes the rest of the security model meaningful:
+
+```bash
+cp dist/credential-aws "$BAO_PLUGIN_DIR/"
+bao plugin register -sha256=$(grep credential-aws dist/SHA256SUMS | cut -d' ' -f1) \
+    -command=credential-aws secret cloud-creds-aws
+bao secrets enable -path=cloud-creds/aws cloud-creds-aws
+```
+
+Every module also builds without the Go workspace (`make build-standalone`), so a
+single plugin can be built or scanned in isolation — `go install` of one plugin's
+`cmd` works, and a per-module SBOM or licence scan sees a complete dependency set.
+
+Reporting security issues: [`SECURITY.md`](SECURITY.md). Third-party licences:
+[`NOTICE`](NOTICE).
+
 ## Build and test
 
 ```bash
@@ -93,6 +118,8 @@ make test-e2e                                          # plugin binaries in a li
 make smoke-test                                        # register every plugin in a live OpenBao dev server
 make test-cloud-real-do                                # REAL DigitalOcean API: creates and deletes real PATs (opt-in)
 make test-cloud-real-aws                               # REAL AWS STS: assume-role mints against a real account (opt-in, $0)
+make build-standalone                                  # every module builds without the workspace
+make dist                                              # release artifacts + SHA256SUMS
 make lint                                              # golangci-lint v2 across all modules
 ```
 

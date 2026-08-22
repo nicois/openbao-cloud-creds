@@ -1,5 +1,7 @@
 go 1.26.1
 
+toolchain go1.26.6
+
 use (
 	./conformance
 	./e2e
@@ -8,8 +10,8 @@ use (
 	./pkg/credenvelope
 	./pkg/localexpiry
 	./pkg/metrics
-	./pkg/mintledger
 	./pkg/metricspath
+	./pkg/mintledger
 	./pkg/plugintest
 	./pkg/reconciler
 	./pkg/recovery
