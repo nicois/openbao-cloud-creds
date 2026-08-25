@@ -75,6 +75,20 @@ table, expiration manager, plugin lifecycle, core-assigned `req.ID`). Both live
 defects it found — workers never starting on a rehydrated backend, and the
 renewability lie above — were invisible to every in-process test.
 
+The scenario itself is **`baotest.RunScenario`** in
+[`pkg/baotest/scenario.go`](pkg/baotest/scenario.go), not in this module. `e2e/` is a
+registry plus nine per-cloud vocabulary files, each returning a `baotest.Case`: the
+three write bodies, the TTL and renewability contract, whether revoke is hard, and a
+`func() int` reading the fake's count. `Case` is to this layer exactly what
+`plugintest.Harness` is to conformance.
+
+Adding a cloud therefore means writing a `Case`, never writing assertions. If you find
+yourself adding an assertion to a case file, it belongs in `pkg/baotest/scenario.go`
+where all eight consumers get it — the reason it moved there is that a second
+repository wrote its own version and quietly omitted a third of the checks
+([`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md), "The scenario
+is importable too").
+
 Rules of thumb:
 
 - **An invariant that can be expressed in-process belongs in `pkg/plugintest`,

@@ -10,42 +10,6 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/baotest"
 )
 
-// e2eCase is one cloud's translation of the shared end-to-end scenario: the
-// three configuration writes, what the resulting lease must look like, and how
-// to see the upstream side of it. It is the e2e analogue of
-// plugintest.Harness — a translation, not a second implementation.
-type e2eCase struct {
-	// Cloud is the plugin's cloud name; the mount path and binary name derive
-	// from it.
-	Cloud string
-
-	// Config, MinterSet and Role are the three writes, in that order. Config
-	// must point the plugin at this case's fake.
-	Config    map[string]interface{}
-	MinterSet map[string]interface{}
-	Role      map[string]interface{}
-
-	// TTLSeconds is the role's default TTL, and therefore the lease duration
-	// OpenBao must report. A mismatch means the plugin did not set
-	// resp.Secret.TTL, or core clamped it against a mount/system max.
-	TTLSeconds int
-
-	// Renewable is the cloud's renewability contract (docs/ttl-semantics.md):
-	// false wherever the credential's expiry is fixed at mint. It is asserted
-	// against the LEASE, which is what a client acts on, and against the
-	// envelope's own renewable field, which must agree.
-	Renewable bool
-
-	// HardRevoke is true when lease revocation must delete the upstream
-	// credential, so the fake's count must fall back.
-	HardRevoke bool
-
-	// Upstream reports how many credentials the fake currently holds. On the
-	// clouds whose credentials cannot be revoked it is a monotonic count of
-	// mints instead; HardRevoke says which.
-	Upstream func() int
-}
-
 // e2ePlugin is a registry row: either a case constructor or a declared reason
 // the cloud cannot be driven end-to-end. Exactly one, never both.
 type e2ePlugin struct {
@@ -101,7 +65,7 @@ func TestE2E(t *testing.T) {
 			continue
 		}
 		t.Run(p.Cloud, func(t *testing.T) {
-			runCase(t, cluster, p)
+			baotest.RunScenario(t, cluster, p.New(t))
 		})
 	}
 }

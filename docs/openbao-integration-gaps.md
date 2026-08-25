@@ -298,7 +298,35 @@ What an external consumer needs:
 |---|---|---|
 | The eight conformance categories | `pkg/plugintest` | `pkg/credenvelope` |
 | The ten cloud fakes | `pkg/credenvelope/fakes` | (part of the `credenvelope` module) |
-| A live OpenBao with plugin binaries | `pkg/baotest` | none (only the OpenBao API) |
+| A live OpenBao with plugin binaries | `pkg/baotest` | `pkg/credenvelope` |
+| The end-to-end **scenario** itself | `pkg/baotest` (`Case`, `RunScenario`) | `pkg/credenvelope` |
+
+## The scenario is importable too (2026-08-25)
+
+The harness (start a server, register a plugin, enable a mount) moved first; the
+**scenario** — the order of the writes and every assertion over the result — followed,
+as `baotest.Case` + `baotest.RunScenario`. `e2e/` is now nine per-cloud vocabulary files
+plus a registry, and `e2e/suite_test.go` is gone.
+
+The reason is the one the first move predicted, observed rather than reasoned about. A
+separate repository wired its own end-to-end test against the same contract and asserted
+six properties: the lease exists and has the right duration and renewability, the
+envelope's api_version/credential_kind/minter_id, distinct credential ids, the shape
+pin, revoke lowering the upstream count, and a reload still issuing. It silently omitted
+the rest — that the expiration manager actually **knows** the lease (`Sys().Lookup`),
+that a **second** revoke is a clean no-op (KI-002 was precisely this wedging forever),
+that the envelope's `renewable` **agrees with the lease's**, that `expires_at` survives
+as parseable RFC3339 and is in the future, that the role's `minter_set` reads back after
+a reload, and that a refused shape pin does not mint. Nothing about it looked
+incomplete; it passed.
+
+`Case` is to this layer what `plugintest.Harness` is to conformance: a translation, not
+a second implementation. It carries the three write bodies, the TTL and renewability
+contract, whether revoke is hard, and a `func() int` to read the fake's count. Two
+fields exist for what varies beyond a cloud's vocabulary: `Mount`/`Binary` (a separate
+repository need not follow `cloud-creds/<cloud>` or `credential-<cloud>`) and
+`GrantedTTLSeconds` (for an upstream that answers with a lifetime of its own rather than
+the one requested — the AWS lesson, now assertable at this layer).
 
 `baotest.Plugin` names the **Go package** to build rather than deriving it from this
 repo's module path, so a caller in another module builds its own binary. `Cluster`
