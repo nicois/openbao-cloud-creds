@@ -6,6 +6,8 @@ use (
 	./pkg/baotest
 	./pkg/capability
 	./pkg/cloudconfig
+	./pkg/cloudhttp
+	./pkg/cloudreal
 	./pkg/credenvelope
 	./pkg/localexpiry
 	./pkg/ownertag
@@ -14,6 +16,7 @@ use (
 	./pkg/reconciler
 	./pkg/recovery
 	./pkg/telemetry
+	./pkg/totp
 	./pkg/worker
 	./plugins/credential-akamai
 	./plugins/credential-aws
