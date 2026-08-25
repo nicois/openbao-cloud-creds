@@ -1,8 +1,6 @@
 module github.com/nicois/openbao-cloud-creds/pkg/cloudconfig
 
-go 1.26.1
-
-toolchain go1.26.6
+go 1.27.0
 
 require github.com/openbao/openbao/sdk/v2 v2.6.2
 
@@ -56,4 +54,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-

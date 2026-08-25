@@ -73,7 +73,7 @@ go build github.com/nicois/openbao-cloud-creds/...        # Go workspace; full m
 go test -race github.com/nicois/openbao-cloud-creds/...
 make test-conformance  # shared test categories × all ten plugins + the cloud × category matrix
 make test-e2e      # plugin binaries in a live OpenBao, full lease lifecycle over HTTP (needs `bao` on PATH)
-make lint          # golangci-lint v2 (pinned v2.12.2) across every module, incl. a --build-tags=e2e pass
+make lint          # golangci-lint v2 (pinned v2.13.1) across every module, incl. a --build-tags=e2e pass
 make smoke-test    # register/enable each plugin in a live OpenBao dev server (needs `bao` on PATH)
 make test-cloud-real-do  # the REAL DigitalOcean API with a real PAT (opt-in, disposable account); the only cloud_real test that exists
 ```

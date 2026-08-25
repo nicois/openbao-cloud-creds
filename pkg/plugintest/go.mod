@@ -1,8 +1,6 @@
 module github.com/nicois/openbao-cloud-creds/pkg/plugintest
 
-go 1.26.1
-
-toolchain go1.26.6
+go 1.27.0
 
 require (
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
@@ -61,4 +59,3 @@ require (
 )
 
 replace github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../credenvelope
-

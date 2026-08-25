@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.0'
 
       - name: Build
         run: go build github.com/nicois/openbao-cloud-creds/...
@@ -33,9 +33,15 @@ jobs:
       - name: Install golangci-lint
         run: |
           # Pin install.sh to the release tag, NOT master: the moving master
-          # script verified the v2.12.2 tarball against the .sbom.json checksum
-          # (asset-layout drift), failing with a spurious hash mismatch.
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.12.2/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
+          # script verified a tarball against the .sbom.json checksum (asset-layout
+          # drift), failing with a spurious hash mismatch.
+          #
+          # The version must be built with a Go at least as new as the stdlib it
+          # parses. v2.12.2 cannot lint a Go 1.27 stdlib at all: its type checker
+          # refuses the newer files outright, and rebuilding it locally only moves
+          # the failure into staticcheck's IR builder, which panics on an AST form
+          # in internal/poll. That is why this pin moves with the Go pin above.
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.13.1/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.13.1
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       # Delegated to the Makefile deliberately: this step used to carry its own
@@ -63,7 +69,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.0'
 
       # Pinned. This tool decides the security verdict, and it was the only @latest
       # in the workflow — so the verdict could change without a commit here.
@@ -92,7 +98,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.0'
 
       - name: Install OpenBao
         run: |

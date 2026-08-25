@@ -99,7 +99,7 @@ The repo adopted a deliberately strict `.golangci.yml` (v2, ~20 linters:
 complexity — gocyclo/gocognit/cyclop/funlen/nestif/maintidx; magic-numbers and
 repeated-literals — mnd/goconst; duplication — dupl/gocritic; dead/comment-rot —
 unused/unparam/ineffassign/wastedassign/godox/godot/predeclared; plus a tuned
-revive ruleset), pinned to golangci-lint v2.12.2 and run per-module in CI.
+revive ruleset), pinned to golangci-lint v2.13.1 and run per-module in CI.
 
 Decision: enforce it across every module with zero `//nolint` suppressions.
 Rationale: with one plugin per cloud and ten near-parallel plugins, the failure

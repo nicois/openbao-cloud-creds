@@ -1,8 +1,6 @@
 module github.com/nicois/openbao-cloud-creds/pkg/localexpiry
 
-go 1.26.1
-
-toolchain go1.26.6
+go 1.27.0
 
 require (
 	github.com/hashicorp/go-hclog v1.6.3
@@ -58,4 +56,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-

@@ -78,7 +78,7 @@ make test-conformance  # the cloud × category matrix + the shared suites over a
 make test-e2e      # plugin binaries in a live OpenBao, driven over HTTP through the lease lifecycle (needs `bao`)
 make test-cloud-real-do  # calls the REAL DigitalOcean API and creates/deletes real PATs (needs CLOUDREAL_DO_TOKEN + a disposable account)
 make test-cloud-real-aws # calls the REAL AWS STS API (needs CLOUDREAL_AWS_KEY=id:secret + CLOUDREAL_AWS_ROLE_ARN); $0, nothing to clean up — STS sessions expire on their own
-make lint          # golangci-lint v2 (pinned v2.12.2) across every module — config in .golangci.yml; plus a tagged pass (e2e, cloud_real) over TAGGED_LINT_TARGETS (a tagged surface is invisible to plain lint)
+make lint          # golangci-lint v2 (pinned v2.13.1) across every module — config in .golangci.yml; plus a tagged pass (e2e, cloud_real) over TAGGED_LINT_TARGETS (a tagged surface is invisible to plain lint)
 make smoke-test    # build each plugin + register/enable in a live OpenBao dev server (needs `bao` on PATH)
 ```
 
@@ -86,7 +86,7 @@ make smoke-test    # build each plugin + register/enable in a live OpenBao dev s
 
 ## Conventions
 
-- Go 1.26.1 (workspace `go.work` + per-module `go.mod`)
+- Go 1.27.0 (workspace `go.work` + per-module `go.mod`)
 - One plugin = one Go module under `plugins/<name>/`
 - Shared code under `pkg/` — plugins import; never the other way around. Genuinely-identical helper bodies are extracted into focused `pkg/` packages with cloud identity passed as a parameter (e.g. `pkg/telemetry` for metric emitters, `pkg/metricspath` for the metrics query endpoints, `pkg/localexpiry` for no-revoke local-entry pruning), preserving per-plugin module isolation — never collapse the plugin modules themselves
 - Each plugin keeps a `consts.go` defining its `cloudName`, `metricNamespace`, and field-name constants (`fieldCloud`/`fieldRole`/`fieldMinterSet`/…); HTTP status codes use `net/http` constants and TTL/duration values are named consts (no magic numbers/literals — enforced by lint)

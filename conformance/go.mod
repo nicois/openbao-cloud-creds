@@ -1,12 +1,11 @@
 module github.com/nicois/openbao-cloud-creds/conformance
 
-go 1.26.1
-
-toolchain go1.26.6
+go 1.27.0
 
 require (
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/mintledger v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/plugintest v0.0.0
 	github.com/nicois/openbao-cloud-creds/plugins/credential-akamai v0.0.0
 	github.com/nicois/openbao-cloud-creds/plugins/credential-aws v0.0.0
@@ -128,3 +127,5 @@ replace github.com/nicois/openbao-cloud-creds/pkg/recovery => ../pkg/recovery
 replace github.com/nicois/openbao-cloud-creds/pkg/telemetry => ../pkg/telemetry
 
 replace github.com/nicois/openbao-cloud-creds/pkg/worker => ../pkg/worker
+
+replace github.com/nicois/openbao-cloud-creds/pkg/ownertag => ../pkg/ownertag

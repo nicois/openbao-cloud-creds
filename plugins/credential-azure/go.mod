@@ -1,12 +1,18 @@
 module github.com/nicois/openbao-cloud-creds/plugins/credential-azure
 
-go 1.26.1
-
-toolchain go1.26.6
+go 1.27.0
 
 require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-metrics v0.5.4
+	github.com/nicois/openbao-cloud-creds/pkg/capability v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/worker v0.0.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
 
@@ -23,6 +29,7 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
+	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-plugin v1.8.0 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
@@ -32,6 +39,7 @@ require (
 	github.com/hashicorp/go-sockaddr v1.0.7 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
+	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
@@ -56,19 +64,6 @@ require (
 	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-)
-
-require (
-	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
-	github.com/hashicorp/golang-lru v0.5.4 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/capability v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/worker v0.0.0
 )
 
 replace github.com/nicois/openbao-cloud-creds/pkg/capability => ../../pkg/capability

@@ -1,8 +1,6 @@
 module github.com/nicois/openbao-cloud-creds/pkg/capability
 
-go 1.26.1
-
-toolchain go1.26.6
+go 1.27.0
 
 require (
 	github.com/hashicorp/go-hclog v1.6.3
@@ -67,4 +65,3 @@ replace github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../cloudconfig
 replace github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../credenvelope
 
 replace github.com/nicois/openbao-cloud-creds/pkg/recovery => ../recovery
-
