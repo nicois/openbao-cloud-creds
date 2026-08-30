@@ -13,6 +13,19 @@
 // REFUSES IPv6 rather than merely deprioritising it, which is what "pinned" has to mean when an
 // allowlist is involved.
 //
+// The two knobs are not independent, and it is worth knowing which one is doing the work. With a
+// proxy set, ForceIPv4 pins only the hop TO the proxy; the address an allowlist actually sees is
+// the proxy's own egress, which this client cannot influence. So setting both is harmless and
+// slightly redundant rather than belt-and-braces.
+//
+// A SOCKS5 proxy is often the only route available: where an API is gated on an allowlist, a host
+// that is not itself allowlisted cannot reach it any other way — including every developer
+// machine, which makes the proxy the only way to exercise such an API by hand. socks5_test.go
+// therefore drives a real handshake against a real (if minimal) proxy, and pins the property that
+// decides where DNS happens: net/http sends the destination as a HOSTNAME, so the proxy resolves
+// it. That is what makes routing through an allowlisted address work when local DNS differs, and
+// it is a property of net/http rather than of this package — hence a test rather than a comment.
+//
 // # Cookie jar
 //
 // For an API that authenticates with a session rather than a header. Go's default http.Client
