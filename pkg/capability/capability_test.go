@@ -132,3 +132,51 @@ func TestProbeName_IsOwnerTaggedAndUnique(t *testing.T) {
 		t.Fatalf("probe names collided: %q", first)
 	}
 }
+
+// TestAnOperatorHintSurvivesRedaction pins the exception to the redaction rule. The rule is
+// load-bearing — a probe's upstream text can name another tenant's resources and the same probe
+// runs on a credential read (A4) — but it was also swallowing the plugin's OWN conclusion, which
+// is the only actionable thing in some failures.
+//
+// The case that proved it: DigitalOcean answers a fenced mint with "You are not authorized to
+// perform this operation", which sends an operator hunting for a privilege that does not exist.
+// credential-do has said so in a hint since 2026-08-21 and every word was being dropped.
+func TestAnOperatorHintSurvivesRedaction(t *testing.T) {
+	const hint = "no privilege changes this; the endpoint is fenced"
+	const upstreamText = "secret-bearing upstream body naming another tenant"
+
+	failure := &Failure{
+		Minter: "minter-1",
+		Roles:  []string{"reader"},
+		Err:    WithHint(hint, errors.New(upstreamText)),
+	}
+
+	message := failure.ClientMessage()
+	if !strings.Contains(message, hint) {
+		t.Errorf("the operator hint was redacted along with the upstream text, leaving the "+
+			"caller nothing to act on: %s", message)
+	}
+	// The exception must not become a hole: upstream text still must not reach a client.
+	if strings.Contains(message, upstreamText) {
+		t.Errorf("the upstream's own error text reached the client response: %s", message)
+	}
+	// And the full error — the one that goes to the log — keeps both.
+	if !strings.Contains(failure.Error(), upstreamText) {
+		t.Errorf("the log rendering lost the upstream text, which is the only place it belongs: %s",
+			failure.Error())
+	}
+}
+
+// TestAFailureWithoutAHintIsUnchanged: the vast majority of probe failures carry no hint, and
+// their message must not grow a stray separator or an empty clause.
+func TestAFailureWithoutAHintIsUnchanged(t *testing.T) {
+	failure := &Failure{
+		Minter: "minter-1", Roles: []string{"reader"}, Err: errors.New("403 Forbidden"),
+	}
+	if got := failure.ClientMessage(); strings.HasSuffix(got, ". ") || strings.Contains(got, "..") {
+		t.Errorf("a hintless failure rendered with a dangling separator: %q", got)
+	}
+	if HintFor(failure.Err) != "" {
+		t.Error("HintFor invented a hint for an error that carries none")
+	}
+}

@@ -111,11 +111,73 @@ func (f *Failure) Error() string {
 func (f *Failure) Unwrap() error { return f.Err }
 
 // ClientMessage renders the failure for an API response: no upstream body, no
-// upstream error text, nothing the caller did not already provide.
+// upstream error text, nothing the caller did not already provide — plus any
+// OperatorHint a plugin attached, which is our own words rather than the cloud's.
 func (f *Failure) ClientMessage() string {
-	return fmt.Sprintf("minter %q cannot mint the credential role(s) %s require; the upstream "+
+	message := fmt.Sprintf("minter %q cannot mint the credential role(s) %s require; the upstream "+
 		"refused the probe mint and its response is in the OpenBao server log",
 		f.Minter, strings.Join(f.Roles, ", "))
+	if hint := HintFor(f.Err); hint != "" {
+		message += ". " + hint
+	}
+	return message
+}
+
+// operatorHint carries a plugin's own diagnosis alongside a probe failure. Deliberately
+// unexported: nothing needs the concrete type, and WithHint/HintFor are the whole of
+// the useful surface.
+type operatorHint struct {
+	hint string
+	err  error
+}
+
+func (h *operatorHint) Error() string {
+	if h.err == nil {
+		return h.hint
+	}
+	return h.err.Error() + ": " + h.hint
+}
+
+func (h *operatorHint) Unwrap() error { return h.err }
+
+// WithHint attaches an operator-facing diagnosis to a probe failure, so it reaches the
+// operator instead of being redacted along with the upstream's response.
+//
+// # Why redaction needed an exception
+//
+// A probe failure's upstream text is withheld from the API response deliberately: the
+// same probe runs on a role write and on a credential read, and a cloud's error body
+// can name other tenants' resources or echo the credential (A4). But that rule was
+// swallowing something it was never aimed at. A plugin sometimes knows a conclusion
+// the cloud's own message actively obscures, and the conclusion is the entire value
+// of the response.
+//
+// The case that proved it: DigitalOcean answers a fenced mint with a bare "You are
+// not authorized to perform this operation", which invites an operator to go hunting
+// for a missing privilege that does not exist (KI-009). credential-do has said so in
+// `forbiddenMintHint` since that was verified — and it went into the wrapped error,
+// so ClientMessage dropped every word of it. The operator got "the upstream refused
+// the probe mint" and a pointer to a log line saying they were not authorized.
+//
+// A hint is safe to return where upstream text is not, for one reason worth stating:
+// it is authored HERE, as a constant, by whoever read the cloud's documentation. It
+// cannot contain a credential or another tenant's data because it does not come from
+// the cloud at all. Never build one from a response body.
+//
+// hint must be operator-facing prose: what is actually wrong, and what to change. err
+// keeps its own (redacted) path to the log. A nil err still yields a hint-carrying
+// error, so a caller need not special-case one.
+func WithHint(hint string, err error) error {
+	return &operatorHint{hint: hint, err: err}
+}
+
+// HintFor returns the first operator hint in err's chain, or "" if there is none.
+func HintFor(err error) string {
+	var hint *operatorHint
+	if errors.As(err, &hint) {
+		return hint.hint
+	}
+	return ""
 }
 
 // Verify runs each distinct Check once and stops at the first failure, so an

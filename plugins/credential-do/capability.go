@@ -70,7 +70,13 @@ func (b *backend) probeMint(apiURL string, minter cloudconfig.Minter, roleName s
 		resp, status, err := client.CreateToken(ctx, capability.ProbeName(ownertag.Prefix(b.ownerInstance()), roleName), scopes)
 		if err != nil {
 			if status == http.StatusForbidden {
-				return status, fmt.Errorf("probe mint returned %d (%w): %s", status, err, forbiddenMintHint)
+				// capability.WithHint, not a %s in the error text: a probe failure's upstream
+				// text is redacted from the API response by design, and this hint used to be
+				// redacted along with it — so the operator was told "the upstream refused the
+				// probe mint" and pointed at a log line claiming they lacked a privilege.
+				// That is the one thing KI-009 establishes is NOT true.
+				return status, capability.WithHint(forbiddenMintHint,
+					fmt.Errorf("probe mint returned %d: %w", status, err))
 			}
 			return status, fmt.Errorf("probe mint returned %d: %w", status, err)
 		}
