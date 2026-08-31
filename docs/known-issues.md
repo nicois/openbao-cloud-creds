@@ -431,6 +431,16 @@ presented as production-viable. See
 [`decisions.md`](decisions.md) ("Why `credential-do` stays the reference
 implementation even though it cannot mint").
 
+**Re-verified 2026-08-31, and the fence is NOT origin-dependent.** The same PAT was
+used from two different network origins in the same minute: `/v2/regions` answered
+`200` with `X-Response-From: service` from both, and `/v2/tokens` answered `403`
+with `X-Response-From: Edge-Gateway` from both. This closes a plausible hope —
+that token management might be opened up for particular egress addresses, the way
+some vendors do — and it is worth having closed, because it was the one remaining
+way `credential-do` could have become production-viable without DigitalOcean
+changing anything. It cannot. The refusal is a property of the auth type and the
+route, exactly as first recorded, and no network arrangement affects it.
+
 **Severity:** Highest here — the reference implementation's hot path does not work
 upstream. Contained, though: it affects one cloud, and the failure is a clean
 `403` at minter-set/role **write** time (the capability probe), not a silent
