@@ -1,6 +1,7 @@
 package cloudhttp_test
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -293,5 +294,63 @@ func readSocksHost(client net.Conn, addressType byte) (string, error) {
 		return string(name), nil
 	default:
 		return "", fmt.Errorf("unknown socks address type %d", addressType)
+	}
+}
+
+// TestAnHTTPConnectProxyIsAlsoUsed covers the other proxy shape, because it is the one a
+// PERSISTENT egress would use.
+//
+// An SSH dynamic forward is right for a person at a terminal and wrong for a long-lived
+// deployment: the tunnel is a process that dies. A proxy daemon at an allowlisted address is the
+// durable form, and an HTTP CONNECT proxy is markedly easier to run and to restrict than a SOCKS5
+// daemon. Both are reachable through the same ProxyURL field with no code change here — which is
+// only worth documenting if it is true, hence this test.
+//
+// The tunnel is deliberately refused rather than completed. What is being proved is that an
+// `http://` proxy URL makes the client issue CONNECT for an https destination — so TLS is
+// end-to-end and the proxy never sees plaintext. Completing the tunnel would need the test to
+// trust a certificate, which would test certificate plumbing instead.
+func TestAnHTTPConnectProxyIsAlsoUsed(t *testing.T) {
+	requests := make(chan string, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening for the fake CONNECT proxy failed: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		line, readErr := bufio.NewReader(conn).ReadString('\n')
+		if readErr != nil {
+			return
+		}
+		requests <- strings.TrimSpace(line)
+		// Refuse the tunnel: the request line is the whole assertion.
+		_, _ = io.WriteString(conn, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
+	}()
+
+	client, err := cloudhttp.New(cloudhttp.Options{ProxyURL: "http://" + listener.Addr().String()})
+	if err != nil {
+		t.Fatalf("building a client with an http proxy failed: %v", err)
+	}
+	// Expected to fail: the fake proxy refuses the tunnel.
+	if resp, getErr := client.Get("https://example.invalid/whatever"); getErr == nil {
+		_ = resp.Body.Close()
+		t.Fatal("the refused tunnel somehow produced a response")
+	}
+
+	select {
+	case got := <-requests:
+		want := "CONNECT example.invalid:443 HTTP/1.1"
+		if got != want {
+			t.Errorf("the proxy received %q, want %q. Anything other than CONNECT means the "+
+				"proxy would see plaintext, or the destination was not proxied at all", got, want)
+		}
+	default:
+		t.Error("the proxy received nothing: an http:// ProxyURL was not used for an https request")
 	}
 }
