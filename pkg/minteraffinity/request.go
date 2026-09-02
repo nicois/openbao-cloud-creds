@@ -20,9 +20,12 @@ func ShardKeyField() *framework.FieldSchema {
 		Type: framework.TypeString,
 		Description: "Optional: an opaque key identifying the calling worker, used to pick which " +
 			"minter of the role's set issues this credential. Callers sharing a key share a " +
-			"minter, and so share whatever upstream rate limit that minter's account has; " +
-			"different keys are spread across the set. Omit it and the caller's token accessor " +
-			"is used, which is per-token and therefore usually per-worker",
+			"minter; different keys are spread across the set. Omit it and the caller's token " +
+			"accessor is used, which is per-token and therefore usually per-worker. Whether that " +
+			"also spreads the ISSUED credential's own rate limit depends on the cloud: on some, a " +
+			"credential belongs to the minter's account, and on others (AWS, GCP, Azure) it is a " +
+			"target named on the role and is the same identity whichever minter issued it — see " +
+			"docs/decisions.md",
 	}
 }
 

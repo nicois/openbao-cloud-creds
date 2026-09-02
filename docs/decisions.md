@@ -110,6 +110,36 @@ which is the worst kind of not working. So `minteraffinity.Key` prefers, in orde
 4. nothing — in which case the order is **randomised**, not fixed, because concentrating every
    keyless caller on one minter would be worse than the behaviour this replaced.
 
+### Whether it multiplies anything is a per-cloud fact, and on three clouds it does not
+
+Affinity chooses a *minter*. Whether that gives the client a separate rate-limit budget depends on
+where the issued credential's **identity** comes from — and the plugins divide in two, which is
+verifiable from the mint call rather than a matter of opinion:
+
+| Cloud | The mint call | The credential's identity is | Does affinity multiply the client's quota? |
+|---|---|---|---|
+| DigitalOcean | `POST /v2/tokens` | the minter's account | **Yes**, if the minters are in different accounts |
+| UpCloud | `POST /1.3/account/tokens` | the minter's account | **Yes**, same condition |
+| Vultr | `POST /v2/users` (sub-user) | a sub-user of the minter's account | **Yes**, same condition |
+| OVH | OAuth2 `client_credentials`, `MintToken(ctx)` — no target argument | the minter's own OAuth client | **Yes**, same condition |
+| Exoscale | `CreateAPIKey(ctx, name, role.RoleID)` | the minter's organization; `role.RoleID` only *scopes* it | **Yes**, same condition |
+| Akamai | `CreateClient(ctx, name, apiAccess, groupAccess)` | an API client under the minter's contract | **Yes**, same condition |
+| **AWS** | `AssumeRole{RoleArn: role.IAMRoleARN}` | **the target role, named on the ROLE** | **No** |
+| **GCP** | `GenerateAccessToken(ctx, role.ServiceAccountEmail, …)` | **the impersonated SA, named on the ROLE** | **No** |
+| **Azure** | `AddPassword(ctx, role.AppObjectID, …)` | **the app registration, named on the ROLE** | **No** |
+| OCI | phased rotation — no minter is selected at issuance | the OCI user the slot was provisioned for | N/A |
+
+On the bottom three the minter only *authorises* the operation; every credential a role issues has
+the same identity whichever minter minted it, so two clients on two minters draw on one budget. No
+key, and no set composition, changes that. Getting a second budget there means a second **role**
+pointing at a second target identity, and then the client chooses it by asking for that role —
+which is ordinary configuration, not affinity.
+
+Affinity is still not pointless on those three, and the distinction is worth keeping straight: it
+spreads the **mint-time** calls — `AssumeRole`, `generateAccessToken`, Graph `addPassword` — across
+minters, and those are themselves throttled. So it buys issuance throughput there, and client
+throughput only on the six above.
+
 ### What it cannot do
 
 It multiplies nothing if the set's minters share an account: two credentials in one account draw on
