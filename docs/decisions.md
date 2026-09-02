@@ -2,6 +2,72 @@
 
 Short notes on choices that aren't obvious from the [techrfc](techrfc.md) and would otherwise need to be re-derived from scratch.
 
+## Durability of an issued credential, and where orphans come from (2026-09-02)
+
+Two questions that get asked separately and answer each other: is a credential durably tracked
+before a client sees it, and how is an untracked one ever cleaned up.
+
+### A client cannot receive a credential whose lease was not persisted
+
+Verified in OpenBao's own source rather than assumed (`vault/expiration.go`,
+`vault/request_handling.go` — v2.6.x):
+
+1. The plugin returns `resp.Secret`.
+2. Core calls `expiration.Register`, which builds the lease entry and calls `persistEntry` →
+   `leaseView.Put(ctx, &ent)`. A **synchronous storage write**, under the per-lease lock, atomic
+   with `updatePending`.
+3. Only when `Register` returns does core set `resp.Secret.LeaseID` and let the response continue
+   to the client.
+4. If **anything** in `Register` fails, a deferred rollback routes a **Revoke** to the plugin,
+   deletes the lease entry and removes the token index — then returns an error to the client.
+
+So the ordering is guaranteed by core, for every plugin, and a failed lease write does not merely
+leave the credential untracked: it actively revokes it. Nothing in this project needs to arrange
+that, and nothing should try to.
+
+The residual case is narrow and worth naming: the rollback is explicitly best-effort ("errors here
+are ignored to do as much cleanup as we can"). If the lease write fails **and** the compensating
+revoke also fails, the credential survives untracked and the client gets an error.
+
+### The half core cannot help with
+
+Core is only involved once the plugin has returned. Between the upstream mint and the plugin's own
+`active-*/` tracking write there is a window core cannot see, and two things can go wrong in it:
+
+| Failure | Recoverable? |
+|---|---|
+| The mint's HTTP response is **lost** (timeout, reset) after the cloud created the credential | **No** — the plugin never learned the id. Only owner-tag reconciliation can find it |
+| The tracking write **fails** after a successful mint | **Yes** — the id is in hand, so the plugin revokes immediately. This is the only moment it can |
+
+The second is a rule this project has always had and, until now, tested nowhere. It is now the
+`revoke` category's `TrackingWriteFailureRevokesUpstream`, declared per plugin via
+`Harness.TrackingPrefix` and asserted on all six hard-revoke clouds: storage is wrapped so writes
+under that prefix fail, and the case requires the response to be an error AND the upstream count to
+return to its baseline. Skipped where revoke is soft or absent (AWS, GCP, OVH, OCI) — there the
+credential self-expires, so an untracked one is harmless and the write is metrics-only.
+
+Adding it caught something worth recording about the prefixes: they are **not uniform**.
+`active-tokens/` on DO, UpCloud, Azure and Exoscale; `active-users/` on Vultr; `active-clients/` on
+Akamai. Declaring the wrong one produces a Put that succeeds and a green test that asserts nothing —
+which is why the field is per-harness rather than a shared constant, and why it was briefly
+mistaken here for two plugins being defective.
+
+### Why the reconciler is the backstop and not the primary mechanism
+
+The first row above is irreducible: minting and recording cannot be one operation, so a lost
+response always loses an id. That is what the owner-tag scheme is for, and what shapes it:
+
+- every credential's **name** carries this mount's owner prefix, so an orphan is attributable
+  without any local record;
+- the reconciler deletes only what matches that prefix and has no local entry;
+- a **confirmation hold** protects the ordinary case — an entity younger than the hold, or whose age
+  cannot be established, is skipped, because it may be a credential still inside its
+  create-then-track window. Fail-closed by construction: an unknown `CreatedAt` is never deleted.
+
+So: core guarantees the lease, the plugin guarantees the tracking record or revokes, and the
+reconciler mops up the one case neither can — periodically, conservatively, and only for credentials
+it can prove are ours.
+
 ## Why a thin uniform-envelope plugin per cloud (not one super-plugin, not pure SDK wrappers)
 
 Considered three approaches:

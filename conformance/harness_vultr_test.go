@@ -59,6 +59,7 @@ func vultrHarness(t *testing.T) plugintest.Harness {
 		},
 		ProvisionedCount:  srv.ProvisionedCount,
 		ExpectsHardRevoke: true,
+		TrackingPrefix:    "active-users/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{

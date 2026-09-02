@@ -60,6 +60,14 @@ and destroys the credential a client tried to keep. The only way to say "not
 renewable" is to register no callback. Never "fix" a renewability failure by
 assigning `resp.Secret.Renewable = false`; remove the callback.
 
+**Durability of an issued credential is settled and documented** — see
+[`docs/decisions.md`](docs/decisions.md) ("Durability of an issued credential, and where orphans
+come from"). Short version: core persists the lease synchronously before the client sees anything,
+and revokes through the plugin if that write fails, so no plugin needs to arrange it. What a plugin
+IS responsible for is the `active-*/` tracking record — and revoking immediately if that write
+fails, which the `revoke` category now asserts via `Harness.TrackingPrefix`. Note the prefixes are
+not uniform across clouds; declaring the wrong one yields a green test that asserts nothing.
+
 Adding a category means: a `Run<X>Suite` in `pkg/plugintest`, an entry in the `suites` registry in `conformance.go` naming the `Harness` fields it needs, and then ten harnesses that either wire those fields or declare the gap. That last step is the point — a new category cannot land half-applied.
 
 ## The layer above: `e2e/`

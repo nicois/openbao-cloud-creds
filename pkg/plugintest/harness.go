@@ -16,6 +16,8 @@
 package plugintest
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -94,6 +96,15 @@ type Harness struct {
 	ProvisionedCount func() int
 	// ExpectsHardRevoke is true when lease revoke deletes an upstream entity.
 	ExpectsHardRevoke bool
+	// TrackingPrefix is the storage prefix a plugin writes its active-credential
+	// record under, e.g. "active-tokens/". Set it and the revoke category asserts
+	// the durability rule that record exists for: a credential whose tracking
+	// write FAILS must be revoked rather than returned.
+	//
+	// Empty skips that case. It is only meaningful where revoke is hard —
+	// on a no-revoke cloud the credential self-expires, so an untracked one is
+	// harmless and the write is metrics-only.
+	TrackingPrefix string
 
 	// --- Capability ---
 
@@ -209,6 +220,40 @@ type Harness struct {
 	// reason. An empty reason, or a key that is not a known category, fails the
 	// conformance run.
 	Skips map[Category]string
+}
+
+// failWritesUnder wraps storage so Put fails for keys under one prefix, and behaves
+// normally otherwise. Used to reach the create-then-track window deliberately: the
+// upstream credential exists, and the plugin cannot record it.
+type failWritesUnder struct {
+	logical.Storage
+	prefix string
+	err    error
+}
+
+func (f *failWritesUnder) Put(ctx context.Context, entry *logical.StorageEntry) error {
+	if entry != nil && strings.HasPrefix(entry.Key, f.prefix) {
+		return f.err
+	}
+	return f.Storage.Put(ctx, entry)
+}
+
+// newBackendWithStorage builds a configured backend over caller-supplied storage, so a
+// test can interpose on it. Configuration is written through the SAME storage, so a
+// wrapper that fails selectively must not fail the config writes.
+func newBackendWithStorage(t *testing.T, h Harness, storage logical.Storage) logical.Backend {
+	t.Helper()
+	cfg := logical.TestBackendConfig()
+	cfg.StorageView = storage
+	b, err := h.Factory(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+	if h.Inject != nil {
+		h.Inject(b)
+	}
+	h.Configure(t, b, storage)
+	return b
 }
 
 // newConfiguredBackend builds a backend, injects any test doubles, and applies

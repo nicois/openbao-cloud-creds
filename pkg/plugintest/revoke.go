@@ -1,6 +1,7 @@
 package plugintest
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -20,6 +21,9 @@ func RunRevokeResilienceSuite(t *testing.T, h Harness) {
 	t.Run("DoubleRevokeIsNoOp", func(t *testing.T) { assertDoubleRevokeIsNoOp(t, h) })
 	t.Run("RevokeWithUnusableInternalDataReleasesTheLease", func(t *testing.T) {
 		assertRevokeWithoutInternalDataReleases(t, h)
+	})
+	t.Run("TrackingWriteFailureRevokesUpstream", func(t *testing.T) {
+		assertTrackingFailureRevokesUpstream(t, h)
 	})
 }
 
@@ -122,4 +126,57 @@ func revokeSecret(t *testing.T, b logical.Backend, storage logical.Storage, path
 		Storage:   storage,
 		Secret:    secret,
 	})
+}
+
+// assertTrackingFailureRevokesUpstream: a credential whose tracking write fails must be
+// REVOKED, not returned.
+//
+// This is the create-then-track window, deliberately entered. Minting and recording are
+// two operations and cannot be one, so between them there is always a moment where a live
+// upstream credential exists that this plugin has not yet recorded. Ordinarily the window
+// closes in microseconds; when the storage write fails it does not close at all.
+//
+// Returning the credential anyway would be the worst of the available outcomes. The caller
+// gets something usable, and the only thing that could later revoke it — the record naming
+// it — does not exist. It becomes an orphan bounded solely by the owner-tag reconciler's
+// confirmation hold, or on a cloud with no native expiry, by nothing at all.
+//
+// Note what this does NOT test, because core guarantees it instead: that the LEASE is
+// durable before the client sees the credential. OpenBao's ExpirationManager.Register
+// persists the lease entry synchronously and, on any failure, routes a Revoke to the
+// plugin before returning an error — so a client cannot receive a credential whose lease
+// was not written. The plugin's own tracking record is the half core cannot help with,
+// which is why it is the half asserted here.
+//
+// Declared per plugin via Harness.TrackingPrefix, and only meaningful where revoke is
+// hard: with no revoke the credential self-expires, so an untracked one is harmless.
+func assertTrackingFailureRevokesUpstream(t *testing.T, h Harness) {
+	t.Helper()
+	if h.TrackingPrefix == "" || !h.ExpectsHardRevoke || h.ProvisionedCount == nil {
+		t.Skipf("needs TrackingPrefix, ExpectsHardRevoke and ProvisionedCount; this cloud "+
+			"declares prefix=%q hardRevoke=%v", h.TrackingPrefix, h.ExpectsHardRevoke)
+	}
+
+	storage := &failWritesUnder{
+		Storage: &logical.InmemStorage{},
+		prefix:  h.TrackingPrefix,
+		err:     errors.New("simulated storage failure on the tracking write"),
+	}
+	b := newBackendWithStorage(t, h, storage)
+
+	// AFTER configuration, since minter-set and role writes each run a capability probe.
+	before := h.ProvisionedCount()
+
+	resp, err := issue(t, b, storage, h.IssuePath)
+	if err == nil && resp != nil && !resp.IsError() && resp.Secret != nil {
+		t.Errorf("a credential was returned with a lease although its tracking record could "+
+			"not be written. Nothing that could later revoke it exists, so it is an orphan "+
+			"from the moment it is handed over (response: %v)", resp.Data)
+	}
+
+	if after := h.ProvisionedCount(); after != before {
+		t.Errorf("the upstream credential count went %d → %d: the credential minted before the "+
+			"failed tracking write was left alive upstream. It must be revoked, because this is "+
+			"the one moment at which this plugin still knows its id", before, after)
+	}
 }
