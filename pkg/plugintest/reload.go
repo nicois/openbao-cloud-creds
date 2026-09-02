@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbao/openbao/sdk/v2/helper/consts"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -15,6 +16,9 @@ import (
 // its minter-set binding. Catches KI-001: a config field set only in
 // pathConfigWrite and never reloaded in Factory.
 func RunReloadSuite(t *testing.T, h Harness) {
+	t.Run("WorkersDoNotStartOnAStandbyNode", func(t *testing.T) {
+		assertWorkersDoNotStartOnAStandby(t, h)
+	})
 	t.Run("ReloadFromStorageThenIssue", func(t *testing.T) {
 		_, storage := newConfiguredBackend(t, h)
 		b2 := Reload(t, h, storage)
@@ -223,3 +227,68 @@ func assertFutureSchemaSetIsRefused(t *testing.T, h Harness) {
 			"version check exists to prevent: %s", after.Value)
 	}
 }
+
+// assertWorkersDoNotStartOnAStandby: background work belongs on the active node only.
+//
+// This is not a hypothetical. InitializeFunc — where every plugin here starts its workers, for the
+// KI-001 reason — is called on EVERY node of a cluster, standbys included. Verified against
+// OpenBao's source rather than assumed, because a comment in it says the opposite and is stale:
+// a standby's runStandbyOnce calls postUnseal with a read-only strategy, that strategy calls
+// setupMounts without the standby flag, and setupMounts' postUnsealFunc calls backend.Initialize.
+//
+// So a three-node cluster ran three health-check loops and three reconcilers. For plugins that must
+// authenticate to do their work, that multiplies by node count: three times the upstream sessions
+// and logins, three times the reconciler's traffic against a per-account quota, and — worst — a
+// stale credential produces (attempt cap x node count) failed logins in a burst, which is how a
+// cluster locks an account out rather than merely failing.
+//
+// A standby that is promoted is torn down and set up again, so Initialize runs a second time and the
+// decision is remade. Nothing needs to watch for promotion, which is just as well because there is
+// nothing to watch.
+func assertWorkersDoNotStartOnAStandby(t *testing.T, h Harness) {
+	t.Helper()
+	if h.WorkersRunning == nil {
+		t.Skip("harness declares no WorkersRunning, so whether workers started is unobservable")
+	}
+
+	cfg := logical.TestBackendConfig()
+	cfg.StorageView = &logical.InmemStorage{}
+	// Exactly what core stores for a standby (vault/ha.go:520).
+	view, ok := cfg.System.(*logical.StaticSystemView)
+	if !ok {
+		t.Skipf("the test backend config's system view is %T, not a StaticSystemView, so a standby "+
+			"cannot be simulated", cfg.System)
+	}
+	view.ReplicationStateVal = consts.ReplicationDRDisabled | consts.ReplicationPerformanceStandby
+
+	b, err := h.Factory(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+	t.Cleanup(func() { b.Cleanup(context.WithoutCancel(t.Context())) })
+	if h.Inject != nil {
+		h.Inject(b)
+	}
+	h.Configure(t, b, cfg.StorageView)
+
+	if err := b.Initialize(t.Context(), &logical.InitializationRequest{Storage: cfg.StorageView}); err != nil {
+		t.Fatalf("initialize failed: %v", err)
+	}
+
+	// Workers start in a goroutine, so give them the chance to be wrong.
+	for range workerStartPollAttempts {
+		if h.WorkersRunning(b) {
+			t.Fatal("background workers started on a STANDBY node. Every node of a cluster calls " +
+				"InitializeFunc, so this means one health-check loop and one reconciler per node: " +
+				"upstream logins and reconciler traffic multiplied by node count, and a stale " +
+				"credential turned into an account lockout instead of a failure")
+		}
+		time.Sleep(workerStartPollInterval)
+	}
+}
+
+// Workers are started from a goroutine, so "did not start" needs a window rather than an instant.
+const (
+	workerStartPollAttempts = 20
+	workerStartPollInterval = 25 * time.Millisecond
+)

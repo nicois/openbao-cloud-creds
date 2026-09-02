@@ -6,6 +6,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/capability"
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/clusterrole"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
@@ -17,6 +18,26 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 	defer b.workerLifecycleMu.Unlock()
 
 	b.stopWorkersLocked()
+
+	// The choke point for the active-node decision, deliberately here rather than at each
+	// caller: Initialize is not the only path that starts workers — a config write and a
+	// minter-set write do too — so a guard at any one of them is a guard that can be walked
+	// around. It was, on the first attempt.
+	//
+	// Initialize runs on EVERY node of a cluster, standbys included (verified against OpenBao's
+	// source; a comment in it claims otherwise and is stale). Without this a three-node cluster
+	// ran three health-check loops and three reconcilers, tripling upstream logins and reconciler
+	// traffic against a per-account quota — and turning a stale credential into an account
+	// lockout rather than a failure, since the attempt cap is per node.
+	//
+	// A promoted standby is torn down and set up again, so this decision is simply remade.
+	if !clusterrole.ShouldRunBackgroundWork(b.System()) {
+		b.Logger().Info("not starting background workers on this node",
+			fieldCloud, cloudName, "cluster_role", clusterrole.Describe(b.System()),
+			"note", "health checks and the reconciler run on the active node only; this node "+
+				"will start them if it is promoted")
+		return
+	}
 
 	b.mu.RLock()
 	cfg := b.config

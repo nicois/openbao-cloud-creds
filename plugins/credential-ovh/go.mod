@@ -49,6 +49,7 @@ require (
 	github.com/mitchellh/go-testing-interface v1.14.2-0.20210821155943-2d9075ca8770 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.0.0
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/openbao/go-kms-wrapping/v2 v2.8.0 // indirect
@@ -82,3 +83,5 @@ replace github.com/nicois/openbao-cloud-creds/pkg/telemetry => ../../pkg/telemet
 replace github.com/nicois/openbao-cloud-creds/pkg/reconciler => ../../pkg/reconciler
 
 replace github.com/nicois/openbao-cloud-creds/pkg/minteraffinity => ../../pkg/minteraffinity
+
+replace github.com/nicois/openbao-cloud-creds/pkg/clusterrole => ../../pkg/clusterrole
