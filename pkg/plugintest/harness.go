@@ -122,6 +122,17 @@ type Harness struct {
 	// RewriteSet attempts to rewrite the default set so it holds exactly the
 	// named minter, returning the raw response.
 	RewriteSet func(t *testing.T, b logical.Backend, storage logical.Storage, minterID string) *logical.Response
+	// WriteSetWithMinters rewrites the default set so it holds exactly the named
+	// minters — two or more. Set it and the `lease` category asserts minter
+	// affinity: that a shard key pins a client to one minter and that different
+	// keys reach more than one.
+	//
+	// Separate from RewriteSet, which takes a single id and exists for the
+	// minter-visibility and capability categories. Affinity is unobservable with a
+	// one-minter set, so a harness that cannot write two declares nothing and the
+	// case skips rather than passing vacuously.
+	WriteSetWithMinters func(t *testing.T, b logical.Backend, storage logical.Storage, minterIDs ...string) *logical.Response
+
 	// PlantDisabledProbeRole writes a DISABLED role bound to the default set
 	// straight to storage (there is no disable endpoint), so the suite can check
 	// a disabled role is not probed.

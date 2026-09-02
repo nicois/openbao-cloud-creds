@@ -3,6 +3,7 @@ package plugintest
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -31,6 +32,9 @@ const leaseSlack = time.Minute
 // Renew callback that always returns an error still advertises renewable=true;
 // the only correct way to say "not renewable" is to register no callback.
 func RunLeaseContractSuite(t *testing.T, h Harness) {
+	t.Run("MinterAffinityPinsAClientAndSpreadsTheFleet", func(t *testing.T) {
+		assertMinterAffinity(t, h)
+	})
 	t.Run("EnvelopeShapeIsTheDeclaredShape", func(t *testing.T) { assertEnvelopeShape(t, h) })
 	t.Run("EnvelopeAgreesWithLease", func(t *testing.T) { assertEnvelopeAgreesWithLease(t, h) })
 	t.Run("RenewMatchesWhatTheLeaseAdvertises", func(t *testing.T) { assertRenewMatchesLease(t, h) })
@@ -458,4 +462,91 @@ func str(t *testing.T, data map[string]interface{}, key string) string {
 		t.Fatalf("field %q is %T, want string", key, data[key])
 	}
 	return value
+}
+
+// assertMinterAffinity: a shard key pins a client to one minter of the set, and different keys
+// reach more than one.
+//
+// This is what makes a minter set a way to multiply an upstream rate limit rather than only to
+// survive a failure. Where a cloud meters per account — DigitalOcean does — credentials minted by
+// different accounts draw on separate budgets, so a set spanning accounts multiplies the throughput
+// available to a fleet. That only works if a worker's requests land consistently on one account:
+// random selection sprays every client across every budget, so one heavy client degrades all of
+// them and exhausting any single account affects everybody.
+//
+// Two properties, and both matter:
+//
+//   - STABILITY. The same key must reach the same minter every time, or a client's consumption is
+//     spread across budgets it cannot reason about and the isolation is lost.
+//   - SPREAD. Different keys must not all land on one minter, which is what a plugin that ignores
+//     the affinity order (or forgets to pass the key) would produce — and it would look perfectly
+//     healthy, because a single minter serves every request correctly.
+//
+// The second is the one worth having in conformance: nine plugins wire this individually, and the
+// failure mode of getting it wrong is silence.
+func assertMinterAffinity(t *testing.T, h Harness) {
+	t.Helper()
+	if h.WriteSetWithMinters == nil {
+		t.Skip("harness declares no WriteSetWithMinters, so affinity cannot be observed: a " +
+			"one-minter set serves every key from the same minter whether or not affinity works")
+	}
+
+	b, storage := newConfiguredBackend(t, h)
+	if resp := h.WriteSetWithMinters(t, b, storage, "minter-1", "minter-2"); resp != nil && resp.IsError() {
+		t.Fatalf("writing a two-minter set was refused: %v", resp.Error())
+	}
+
+	// Stability: one key, several reads, one minter.
+	const stableKey = "worker-a"
+	first := minterServing(t, b, storage, h, stableKey)
+	for range 4 {
+		if again := minterServing(t, b, storage, h, stableKey); again != first {
+			t.Errorf("shard key %q was served by %q and then %q; a client's requests must stay on "+
+				"one minter, or its consumption is spread across every upstream budget",
+				stableKey, first, again)
+			break
+		}
+	}
+
+	// Spread: enough distinct keys that landing on one minter is not chance. With two minters and
+	// a sound hash the odds of 20 keys all choosing the same one are 2^-19.
+	seen := map[string]int{}
+	for i := range 20 {
+		seen[minterServing(t, b, storage, h, fmt.Sprintf("worker-%d", i))]++
+	}
+	if len(seen) < 2 {
+		t.Errorf("20 different shard keys were all served by %v. Either the affinity order is "+
+			"ignored or the key never reaches selection — and a set that always uses one minter "+
+			"multiplies no rate limit, while looking entirely healthy", seen)
+	}
+	t.Logf("20 keys over 2 minters: %v", seen)
+}
+
+// minterServing issues one credential with a shard key and reports which minter the envelope says
+// served it. Read from metadata rather than from any internal state: it is what a client sees, and
+// what an operator would use to check the spread.
+func minterServing(t *testing.T, b logical.Backend, storage logical.Storage, h Harness, shardKey string) string {
+	t.Helper()
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.ReadOperation,
+		Path:      h.IssuePath,
+		Storage:   storage,
+		Data:      map[string]interface{}{"shard_key": shardKey},
+		ID:        "req-" + shardKey,
+	})
+	if err != nil {
+		t.Fatalf("issuing with shard_key=%q failed: %v", shardKey, err)
+	}
+	if resp == nil || resp.IsError() {
+		t.Fatalf("issuing with shard_key=%q was refused: %v", shardKey, resp)
+	}
+	metadata, ok := resp.Data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("the response carries no metadata: %#v", resp.Data)
+	}
+	minterID, _ := metadata["minter_id"].(string)
+	if minterID == "" {
+		t.Fatal("metadata.minter_id is empty, so which minter served this is unobservable")
+	}
+	return minterID
 }

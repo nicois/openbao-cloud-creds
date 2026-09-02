@@ -42,7 +42,7 @@ func TestSelectMinter_SkipsRetired(t *testing.T) {
 	bk.mu.Unlock()
 
 	for i := 0; i < 10; i++ {
-		sel, err := bk.selectMinter("default", time.Now())
+		sel, err := bk.selectMinter("default", "", time.Now())
 		if err != nil {
 			t.Fatalf("selectMinter: %v", err)
 		}

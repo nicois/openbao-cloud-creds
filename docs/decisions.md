@@ -68,6 +68,64 @@ So: core guarantees the lease, the plugin guarantees the tracking record or revo
 reconciler mops up the one case neither can — periodically, conservatively, and only for credentials
 it can prove are ours.
 
+## Why minter selection has affinity, and why rendezvous hashing (2026-09-02)
+
+A minter set began as redundancy: several credentials so that one failing does not stop issuance.
+It said nothing about WHICH minter serves a given read, and the answer was Go's map iteration
+order — effectively random per request.
+
+Random is wrong when the upstream meters per **account**. DigitalOcean limits requests per account,
+so credentials minted by different accounts draw on separate budgets, and a set spanning accounts is
+a way to multiply the throughput available to a fleet of workers. That only pays off if a worker's
+requests land consistently on one account.
+
+**Isolation is the larger half of the argument, not balancing.** With random selection every client
+draws on every budget: one heavy client degrades all of them, and exhausting any single account
+affects everybody. With stable affinity a client draws on one budget, so a heavy or misbehaving
+client exhausts its own shard and the others are untouched. It is a bulkhead.
+
+**Rendezvous (highest-random-weight) hashing, not `hash % N`.** Modulo reshuffles nearly every
+client when the set changes size, and a set changes size for ordinary reasons — a minter retired,
+rotated in, added for capacity. Rendezvous moves only about 1/N. It also yields a total ORDER rather
+than one choice, which is what makes "best-effort" precise: a client prefers its own shard and falls
+to its second preference when that minter is unhealthy or in a rate-limit cooldown —
+deterministically, so the fallback is as stable as the primary. Affinity is a preference, never a
+constraint, and redundancy is unchanged. Both properties are asserted numerically in
+`pkg/minteraffinity`: 10000 keys over 5 minters land within 3% of an even share, growing 4→5 moves
+about 20% of clients, and removing a minter moves *nobody* who was not on it.
+
+### The key is the whole design, and the obvious choice is wrong
+
+An OpenBao identity entity is shared by every client authenticating through the same auth role —
+with AppRole the alias is the role id, so a hundred workers on one role are ONE entity. Keying on
+`EntityID` would hash the entire fleet to a single minter and the feature would silently do nothing,
+which is the worst kind of not working. So `minteraffinity.Key` prefers, in order:
+
+1. an explicit `shard_key` on the request — the only reliably per-worker option, and stable for
+   exactly as long as the caller wants;
+2. the **client token accessor** — one token per worker is the ordinary shape, so this is per-worker
+   in practice. The accessor, not the token, which is a secret. Semi-stable: re-authenticating moves
+   a worker to another shard, which costs a budget migration and nothing else;
+3. the entity id, coarse but better than nothing;
+4. nothing — in which case the order is **randomised**, not fixed, because concentrating every
+   keyless caller on one minter would be worse than the behaviour this replaced.
+
+### What it cannot do
+
+It multiplies nothing if the set's minters share an account: two credentials in one account draw on
+one budget, and no hashing changes that. There is no portable way to check — an account is not a
+concept the cloud-agnostic layer has — so it is a property of how an operator populates the set, and
+a foot-gun worth stating rather than hiding.
+
+### Why it is in conformance
+
+Nine plugins wire selection individually, and the failure mode of getting it wrong is **silence**: a
+plugin that drops the key, or ignores the order, serves every request correctly from one minter and
+looks perfectly healthy. `lease/MinterAffinityPinsAClientAndSpreadsTheFleet` catches both — one key
+must reach one minter across repeated reads, and twenty keys must reach more than one. It needs a
+two-minter set (`Harness.WriteSetWithMinters`), so a harness that cannot write one skips rather than
+passing vacuously.
+
 ## Why a thin uniform-envelope plugin per cloud (not one super-plugin, not pure SDK wrappers)
 
 Considered three approaches:

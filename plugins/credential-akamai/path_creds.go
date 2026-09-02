@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/minteraffinity"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
@@ -30,6 +31,7 @@ func (b *backend) credsPaths() []*framework.Path {
 						"A mismatch is refused with credential_kind_unsupported instead of " +
 						"returning a payload the caller cannot read",
 				},
+				minteraffinity.FieldShardKey: minteraffinity.ShardKeyField(),
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{Callback: b.pathCredsRead},
@@ -63,7 +65,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 
 	// Select a healthy minter from the role's bound set
-	sel, err := b.selectMinter(role.MinterSet, now)
+	sel, err := b.selectMinter(role.MinterSet, minteraffinity.KeyFromRequest(req, d), now)
 	if err != nil {
 		return credenvelope.ResponseFor(err), nil
 	}
@@ -315,7 +317,7 @@ type selectedMinter struct {
 	client   *akamaiClient
 }
 
-func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, error) {
+func (b *backend) selectMinter(setName, affinityKey string, now time.Time) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -324,7 +326,14 @@ func (b *backend) selectMinter(setName string, now time.Time) (selectedMinter, e
 		return selectedMinter{}, credenvelope.NewError(credenvelope.ErrConfigInvalid,
 			http.StatusBadRequest, fmt.Sprintf("minter set %q is not loaded", setName))
 	}
-	for id, ms := range states {
+	// Affinity order, not map order. Map iteration is randomised, which spread each client's
+	// requests across every minter — and so across every upstream rate-limit budget, since a
+	// cloud that meters per account gives each minter's account its own. Ordering by a stable
+	// key pins a client to one budget (so a heavy client exhausts its own shard rather than
+	// everybody's) while leaving the rest of the list as its fallback, so redundancy is
+	// unchanged. See pkg/minteraffinity.
+	for _, id := range minteraffinity.OrderKeys(affinityKey, states) {
+		ms := states[id]
 		if !ms.minter.Retired && ms.sm.TryAcquire(now) {
 			c, err := b.clientFor(ms)
 			if err != nil {

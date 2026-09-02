@@ -139,7 +139,7 @@ func TestMinterRotation_HappyPath(t *testing.T) {
 	// selectMinter must never return the retired minter (deterministic regardless
 	// of map-iteration order).
 	for range 10 {
-		sel, err := bk.selectMinter(defaultSetName, time.Now())
+		sel, err := bk.selectMinter(defaultSetName, "", time.Now())
 		if err != nil {
 			t.Fatalf("selectMinter: %v", err)
 		}

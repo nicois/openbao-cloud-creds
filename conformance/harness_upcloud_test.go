@@ -77,6 +77,16 @@ func upcloudHarness(t *testing.T) plugintest.Harness {
 			return plugintest.TryWrite(t, b, storage, setPath,
 				minterSet(tokenMinter(minterID, upcloudLiveToken)))
 		},
+		WriteSetWithMinters: func(t *testing.T, b logical.Backend, storage logical.Storage, ids ...string) *logical.Response {
+			minters := make([]map[string]interface{}, 0, len(ids))
+			for _, id := range ids {
+				// The same credential under different ids. Affinity is about WHICH minter is
+				// chosen, not about the credentials differing, so one token keeps the fake simple
+				// while the selection under test is unchanged.
+				minters = append(minters, tokenMinter(id, upcloudLiveToken))
+			}
+			return plugintest.TryWrite(t, b, storage, setPath, minterSet(minters...))
+		},
 		PlantDisabledProbeRole: plantDisabledRole,
 		DenyMint:               func() { srv.SetForbidMintForTokenPrefix(upcloudMinterPrefix) },
 		AllowMint:              func() { srv.SetForbidMintForTokenPrefix("") },

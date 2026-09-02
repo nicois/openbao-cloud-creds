@@ -50,7 +50,7 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 	bk.recordMinterError("default", "minter-1", http.StatusTooManyRequests, nil, time.Now())
 
 	// selectMinter should skip cooling-down minter-1 and choose minter-2
-	sel, err := bk.selectMinter("default", time.Now())
+	sel, err := bk.selectMinter("default", "", time.Now())
 	if err != nil {
 		t.Fatalf("selectMinter: %v", err)
 	}
