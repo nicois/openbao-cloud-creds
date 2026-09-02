@@ -32,6 +32,24 @@ type PluginConfig struct {
 	// as capability.DefaultCacheTTL; an explicit 0 disables the cache and re-probes
 	// every write.
 	CapabilityCacheTTL *time.Duration `json:"capability_cache_ttl,omitempty"`
+
+	// MinterCredentialLimit is how many live credentials ONE minter may have
+	// outstanding, where the cloud caps that per account. Selection passes over a
+	// minter at its limit and uses the next in preference order, so a set scales the
+	// ceiling to (limit x minters) — which is a second reason to add minters, next to
+	// redundancy and rate-limit sharding.
+	//
+	// Nil or zero means UNENFORCED, and that has to be the default: most clouds'
+	// caps are undocumented, and a guessed limit would refuse issuance that the
+	// cloud would have allowed. Setting it is how an operator opts into the
+	// protection, and into the warning that precedes the ceiling.
+	//
+	// It bounds what this MOUNT knows it holds. Credentials created in the same
+	// account by anything else, and orphans whose tracking record was lost, are
+	// invisible to it — so the cloud's own refusal still has to be handled, and this
+	// is about avoiding wasted calls and warning in time, not about being
+	// authoritative. See pkg/mintercapacity.
+	MinterCredentialLimit *int `json:"minter_credential_limit,omitempty"`
 }
 
 // DefaultCapabilityCacheTTL is the default for CapabilityCacheTTL. It is declared
@@ -39,6 +57,15 @@ type PluginConfig struct {
 // on a package that depends on it; the two constants are asserted equal by
 // pkg/capability's tests.
 const DefaultCapabilityCacheTTL = time.Hour
+
+// CredentialLimitPerMinter reports the configured per-minter cap, or 0 when unset —
+// which pkg/mintercapacity treats as unenforced.
+func (c *PluginConfig) CredentialLimitPerMinter() int {
+	if c == nil || c.MinterCredentialLimit == nil || *c.MinterCredentialLimit < 0 {
+		return 0
+	}
+	return *c.MinterCredentialLimit
+}
 
 // CapabilityVerificationEnabled reports whether capability probes should run.
 // Enabled unless an operator has explicitly set verify_minter_capability=false,

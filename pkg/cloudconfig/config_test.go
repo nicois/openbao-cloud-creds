@@ -75,3 +75,26 @@ func TestDefaultConfig_MinterRetireGraceDefaultsToMinMinterGap(t *testing.T) {
 		t.Fatalf("MinterRetireGrace = %v, want MinMinterGap", got)
 	}
 }
+
+// TestCredentialLimitPerMinterDefaultsToUnenforced: most clouds' caps are undocumented, so an unset
+// field must not become a guessed limit that refuses issuance the cloud would have allowed.
+func TestCredentialLimitPerMinterDefaultsToUnenforced(t *testing.T) {
+	limit := 8
+	negative := -1
+	cases := map[string]struct {
+		cfg  *cloudconfig.PluginConfig
+		want int
+	}{
+		"nil config":  {nil, 0},
+		"unset field": {&cloudconfig.PluginConfig{}, 0},
+		"set":         {&cloudconfig.PluginConfig{MinterCredentialLimit: &limit}, 8},
+		"negative":    {&cloudconfig.PluginConfig{MinterCredentialLimit: &negative}, 0},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := tc.cfg.CredentialLimitPerMinter(); got != tc.want {
+				t.Errorf("CredentialLimitPerMinter() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

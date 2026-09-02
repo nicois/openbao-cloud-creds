@@ -68,6 +68,51 @@ So: core guarantees the lease, the plugin guarantees the tracking record or revo
 reconciler mops up the one case neither can — periodically, conservatively, and only for credentials
 it can prove are ours.
 
+## Why a minter set also scales past a per-account credential cap (2026-09-03)
+
+Several clouds limit how many credentials one account may hold at once. OCI allows **two** auth
+tokens per user, which is why that cloud uses phased rotation instead of JIT at all; AWS allows two
+access keys per IAM user, which is why minter rotation there needs a grace-period sweep rather than
+a create-then-delete. A cap that is low but not crippling is a third case, and it has an answer the
+design already contains: each minter's cap is its own, so a set of *M* minters has a ceiling of
+(limit × M).
+
+What was missing is for selection to know it. Without that, issuance fails when the *preferred*
+minter is full even though a sibling has room — and it fails for whoever asks next rather than for
+whoever is holding the credentials.
+
+`pkg/mintercapacity` supplies the count and selection acts on it: a minter at its limit is passed
+**over**, and the next in affinity order serves. That makes capacity a third reason to add a minter,
+beside redundancy and rate-limit sharding — all three point the same way, which is convenient.
+
+**When every minter is full the code is `pool_exhausted`, not `upstream_auth_failed`.** The
+distinction is the whole value of the feature at that point: nothing is wrong with the credentials,
+and an operator told "auth failed" would rotate one and find it changed nothing. The message names
+the usage (`minter-1=8/8 minter-2=8/8`) and the fix (add a minter, or wait for leases to expire).
+`pool_exhausted` was already in the vocabulary for OCI's "every rotation slot is unavailable", and
+the client's action is identical — retry later, or ask for capacity — so no code was added, per the
+rule that a new code is only justified when a client would act differently.
+
+**The count comes from our own records, not from the cloud.** An upstream listing would be
+authoritative but costs an API call per issuance, against the very quota being conserved. So it
+counts the `active-*/` tracking entries, which are written at mint and deleted at revoke. That
+undercounts in two ways worth stating: it cannot see credentials created in the same account by
+anything else, and it cannot see orphans whose tracking record was lost in the create-then-track
+window. The real ceiling may therefore arrive earlier than predicted, which is why the cloud's own
+refusal still has to be handled — this avoids wasted calls and enables the warning; it is not
+authoritative.
+
+**The default is unenforced, and that is not laziness.** Most of these caps are undocumented. A
+guessed limit would refuse issuance the cloud would have allowed, which is worse than not knowing —
+so `minter_credential_limit` defaults to 0, nothing is counted at all in that case, and setting it
+is how an operator opts in. The one cloud where a number is assumed is the private DigitalOcean
+driver, at 8, pending confirmation from the vendor.
+
+**The warning fires at 80%, not at the ceiling.** The remedy is adding a minter, which takes human
+time; a signal that coincides with the failure is too late to be one. It is a log line rather than a
+metric because plugin metrics reach nobody in this deployment (A12), and it names the minter and the
+usage so the log alone is actionable.
+
 ## Why minter selection has affinity, and why rendezvous hashing (2026-09-02)
 
 A minter set began as redundancy: several credentials so that one failing does not stop issuance.

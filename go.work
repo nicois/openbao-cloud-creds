@@ -13,6 +13,7 @@ use (
 	./pkg/localexpiry
 	./pkg/ownertag
 	./pkg/mintledger
+	./pkg/mintercapacity
 	./pkg/minteraffinity
 	./pkg/plugintest
 	./pkg/reconciler

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope/fakes"
+	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -42,7 +43,7 @@ func TestSelectMinter_SkipsRetired(t *testing.T) {
 	bk.mu.Unlock()
 
 	for i := 0; i < 10; i++ {
-		sel, err := bk.selectMinter("default", "", time.Now())
+		sel, err := bk.selectMinter("default", "", mintercapacity.State{}, time.Now())
 		if err != nil {
 			t.Fatalf("selectMinter: %v", err)
 		}

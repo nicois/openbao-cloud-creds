@@ -51,6 +51,7 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.0.0
 	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/mintercapacity v0.0.0
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/openbao/go-kms-wrapping/v2 v2.8.0 // indirect
 	github.com/openbao/openbao/api/v2 v2.6.0 // indirect
@@ -85,3 +86,5 @@ replace github.com/nicois/openbao-cloud-creds/pkg/reconciler => ../../pkg/reconc
 replace github.com/nicois/openbao-cloud-creds/pkg/minteraffinity => ../../pkg/minteraffinity
 
 replace github.com/nicois/openbao-cloud-creds/pkg/clusterrole => ../../pkg/clusterrole
+
+replace github.com/nicois/openbao-cloud-creds/pkg/mintercapacity => ../../pkg/mintercapacity

@@ -9,6 +9,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/minteraffinity"
+	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
@@ -65,7 +66,16 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	now := time.Now()
 
 	// Select a healthy minter from the role's bound set
-	sel, err := b.selectMinter(role.MinterSet, minteraffinity.KeyFromRequest(req, d), now)
+	// Counted before selection so a minter with no room is passed over rather than failed on.
+	// Costs nothing when no limit is configured, which is every cloud whose cap is unknown.
+	capacity, err := mintercapacity.Snapshot(ctx, req.Storage, activeTrackingPrefix,
+		b.credentialLimitPerMinter())
+	if err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "counting outstanding credentials", err), nil
+	}
+	b.warnOnNearingCapacity(capacity)
+
+	sel, err := b.selectMinter(role.MinterSet, minteraffinity.KeyFromRequest(req, d), capacity, now)
 	if err != nil {
 		return credenvelope.ResponseFor(err), nil
 	}
@@ -317,7 +327,7 @@ type selectedMinter struct {
 	client   *akamaiClient
 }
 
-func (b *backend) selectMinter(setName, affinityKey string, now time.Time) (selectedMinter, error) {
+func (b *backend) selectMinter(setName, affinityKey string, capacity mintercapacity.State, now time.Time) (selectedMinter, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -332,8 +342,16 @@ func (b *backend) selectMinter(setName, affinityKey string, now time.Time) (sele
 	// key pins a client to one budget (so a heavy client exhausts its own shard rather than
 	// everybody's) while leaving the rest of the list as its fallback, so redundancy is
 	// unchanged. See pkg/minteraffinity.
+	atCapacity := false
 	for _, id := range minteraffinity.OrderKeys(affinityKey, states) {
 		ms := states[id]
+		if !capacity.HasRoom(id) {
+			// Passed over rather than failed on: this minter holds as many credentials as its
+			// account allows, and the next in preference order may not. That is what makes a set
+			// scale the ceiling to (limit x minters).
+			atCapacity = true
+			continue
+		}
 		if !ms.minter.Retired && ms.sm.TryAcquire(now) {
 			c, err := b.clientFor(ms)
 			if err != nil {
@@ -341,6 +359,16 @@ func (b *backend) selectMinter(setName, affinityKey string, now time.Time) (sele
 			}
 			return selectedMinter{setID: setName, minterID: id, client: c}, nil
 		}
+	}
+	if atCapacity {
+		// A different fault from an unhealthy set, and a different fix: nothing is wrong with the
+		// credentials, there is simply no room. An operator adds a minter (or waits for leases to
+		// expire); rotating a credential would not help and the message must not imply it.
+		return selectedMinter{}, credenvelope.NewError(credenvelope.ErrPoolExhausted,
+			http.StatusServiceUnavailable,
+			fmt.Sprintf("every minter in set %q holds as many credentials as its account allows "+
+				"(%s); add a minter to the set to raise the ceiling, or wait for leases to expire",
+				setName, capacity.Describe()))
 	}
 	return selectedMinter{}, recovery.UnavailableError(setName, machinesOf(states), now)
 }
@@ -444,4 +472,37 @@ func (b *backend) credentialName(ctx context.Context, req *logical.Request, role
 		return "", credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
 	}
 	return ownertag.CredentialName(instanceID, roleName, suffix), nil
+}
+
+// activeTrackingPrefix is the storage prefix this plugin records issued credentials under. Named
+// here because pkg/mintercapacity counts them, and the prefix is NOT uniform across clouds.
+const activeTrackingPrefix = "active-clients/"
+
+// warnOnNearingCapacity tells an operator before the ceiling rather than with it. The remedy for a
+// full set is adding a minter, which takes human time, so a signal that coincides with the failure
+// is too late to be useful.
+//
+// A log line rather than a metric, deliberately: plugin metrics do not reach an operator in this
+// deployment (they go to a blackhole across the plugin RPC boundary), so anything that must be seen
+// is logged.
+func (b *backend) warnOnNearingCapacity(capacity mintercapacity.State) {
+	if !capacity.Enforced() {
+		return
+	}
+	for id := range capacity.Used {
+		if id != "" && capacity.Nearing(id) {
+			b.Logger().Warn("a minter is close to the credential limit its account allows",
+				fieldCloud, cloudName, "minter_id", id, "usage", capacity.Describe(),
+				"note", "add a minter to this set to raise the ceiling; issuance fails once every "+
+					"minter is full")
+		}
+	}
+}
+
+// credentialLimitPerMinter reads the configured cap under the lock, since b.config is replaced
+// wholesale by a config write and a reload.
+func (b *backend) credentialLimitPerMinter() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.config.CredentialLimitPerMinter()
 }
