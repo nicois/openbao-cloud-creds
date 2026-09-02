@@ -72,6 +72,35 @@ bao read cloud-creds/aws/creds/deploy credential_kind=sigv4_session
 
 If the role serves a different shape the read is refused with `credential_kind_unsupported`, naming both shapes, **before anything is loaded or minted** — so a caller that could not have used the credential never causes one to be created. Omitting the pin still works and still tells you the shape in the response.
 
+
+### Spreading a fleet across minters (`shard_key`)
+
+A role's minter set exists for redundancy, but it can also multiply an upstream rate limit: where a
+cloud meters per **account**, credentials minted by different accounts draw on separate budgets.
+Selection is by rendezvous hash of a per-client key, so a client is pinned to one minter and
+different clients spread across the set — and a heavy client exhausts its own shard rather than
+everybody's.
+
+`shard_key` is **optional**:
+
+```bash
+bao read cloud-creds/do/creds/reader shard_key=worker-7
+```
+
+Omit it and the caller's OpenBao token accessor is used, which is per-token and therefore usually
+per-worker — so a fleet where each instance has its own token gets spreading with no client change.
+Send it when several workers share one token (they would otherwise share a shard), or when a worker
+re-authenticates often and you want its shard to survive that.
+
+Affinity is a preference, not a constraint: an unhealthy or throttled minter falls through to the
+next preference deterministically, so redundancy is unaffected.
+
+Two caveats. It multiplies nothing if the set's minters live in the same upstream account. And on
+**AWS, GCP and Azure** it does not multiply the client's quota at all — there the credential's
+identity is a target named on the *role* (`iam_role_arn`, the impersonated service account,
+`app_object_id`) and is the same whichever minter issued it; on those three it spreads only the
+mint-time calls. The per-cloud table is in [`docs/decisions.md`](docs/decisions.md).
+
 This is what makes adding a shape backwards-compatible. A cloud can serve more than one: AWS SES over SMTP needs `{username, password}`, and cannot use an STS session at all, because SMTP `AUTH` carries only two values and there is nowhere to put the session token. When that shape appears, a client pinning `sigv4_session` keeps getting exactly what it asked for. A kind names a payload rather than a cloud, so two clouds emitting the same keys share one — GCP and OVH are both `oauth2_bearer` — and a conformance test over the whole registry enforces that rather than trusting it.
 
 ### Minter capability is verified, not assumed
