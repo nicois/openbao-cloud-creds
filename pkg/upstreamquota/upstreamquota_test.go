@@ -115,6 +115,29 @@ func TestTheReporterWarnsOncePerWindow(t *testing.T) {
 }
 
 // TestAHealthyQuotaSaysNothing: silence is the common case and must stay silent.
+// TestTheDefaultThresholdIsHalf pins the default, because it was chosen for a reason that is not
+// obvious from the number: it tracks how long the REMEDY takes (adding a minter account, a human
+// process of days), not how close failure is. Reporter's once-per-window rule is what makes a
+// threshold this early affordable.
+func TestTheDefaultThresholdIsHalf(t *testing.T) {
+	reporter := &upstreamquota.Reporter{}
+	// Just under half of 10000, with a reset so the once-per-window rule has a window to key on.
+	justUnderHalf := upstreamquota.Observe(headers(
+		"Ratelimit-Limit", "10000", "Ratelimit-Remaining", "4999", "Ratelimit-Reset", "1788340528"))
+	if got := reporter.Report(justUnderHalf, now); got == "" {
+		t.Error("4999 of 10000 produced no warning; the default threshold is meant to be half, " +
+			"because the remedy takes longer than the quota does")
+	}
+
+	fresh := &upstreamquota.Reporter{}
+	justOverHalf := upstreamquota.Observe(headers(
+		"Ratelimit-Limit", "10000", "Ratelimit-Remaining", "5001", "Ratelimit-Reset", "1788340528"))
+	if got := fresh.Report(justOverHalf, now); got != "" {
+		t.Errorf("5001 of 10000 warned: %q. Above half must stay silent, or the line stops meaning "+
+			"anything", got)
+	}
+}
+
 func TestAHealthyQuotaSaysNothing(t *testing.T) {
 	reporter := &upstreamquota.Reporter{}
 	healthy := upstreamquota.Observe(headers("Ratelimit-Limit", "10000", "Ratelimit-Remaining", "9900"))

@@ -122,9 +122,16 @@ type Reporter struct {
 	lastWarnedWindow time.Time
 }
 
-// DefaultFraction is the level at which a quota is worth mentioning: a fifth left. Late enough not
-// to be noise, early enough that adding a minter account is a considered action.
-const DefaultFraction = 0.2
+// DefaultFraction is the level at which a quota is worth mentioning: HALF left.
+//
+// Deliberately early. The threshold is not about proximity to failure, it is about how long the
+// remedy takes — spreading load across more minter accounts is a human process measured in days, so a
+// warning that fires with a fifth left gives an operator less notice than the fix needs.
+//
+// Half is affordable because Reporter warns at most once per quota window, so even a mount running
+// permanently over the line produces one log line an hour rather than one per request. A threshold
+// that would be noise at every request is not noise at once an hour.
+const DefaultFraction = 0.5
 
 // Report returns a message to log, or "" if there is nothing worth saying yet. The caller decides
 // severity and adds its own context (which cloud, which minter).
