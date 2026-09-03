@@ -16,6 +16,9 @@ type fakeCloudLister struct {
 	// (and leave the entity in place), simulating a non-404 upstream delete
 	// failure for one entity.
 	errOnID string
+	// deleted records ids in the order they were deleted, so a test can assert WHICH entities a
+	// bounded pass chose rather than only how many.
+	deleted []string
 }
 
 func (f *fakeCloudLister) ListTaggedEntities(ctx context.Context) ([]reconciler.UpstreamEntity, error) {
@@ -31,6 +34,7 @@ func (f *fakeCloudLister) DeleteEntity(ctx context.Context, id string) error {
 	if id == f.errOnID {
 		return fmt.Errorf("simulated delete failure for %s", id)
 	}
+	f.deleted = append(f.deleted, id)
 	for i, e := range f.entities {
 		if e.ID == id {
 			f.entities = append(f.entities[:i], f.entities[i+1:]...)
@@ -294,5 +298,70 @@ func TestRun_OwnedIDsErrorIsFailClosed(t *testing.T) {
 	// fail-closed pass must leave orphan-1 present (it was never deleted).
 	if len(cloud.entities) != 1 {
 		t.Fatalf("fail-closed must not delete; entities now %v", cloud.entities)
+	}
+}
+
+// TestTheDeleteBudgetGoesToLiveOrphansFirst: the per-pass cap is a brake on INFERRED deletion, and it
+// should spend its budget where deletion changes something.
+//
+// An orphan that has already expired is inert — it cannot be used — while a live one is an exposure.
+// A listing arrives in creation order, so expired credentials come FIRST (they are the oldest), and
+// before this the budget went to the harmless ones while live orphans waited for the next pass. On a
+// cloud whose credentials have no native expiry that never mattered; on one that lists expired
+// credentials it inverted the priority entirely.
+func TestTheDeleteBudgetGoesToLiveOrphansFirst(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-24 * time.Hour)
+
+	// Ordered as a listing sorted created_at ascending delivers them: expired first, being oldest.
+	cloud := &fakeCloudLister{entities: []reconciler.UpstreamEntity{
+		{ID: "expired-1", Name: "cloud-creds-role-x-a", CreatedAt: old, ExpiresAt: now.Add(-2 * time.Hour)},
+		{ID: "expired-2", Name: "cloud-creds-role-x-b", CreatedAt: old, ExpiresAt: now.Add(-time.Hour)},
+		{ID: "live-1", Name: "cloud-creds-role-x-c", CreatedAt: old, ExpiresAt: now.Add(time.Hour)},
+		{ID: "live-2", Name: "cloud-creds-role-x-d", CreatedAt: old},
+	}}
+	registry := &fakeRegistry{known: map[string]bool{}}
+
+	// A budget of two, so which two get spent is the whole question.
+	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 2}, cloud, registry)
+	result, err := r.Run(t.Context(), now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Deleted != 2 || !result.HitLimit {
+		t.Fatalf("deleted=%d hitLimit=%v, want 2 and true", result.Deleted, result.HitLimit)
+	}
+
+	deleted := map[string]bool{}
+	for _, id := range cloud.deleted {
+		deleted[id] = true
+	}
+	if !deleted["live-1"] || !deleted["live-2"] {
+		t.Errorf("the pass deleted %v; a budget of two should have gone to the two LIVE orphans, "+
+			"which are exposures, rather than to expired ones that cannot be used", cloud.deleted)
+	}
+	if deleted["expired-1"] || deleted["expired-2"] {
+		t.Errorf("the pass spent budget on an already-expired orphan (%v) while a live one remained",
+			cloud.deleted)
+	}
+}
+
+// TestUnknownExpiryIsTreatedAsLive pins the direction of the default. Most clouds' listings say
+// nothing about expiry, so treating unknown as inert would quietly defer everything — the reconciler
+// would keep finding orphans and never prioritise any of them.
+func TestUnknownExpiryIsTreatedAsLive(t *testing.T) {
+	now := time.Now()
+	cloud := &fakeCloudLister{entities: []reconciler.UpstreamEntity{
+		{ID: "expired", Name: "cloud-creds-role-x-a", CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute)},
+		{ID: "unknown", Name: "cloud-creds-role-x-b", CreatedAt: now.Add(-time.Hour)},
+	}}
+	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 1},
+		cloud, &fakeRegistry{known: map[string]bool{}})
+	if _, err := r.Run(t.Context(), now); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cloud.deleted) != 1 || cloud.deleted[0] != "unknown" {
+		t.Errorf("deleted %v; an entity whose expiry is unknown must be treated as live and take "+
+			"priority, or on the clouds that omit expiry nothing is ever prioritised", cloud.deleted)
 	}
 }

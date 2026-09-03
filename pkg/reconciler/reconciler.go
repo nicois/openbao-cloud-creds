@@ -11,6 +11,23 @@ type UpstreamEntity struct {
 	ID        string
 	Name      string
 	CreatedAt time.Time
+	// ExpiresAt is when the cloud will discard this credential by itself. OPTIONAL: zero means
+	// "unknown", which is the honest answer for the clouds whose listings do not report it and for
+	// the credentials that genuinely never expire.
+	//
+	// It exists to order the work rather than to change what is deleted. An orphan that has already
+	// expired is inert — it cannot be used — while a live one is an exposure, and the per-pass delete
+	// budget should be spent on the second first. Without this field the reconciler processed the
+	// listing in creation order, which puts the EXPIRED ones first (they are the oldest), so on a
+	// cloud that lists expired credentials the budget went to the harmless ones.
+	ExpiresAt time.Time
+}
+
+// inert reports whether this entity has already expired, so deleting it changes nothing about
+// security and only reduces clutter. Unknown expiry counts as live, which is the safe direction: it
+// keeps an entity in the priority queue rather than quietly deferring it forever.
+func (e UpstreamEntity) inert(now time.Time) bool {
+	return !e.ExpiresAt.IsZero() && e.ExpiresAt.Before(now)
 }
 
 // ParseCreatedAt converts an RFC3339 creation timestamp from a cloud list
@@ -48,6 +65,24 @@ type CloudLister interface {
 // must include minter-owned IDs; see cloudconfig.MinterUpstreamIDs.
 type Registry interface {
 	OwnedIDs(ctx context.Context) (map[string]struct{}, error)
+}
+
+// liveFirst partitions entities so that ones which have not yet expired come first, preserving the
+// input order within each group.
+//
+// Entities whose expiry is unknown are treated as live. That is deliberate: the alternative would
+// defer anything the cloud does not describe, which on most clouds is everything.
+func liveFirst(entities []UpstreamEntity, now time.Time) []UpstreamEntity {
+	ordered := make([]UpstreamEntity, 0, len(entities))
+	var inert []UpstreamEntity
+	for _, entity := range entities {
+		if entity.inert(now) {
+			inert = append(inert, entity)
+			continue
+		}
+		ordered = append(ordered, entity)
+	}
+	return append(ordered, inert...)
 }
 
 // MinConfirmationHold is the floor for an operator-requested confirmation hold
@@ -124,6 +159,11 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 		// live credential.
 		return nil, oerr
 	}
+
+	// Live orphans before inert ones, so the per-pass delete budget is spent where deletion changes
+	// the security posture. A stable partition rather than a sort: within each group the listing's
+	// own order is preserved, which is oldest-first and is the right order for equals.
+	entities = liveFirst(entities, now)
 
 	for _, entity := range entities {
 		if _, ok := owned[entity.ID]; ok {
