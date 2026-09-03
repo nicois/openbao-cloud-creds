@@ -161,14 +161,27 @@ Affinity chooses a *minter*. Whether that gives the client a separate rate-limit
 where the issued credential's **identity** comes from — and the plugins divide in two, which is
 verifiable from the mint call rather than a matter of opinion:
 
+**A correction, and the reason to distrust the rest of this table.** It was built by reading each
+mint call to see where the credential's identity comes from. That answers **ownership**, and I used it
+to answer **metering** — which are different questions, as a measurement then showed.
+
+Measured on DigitalOcean 2026-09-03: two credentials minted from ONE account, 25 requests spent on the
+first, and the second's counter fell by **one** — its own request. The public API meters **per token**,
+at 5000/hour each. So a DigitalOcean credential is *owned* by the minter's account and *metered* on
+itself, and affinity does not multiply a client's throughput there at all. The row below said it did.
+
+Every "Yes" that has not been measured is therefore an inference of the kind just refuted, and should
+be read as "unknown, and probably worth checking the same way": mint two credentials from one minter,
+spend one, read the other's counter.
+
 | Cloud | The mint call | The credential's identity is | Does affinity multiply the client's quota? |
 |---|---|---|---|
-| DigitalOcean | `POST /v2/tokens` | the minter's account | **Yes**, if the minters are in different accounts |
-| UpCloud | `POST /1.3/account/tokens` | the minter's account | **Yes**, same condition |
-| Vultr | `POST /v2/users` (sub-user) | a sub-user of the minter's account | **Yes**, same condition |
-| OVH | OAuth2 `client_credentials`, `MintToken(ctx)` — no target argument | the minter's own OAuth client | **Yes**, same condition |
-| Exoscale | `CreateAPIKey(ctx, name, role.RoleID)` | the minter's organization; `role.RoleID` only *scopes* it | **Yes**, same condition |
-| Akamai | `CreateClient(ctx, name, apiAccess, groupAccess)` | an API client under the minter's contract | **Yes**, same condition |
+| **DigitalOcean** | `POST /v2/tokens` | the minter's account | **No — measured.** Metered per token (5000/h each), so a client's throughput is not account-limited |
+| UpCloud | `POST /1.3/account/tokens` | the minter's account | Unknown (was inferred "yes") |
+| Vultr | `POST /v2/users` (sub-user) | a sub-user of the minter's account | Unknown (was inferred "yes") |
+| OVH | OAuth2 `client_credentials`, `MintToken(ctx)` — no target argument | the minter's own OAuth client | Unknown (was inferred "yes") |
+| Exoscale | `CreateAPIKey(ctx, name, role.RoleID)` | the minter's organization; `role.RoleID` only *scopes* it | Unknown (was inferred "yes") |
+| Akamai | `CreateClient(ctx, name, apiAccess, groupAccess)` | an API client under the minter's contract | Unknown (was inferred "yes") |
 | **AWS** | `AssumeRole{RoleArn: role.IAMRoleARN}` | **the target role, named on the ROLE** | **No** |
 | **GCP** | `GenerateAccessToken(ctx, role.ServiceAccountEmail, …)` | **the impersonated SA, named on the ROLE** | **No** |
 | **Azure** | `AddPassword(ctx, role.AppObjectID, …)` | **the app registration, named on the ROLE** | **No** |
@@ -180,10 +193,18 @@ key, and no set composition, changes that. Getting a second budget there means a
 pointing at a second target identity, and then the client chooses it by asking for that role —
 which is ordinary configuration, not affinity.
 
-Affinity is still not pointless on those three, and the distinction is worth keeping straight: it
-spreads the **mint-time** calls — `AssumeRole`, `generateAccessToken`, Graph `addPassword` — across
-minters, and those are themselves throttled. So it buys issuance throughput there, and client
-throughput only on the six above.
+Affinity is still not pointless where it does not multiply a client's quota, and after the
+DigitalOcean measurement this is most of its value rather than a footnote: it spreads the
+**mint-time** calls — `AssumeRole`, `generateAccessToken`, Graph `addPassword`, DigitalOcean's
+`CreateToken` — across minters, and those are metered too. On DigitalOcean the minting side is
+10000/hour on the private console API and demonstrably shared across sessions, while each issued
+credential gets its own 5000/hour. So the ceiling affinity raises is **issuance rate**, not worker
+throughput.
+
+That is a smaller claim than the feature was introduced with, and worth restating plainly: at roughly
+two calls per issuance (mint plus revoke) a single minting budget of 10000/hour caps a mount at a few
+thousand issuances an hour, and more minters raise that. The isolation argument is unaffected — a
+heavy client still exhausts its own shard of the minting budget rather than everybody's.
 
 ### What it cannot do
 
