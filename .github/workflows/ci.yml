@@ -73,8 +73,16 @@ jobs:
 
       # Pinned. This tool decides the security verdict, and it was the only @latest
       # in the workflow — so the verdict could change without a commit here.
+      #
+      # A pin is not "set and forget", though: v1.1.4 predated Go 1.27 and its bundled
+      # x/tools SSA builder PANICKED on this repo's own source (`unexpected expr:
+      # *ast.KeyValueExpr`, scanning pkg/baotest). A panicking scanner is worse than a
+      # stale one — it exits non-zero, so it looks like a finding, and it stops the loop
+      # partway, so the modules after it are never scanned at all. Four modules were
+      # carrying a real grpc advisory behind that panic. Bump this whenever the Go
+      # toolchain moves.
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
       # The module list is DERIVED from go.work. This step used to keep a third
       # hardcoded copy, which had already drifted: it omitted pkg/capability — the
@@ -102,14 +110,22 @@ jobs:
 
       - name: Install OpenBao
         run: |
-          # Release assets are named openbao_<ver>_linux_amd64.deb (not bao_…),
-          # and v2.5.3 shipped no .deb (404). Use 2.5.4 (matches the spike cluster).
-          BAO_VERSION=2.5.4
+          # Release assets are named openbao_<ver>_linux_amd64.deb (not bao_…).
+          # 2.6.2 is current and matches the sdk/v2 version every module requires.
+          BAO_VERSION=2.6.2
           base="https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}"
           curl -fsSL -o /tmp/bao.deb "${base}/openbao_${BAO_VERSION}_linux_amd64.deb"
           # Verify before installing. This was an unverified `dpkg -i` of a remote
           # package into the job that then builds and tests the plugins (A21).
-          curl -fsSL -o /tmp/bao.sums "${base}/openbao_${BAO_VERSION}_SHA256SUMS"
+          #
+          # BOTH names here are volatile and neither is guessable, so check them against
+          # the release's asset list before bumping the version. The checksum file has
+          # been called three things: openbao_<ver>_SHA256SUMS (gone), then
+          # checksums-<os>.txt split per platform (2.5.x), now a single checksums.txt
+          # (2.6.x). The stale name is what broke this job — the .deb still downloaded
+          # fine, and it was VERIFICATION that 404'd, which is the half whose absence
+          # would otherwise be silent.
+          curl -fsSL -o /tmp/bao.sums "${base}/checksums.txt"
           ( cd /tmp && grep "openbao_${BAO_VERSION}_linux_amd64.deb$" bao.sums | sed 's|  .*/|  |' > bao.deb.sum \
             && sed -i "s|openbao_${BAO_VERSION}_linux_amd64.deb|bao.deb|" bao.deb.sum \
             && sha256sum -c bao.deb.sum )
