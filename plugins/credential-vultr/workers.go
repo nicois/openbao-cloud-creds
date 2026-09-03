@@ -143,7 +143,7 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 
 	cfg := reconciler.Config{
 		MaxDeletesPerPass: maxDeletes,
-		ConfirmationHold:  1 * time.Hour,
+		ConfirmationHold:  reconciler.WorkerConfirmationHold,
 		DryRun:            false,
 	}
 

@@ -1056,3 +1056,74 @@ What this does NOT decide is whether SES-over-SMTP gets built. It needs a long-l
 IAM key, which is a phased-rotation problem (the OCI strategy) rather than a JIT one —
 see the SES note in that section. The shape mechanism is worth having regardless,
 because it is the thing that has to exist *before* a second shape, not after.
+
+## Why the reconciler's delete cap is per class, and expired orphans get their own budget
+
+`max_deletes_per_pass` (default 10) exists because reconciler deletion is **inferred**: an
+upstream credential is an orphan because this mount cannot find it in its own records. A
+subtly incomplete owned-set therefore nominates *live* credentials — that is exactly what
+A1 was, where a rotation successor was owner-tagged but not lease-tracked and got deleted
+out from under its set — and a low cap is what bounds the damage and leaves a human time to
+notice.
+
+That reasoning does not apply to a credential the cloud has already expired. Nothing can
+use it, so deleting it cannot break a workload; it is housekeeping.
+
+Until now both were charged to one budget, spent in the order the cloud listed them — and
+listers sort oldest-first, so **expired credentials come first**. A pass with ten of budget
+and twelve expired orphans ahead of two live ones spent the whole cap on credentials that
+could not have hurt anyone, and the two actual exposures waited for the next pass. The
+priority was exactly inverted, on the one dimension the cap is supposed to be careful about.
+
+So `UpstreamEntity` gained an optional `ExpiresAt` and the budget became two counters.
+
+- **Separate counters, not an exemption for expired orphans.** The tempting version is to
+  stop counting them at all. It was rejected because *"expired"* is derived data too: a
+  node whose clock is hours fast, or a lister misreading the upstream's expiry field,
+  reclassifies live credentials as inert — and an exemption would then delete them without
+  bound, in the one scenario where the cap is the only thing left. Two counters keep the
+  runaway bound (at most 2× the cap per pass, the same order of magnitude) while
+  guaranteeing the thing that was broken: expired clutter can never starve a live orphan.
+  The accepted cost is that a purely-expired leak still drains at the cap per pass. It is
+  clutter, it costs only listing size, and nothing else reclaims it.
+- **Unknown expiry counts as LIVE.** Most listings report no expiry, and the four
+  hard-revoke clouds issue credentials with *no upstream expiry at all* — so treating
+  unknown as inert would put nearly everything on the housekeeping budget and erase the
+  distinction. Unknown means unknown, and unknown belongs under the conservative cap.
+- **No reordering.** Priority comes from the accounting, not from a sort, so the pass still
+  walks the listing in its own oldest-first order — the right order among equals. An earlier
+  attempt did partition live-before-inert; two budgets subsume it and are simpler.
+- **The scan continues past an exhausted budget** (`continue`, not `break`). This was a
+  reporting defect the 1025-orphan real-cloud run made obvious: a pass draining a leak of
+  1025 logged `orphans_found=11` — ten deleted plus the one that tripped the cap — because
+  the loop stopped counting when it stopped deleting. An operator draining a real leak could
+  not see how much was left. `Scanned` was right; `found` was not.
+- **`expired` is in the `/reconcile` response**, added to the uniform schema. Without it
+  the numbers look broken: `deleted` can legitimately exceed the configured cap now, and
+  nothing else distinguishes that from a cap that is not working. The `TargetLocalExpired`
+  clouds (AWS/GCP/OVH) report it equal to `deleted`, which is true by definition — an
+  expired credential is the only thing those passes reclaim.
+
+## Why the timer-driven confirmation hold is an hour, and named
+
+The minimum age an orphan must reach before deletion was a bare `1 * time.Hour` repeated in
+six `workers.go` files, with only the *manual* path's 5-minute floor (`MinConfirmationHold`)
+documented. It is now `reconciler.WorkerConfirmationHold`, one value, because it is the
+answer to "what stops the reconciler racing an issue" and that should be greppable.
+
+An hour is far above the 5-minute floor deliberately — a worker runs unattended. It covers
+three races, in increasing order of how easily an hour beats them:
+
+1. **The create-then-track window.** A credential exists upstream for a moment before this
+   mount records it, and in that window it is indistinguishable from an orphan.
+2. **Handover between cluster nodes.** Background work runs on the active node only
+   (`pkg/clusterrole`), so a failover moves the reconciler to a node whose storage view is
+   whatever replication has delivered. A tracking record written just before the handover
+   may be invisible to the promoted node's first pass, which would read a live credential as
+   an orphan. An hour is orders of magnitude more than raft needs, and waiting costs
+   nothing — an orphan an hour old is just as reclaimable.
+3. **Clock disagreement.** The age compares the *cloud's* creation timestamp against the
+   *local* clock, so the two come from different sources. Minutes of skew cannot cross an hour.
+
+A test keeps the worker's hold at or above the manual floor, since the two are set
+independently and the unattended one must not be the weaker.

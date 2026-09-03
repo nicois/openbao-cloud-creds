@@ -61,7 +61,7 @@ func RunReconcilerSafetySuite(t *testing.T, h Harness) {
 // local tracking entries — is now the `target` field, which is data.
 var reconcileResponseKeys = []string{
 	"mode", "dry_run", "target", "scanned", "found", "deleted", "remaining",
-	"delete_errors", "hit_limit", "confirmation_hold",
+	"delete_errors", "expired", "hit_limit", "confirmation_hold",
 }
 
 func assertReconcileSchema(t *testing.T, h Harness) {

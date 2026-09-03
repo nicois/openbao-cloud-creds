@@ -95,6 +95,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 		Deleted:          result.Deleted,
 		Remaining:        result.Scanned - result.Deleted,
 		DeleteErrors:     len(result.Errors),
+		Expired:          result.Expired,
 		HitLimit:         result.HitLimit,
 		ConfirmationHold: effectiveHold,
 	}.Map()}, nil

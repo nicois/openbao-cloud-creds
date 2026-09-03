@@ -15,19 +15,34 @@ type UpstreamEntity struct {
 	// "unknown", which is the honest answer for the clouds whose listings do not report it and for
 	// the credentials that genuinely never expire.
 	//
-	// It exists to order the work rather than to change what is deleted. An orphan that has already
-	// expired is inert — it cannot be used — while a live one is an exposure, and the per-pass delete
-	// budget should be spent on the second first. Without this field the reconciler processed the
-	// listing in creation order, which puts the EXPIRED ones first (they are the oldest), so on a
-	// cloud that lists expired credentials the budget went to the harmless ones.
+	// It exists to separate the two kinds of orphan the per-pass delete budget has to fund. An
+	// orphan that has already expired is inert — nothing can use it, so deleting it is housekeeping
+	// — while a live one is an exposure. Without this field the reconciler charged both to one
+	// budget in creation order, and expired credentials are the OLDEST, so on a cloud that lists
+	// them the whole budget went to the harmless ones and live orphans waited for the next pass.
 	ExpiresAt time.Time
 }
 
-// inert reports whether this entity has already expired, so deleting it changes nothing about
-// security and only reduces clutter. Unknown expiry counts as live, which is the safe direction: it
-// keeps an entity in the priority queue rather than quietly deferring it forever.
-func (e UpstreamEntity) inert(now time.Time) bool {
-	return !e.ExpiresAt.IsZero() && e.ExpiresAt.Before(now)
+// orphanClass says which delete budget an orphan is funded from. Named rather than a boolean
+// because the two are not "on and off" — they are two populations with different consequences.
+type orphanClass int
+
+const (
+	// liveOrphan can still be used by whoever holds it, so deleting it could break a workload. This
+	// is what the conservative per-pass cap exists for.
+	liveOrphan orphanClass = iota
+	// inertOrphan has already expired upstream. Deleting it is housekeeping.
+	inertOrphan
+)
+
+// classify decides which budget this entity draws on. Unknown expiry counts as LIVE, which is the
+// safe direction: it keeps the entity under the conservative cap rather than on the housekeeping
+// budget, and most clouds' listings report no expiry at all.
+func (e UpstreamEntity) classify(now time.Time) orphanClass {
+	if !e.ExpiresAt.IsZero() && e.ExpiresAt.Before(now) {
+		return inertOrphan
+	}
+	return liveOrphan
 }
 
 // ParseCreatedAt converts an RFC3339 creation timestamp from a cloud list
@@ -67,22 +82,42 @@ type Registry interface {
 	OwnedIDs(ctx context.Context) (map[string]struct{}, error)
 }
 
-// liveFirst partitions entities so that ones which have not yet expired come first, preserving the
-// input order within each group.
+// deleteBudget bounds a pass, counting live and already-expired orphans SEPARATELY.
 //
-// Entities whose expiry is unknown are treated as live. That is deliberate: the alternative would
-// defer anything the cloud does not describe, which on most clouds is everything.
-func liveFirst(entities []UpstreamEntity, now time.Time) []UpstreamEntity {
-	ordered := make([]UpstreamEntity, 0, len(entities))
-	var inert []UpstreamEntity
-	for _, entity := range entities {
-		if entity.inert(now) {
-			inert = append(inert, entity)
-			continue
-		}
-		ordered = append(ordered, entity)
+// One shared budget conflated two different risks. The budget exists because deletion here is
+// INFERRED — an entity is an orphan because this mount cannot find it in its own records — so a
+// subtly incomplete owned-set nominates live credentials, and a low per-pass cap is what bounds the
+// damage and leaves time for a human to notice (that is the A1 class in docs/audit-2026-08-22.md).
+// None of that reasoning applies to a credential the cloud has already expired: nothing can use it,
+// so deleting it is housekeeping and cannot break a workload.
+//
+// Two counters rather than exempting inert entities altogether, because "expired" is derived data
+// too. A node whose clock is hours fast, or a lister that misreads the upstream's expiry field,
+// reclassifies live credentials as inert — and an exemption would then delete them without bound.
+// So the runaway bound is kept (at most 2×limit deletions per pass, the same order of magnitude)
+// while guaranteeing the thing that was actually broken: expired clutter can never starve a live
+// orphan of budget, however much of it there is.
+//
+// The consequence to be aware of: a large expired leak still drains at limit-per-pass. That is
+// accepted — it is clutter, it costs only listing size, and it is going nowhere on its own.
+type deleteBudget struct {
+	limit int
+	live  int
+	inert int
+}
+
+// claim reserves one deletion from the counter for this class, reporting false when that counter is
+// spent. Charging the right counter is the whole mechanism.
+func (b *deleteBudget) claim(class orphanClass) bool {
+	spent := &b.live
+	if class == inertOrphan {
+		spent = &b.inert
 	}
-	return append(ordered, inert...)
+	if *spent >= b.limit {
+		return false
+	}
+	*spent++
+	return true
 }
 
 // MinConfirmationHold is the floor for an operator-requested confirmation hold
@@ -93,6 +128,30 @@ func liveFirst(entities []UpstreamEntity, now time.Time) []UpstreamEntity {
 // handlers), NOT inside Run — Run's ConfirmationHold==0 still means "guard
 // disabled" for internal/worker use and existing tests.
 const MinConfirmationHold = 5 * time.Minute
+
+// WorkerConfirmationHold is the minimum age an orphan must reach before a TIMER-DRIVEN pass will
+// delete it. Every background reconciler uses this; the value is far above MinConfirmationHold on
+// purpose, because a worker has nobody watching it.
+//
+// What it protects, in order of how likely each is to be met:
+//
+//  1. **The create-then-track window.** A credential exists upstream for a moment before this mount
+//     records it. In that window it is indistinguishable from an orphan, and the reconciler would
+//     delete a credential a client is about to be handed.
+//  2. **Handover between cluster nodes.** Background work runs on the ACTIVE node only
+//     (pkg/clusterrole), so a failover moves the reconciler to a node whose view of storage is
+//     whatever replication has delivered. A tracking record written moments before the handover may
+//     not be visible to the promoted node's first pass, which would read a live credential as an
+//     orphan. An hour is orders of magnitude more than raft replication needs, and there is no cost
+//     to waiting — an orphan an hour old is just as reclaimable.
+//  3. **Clock disagreement between nodes.** The age is computed from the cloud's own creation
+//     timestamp against the local clock, so the two come from different sources. Minutes of skew
+//     cannot reach across an hour.
+//
+// A named constant rather than the literal it replaces in six workers: the guarantee is a single
+// value now, it is greppable from the question "what stops the reconciler racing an issue", and
+// TestWorkerHoldClearsTheFloor keeps it above the manual path's floor.
+const WorkerConfirmationHold = time.Hour
 
 type Config struct {
 	MaxDeletesPerPass int
@@ -106,7 +165,13 @@ type Result struct {
 	Scanned      int
 	OrphansFound []string
 	Deleted      int
-	HitLimit     bool
+	// HitLimit reports that a pass left orphans undeleted because a delete budget was spent. The
+	// budget is per class, so this can be set while deletions of the OTHER class continued.
+	HitLimit bool
+	// Expired is how many of Deleted had already expired upstream, so an operator reading a
+	// deletion count larger than the configured cap can see why: the cap is per class, and this is
+	// the half that could not have broken anything.
+	Expired int
 	// Errors holds the IDs of orphans whose delete failed. A per-entity delete
 	// failure no longer aborts the whole pass (defense in depth alongside the
 	// lister-level 404-is-success handling); the failing ID is recorded here and
@@ -160,10 +225,10 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 		return nil, oerr
 	}
 
-	// Live orphans before inert ones, so the per-pass delete budget is spent where deletion changes
-	// the security posture. A stable partition rather than a sort: within each group the listing's
-	// own order is preserved, which is oldest-first and is the right order for equals.
-	entities = liveFirst(entities, now)
+	// Entities are processed in the listing's own order, which listers sort oldest-first — the right
+	// order for equals. Priority is handled by charging each deletion to its own budget rather than
+	// by reordering, so running out of budget for expired clutter cannot delay a live orphan.
+	budget := &deleteBudget{limit: r.config.MaxDeletesPerPass}
 
 	for _, entity := range entities {
 		if _, ok := owned[entity.ID]; ok {
@@ -187,9 +252,13 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 			continue
 		}
 
-		if result.Deleted >= r.config.MaxDeletesPerPass {
+		// Already expired upstream? Then this deletion is housekeeping and is funded separately.
+		class := entity.classify(now)
+		if !budget.claim(class) {
 			result.HitLimit = true
-			break
+			// Continue rather than break: the other class may still have budget, and stopping the
+			// scan here would also stop counting what remains.
+			continue
 		}
 
 		if err := r.cloud.DeleteEntity(ctx, entity.ID); err != nil {
@@ -199,11 +268,15 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 			continue
 		}
 		result.Deleted++
+		if class == inertOrphan {
+			result.Expired++
+		}
 		// One line per deletion, naming what was deleted and why it qualified. This
 		// is the audit trail for automated destruction of a cloud credential.
 		r.info("reconciler: deleted an orphaned upstream credential",
 			"id", entity.ID, "name", entity.Name,
-			"created_at", entity.CreatedAt, "reason", "not owned by any lease or minter")
+			"created_at", entity.CreatedAt, "expired_upstream", class == inertOrphan,
+			"reason", "not owned by any lease or minter")
 	}
 
 	r.summarise(result)
@@ -215,9 +288,10 @@ func (r *reconciler) Run(ctx context.Context, now time.Time) (*Result, error) {
 // faster than they are reclaimed) and per-entity delete failures.
 func (r *reconciler) summarise(result *Result) {
 	if result.HitLimit {
-		r.warn("reconciler: hit the per-pass delete limit; orphans remain",
-			"deleted", result.Deleted, "orphans_found", len(result.OrphansFound),
-			"limit", r.config.MaxDeletesPerPass)
+		r.warn("reconciler: hit a per-pass delete limit; orphans remain",
+			"deleted", result.Deleted, "of_which_expired", result.Expired,
+			"orphans_found", len(result.OrphansFound),
+			"limit_per_class", r.config.MaxDeletesPerPass)
 	}
 	if len(result.Errors) > 0 {
 		r.warn("reconciler: some orphan deletions failed and will be retried next pass",
@@ -226,7 +300,7 @@ func (r *reconciler) summarise(result *Result) {
 	if result.Deleted > 0 || len(result.OrphansFound) > 0 {
 		r.info("reconciler: pass complete",
 			"orphans_found", len(result.OrphansFound), "deleted", result.Deleted,
-			"dry_run", r.config.DryRun)
+			"of_which_expired", result.Expired, "dry_run", r.config.DryRun)
 	}
 }
 

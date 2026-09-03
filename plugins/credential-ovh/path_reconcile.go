@@ -70,6 +70,10 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 		// genuinely has none, not because the field does not apply.
 		DeleteErrors: 0,
 		HitLimit:     false,
+		// Every entry this pass reclaims is one whose credential has already expired — that is the
+		// only reason it is reclaimable — so the expired count is the whole of it. Reported rather
+		// than left at zero so the field means the same thing on every cloud.
+		Expired: res.Deleted,
 		// No confirmation hold: these entries are pruned because the credential they
 		// track has already EXPIRED, so there is no live credential a hold would protect.
 		ConfirmationHold: 0,

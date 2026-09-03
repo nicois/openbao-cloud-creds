@@ -220,6 +220,10 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 		Remaining:    res.scanned - res.deleted,
 		DeleteErrors: res.deleteErrors,
 		HitLimit:     res.deleted >= maxDeletes,
+		// OCI's pass does not read an upstream expiry: an auth token here has none, and the
+		// rotation slot rather than the token carries the lifetime. So nothing it reclaims can be
+		// shown to be already-expired, and the count is honestly zero rather than assumed.
+		Expired: 0,
 		// OCI's pass has no confirmation hold: a token is an orphan only if it carries
 		// our prefix AND is absent from slot storage, and a slot is written before its
 		// token is minted, so there is no create-then-track window to protect.

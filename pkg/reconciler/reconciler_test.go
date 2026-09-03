@@ -301,19 +301,18 @@ func TestRun_OwnedIDsErrorIsFailClosed(t *testing.T) {
 	}
 }
 
-// TestTheDeleteBudgetGoesToLiveOrphansFirst: the per-pass cap is a brake on INFERRED deletion, and it
-// should spend its budget where deletion changes something.
+// TestExpiredOrphansDoNotConsumeTheBudgetForLiveOnes: the per-pass cap bounds deletion that was
+// INFERRED, and that reasoning does not apply to a credential the cloud has already expired —
+// nothing can use it, so deleting it cannot break a workload.
 //
-// An orphan that has already expired is inert — it cannot be used — while a live one is an exposure.
-// A listing arrives in creation order, so expired credentials come FIRST (they are the oldest), and
-// before this the budget went to the harmless ones while live orphans waited for the next pass. On a
-// cloud whose credentials have no native expiry that never mattered; on one that lists expired
-// credentials it inverted the priority entirely.
-func TestTheDeleteBudgetGoesToLiveOrphansFirst(t *testing.T) {
+// It used to be one shared budget spent in listing order, and a listing is sorted oldest-first, so
+// expired credentials come FIRST. A leak of expired clutter therefore consumed the entire budget and
+// live orphans — the ones that are actual exposures — waited for the next pass.
+func TestExpiredOrphansDoNotConsumeTheBudgetForLiveOnes(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-24 * time.Hour)
 
-	// Ordered as a listing sorted created_at ascending delivers them: expired first, being oldest.
+	// Ordered as a lister sorting created_at ascending delivers them: expired first, being oldest.
 	cloud := &fakeCloudLister{entities: []reconciler.UpstreamEntity{
 		{ID: "expired-1", Name: "cloud-creds-role-x-a", CreatedAt: old, ExpiresAt: now.Add(-2 * time.Hour)},
 		{ID: "expired-2", Name: "cloud-creds-role-x-b", CreatedAt: old, ExpiresAt: now.Add(-time.Hour)},
@@ -322,46 +321,141 @@ func TestTheDeleteBudgetGoesToLiveOrphansFirst(t *testing.T) {
 	}}
 	registry := &fakeRegistry{known: map[string]bool{}}
 
-	// A budget of two, so which two get spent is the whole question.
+	// A budget of two: enough for the live pair, and the expired pair must not eat into it.
 	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 2}, cloud, registry)
 	result, err := r.Run(t.Context(), now)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Deleted != 2 || !result.HitLimit {
-		t.Fatalf("deleted=%d hitLimit=%v, want 2 and true", result.Deleted, result.HitLimit)
-	}
 
-	deleted := map[string]bool{}
-	for _, id := range cloud.deleted {
-		deleted[id] = true
+	if result.Deleted != 4 {
+		t.Fatalf("deleted %d of 4 (order %v); two expired orphans must not consume the budget the "+
+			"two live ones need", result.Deleted, cloud.deleted)
 	}
-	if !deleted["live-1"] || !deleted["live-2"] {
-		t.Errorf("the pass deleted %v; a budget of two should have gone to the two LIVE orphans, "+
-			"which are exposures, rather than to expired ones that cannot be used", cloud.deleted)
+	if result.Expired != 2 {
+		t.Errorf("Expired=%d, want 2; an operator seeing 4 deletions against a cap of 2 needs this "+
+			"field to see that half of them could not have broken anything", result.Expired)
 	}
-	if deleted["expired-1"] || deleted["expired-2"] {
-		t.Errorf("the pass spent budget on an already-expired orphan (%v) while a live one remained",
-			cloud.deleted)
+	if result.HitLimit {
+		t.Errorf("HitLimit was set though every orphan was deleted within its own budget")
+	}
+	// Oldest-first within the pass: no reordering, just separate accounting.
+	want := []string{"expired-1", "expired-2", "live-1", "live-2"}
+	if len(cloud.deleted) != len(want) {
+		t.Fatalf("deletion order %v, want %v", cloud.deleted, want)
+	}
+	for i := range want {
+		if cloud.deleted[i] != want[i] {
+			t.Fatalf("deletion order %v, want the listing's own oldest-first order %v",
+				cloud.deleted, want)
+		}
+	}
+}
+
+// TestEachClassIsStillBounded: separate budgets, not an exemption. "Expired" is derived data — a
+// clock hours fast, or a lister misreading the upstream's expiry field, reclassifies live
+// credentials as inert — so an unbounded exemption would delete them without limit. The runaway
+// bound stays; it is just per class.
+func TestEachClassIsStillBounded(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-24 * time.Hour)
+
+	entities := make([]reconciler.UpstreamEntity, 0, 12)
+	for i := range 6 {
+		entities = append(entities, reconciler.UpstreamEntity{
+			ID: fmt.Sprintf("expired-%d", i), Name: fmt.Sprintf("cloud-creds-role-x-e%d", i),
+			CreatedAt: old, ExpiresAt: now.Add(-time.Hour),
+		})
+	}
+	for i := range 6 {
+		entities = append(entities, reconciler.UpstreamEntity{
+			ID: fmt.Sprintf("live-%d", i), Name: fmt.Sprintf("cloud-creds-role-x-l%d", i),
+			CreatedAt: old, ExpiresAt: now.Add(time.Hour),
+		})
+	}
+	cloud := &fakeCloudLister{entities: entities}
+
+	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 2},
+		cloud, &fakeRegistry{known: map[string]bool{}})
+	result, err := r.Run(t.Context(), now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Deleted != 4 || result.Expired != 2 {
+		t.Fatalf("deleted=%d expired=%d (order %v), want 4 and 2 — two per class and no more",
+			result.Deleted, result.Expired, cloud.deleted)
+	}
+	if !result.HitLimit {
+		t.Error("HitLimit must be set: eight orphans were left undeleted because both budgets ran out")
+	}
+	// The scan continues past an exhausted budget, so what remains is still reported.
+	if len(result.OrphansFound) != 12 {
+		t.Errorf("OrphansFound has %d of 12; a spent budget must not stop the pass counting what is "+
+			"left, which is how an operator sees the leak growing", len(result.OrphansFound))
 	}
 }
 
 // TestUnknownExpiryIsTreatedAsLive pins the direction of the default. Most clouds' listings say
-// nothing about expiry, so treating unknown as inert would quietly defer everything — the reconciler
-// would keep finding orphans and never prioritise any of them.
+// nothing about expiry, and the four that hard-revoke issue credentials with no upstream expiry at
+// all — so treating unknown as inert would put nearly everything on the housekeeping budget and
+// quietly drop the distinction this all exists for.
 func TestUnknownExpiryIsTreatedAsLive(t *testing.T) {
 	now := time.Now()
 	cloud := &fakeCloudLister{entities: []reconciler.UpstreamEntity{
-		{ID: "expired", Name: "cloud-creds-role-x-a", CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute)},
-		{ID: "unknown", Name: "cloud-creds-role-x-b", CreatedAt: now.Add(-time.Hour)},
+		{ID: "unknown-1", Name: "cloud-creds-role-x-a", CreatedAt: now.Add(-time.Hour)},
+		{ID: "unknown-2", Name: "cloud-creds-role-x-b", CreatedAt: now.Add(-time.Hour)},
 	}}
 	r := reconciler.New(reconciler.Config{MaxDeletesPerPass: 1},
 		cloud, &fakeRegistry{known: map[string]bool{}})
-	if _, err := r.Run(t.Context(), now); err != nil {
+	result, err := r.Run(t.Context(), now)
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(cloud.deleted) != 1 || cloud.deleted[0] != "unknown" {
-		t.Errorf("deleted %v; an entity whose expiry is unknown must be treated as live and take "+
-			"priority, or on the clouds that omit expiry nothing is ever prioritised", cloud.deleted)
+	if result.Deleted != 1 || result.Expired != 0 || !result.HitLimit {
+		t.Errorf("deleted=%d expired=%d hitLimit=%v (order %v); an entity whose expiry is unknown "+
+			"must be charged to the LIVE budget, so a cap of one deletes exactly one",
+			result.Deleted, result.Expired, result.HitLimit, cloud.deleted)
+	}
+}
+
+// TestWorkerHoldClearsTheFloor: the timer-driven hold must be at least the floor the operator-facing
+// path clamps to. The two are set independently, and a worker with the weaker guard would be the
+// dangerous one — it runs unattended, and it is the pass that races a node handover.
+func TestWorkerHoldClearsTheFloor(t *testing.T) {
+	if reconciler.WorkerConfirmationHold < reconciler.MinConfirmationHold {
+		t.Fatalf("WorkerConfirmationHold is %v, below the manual path's floor of %v",
+			reconciler.WorkerConfirmationHold, reconciler.MinConfirmationHold)
+	}
+}
+
+// TestAConfirmationHoldSurvivesTheSeparateBudgets: the two delete budgets changed which entities a
+// pass reaches, so the age guard is re-asserted against the new loop. An expired orphan is still an
+// orphan the mount inferred, and a young one must be left alone whichever budget would fund it —
+// otherwise the housekeeping budget would become a way around the guard.
+func TestAConfirmationHoldSurvivesTheSeparateBudgets(t *testing.T) {
+	now := time.Now()
+	cloud := &fakeCloudLister{entities: []reconciler.UpstreamEntity{
+		// Created a minute ago and already expired: a short-lived credential mid-issue, which is
+		// exactly what the create-then-track window looks like from the outside.
+		{ID: "young-expired", Name: "cloud-creds-role-x-a", CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(-time.Second)},
+		{ID: "young-live", Name: "cloud-creds-role-x-b", CreatedAt: now.Add(-time.Minute)},
+		{ID: "old-expired", Name: "cloud-creds-role-x-c", CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour)},
+	}}
+	r := reconciler.New(reconciler.Config{
+		MaxDeletesPerPass: 10,
+		ConfirmationHold:  reconciler.WorkerConfirmationHold,
+	}, cloud, &fakeRegistry{known: map[string]bool{}})
+
+	result, err := r.Run(t.Context(), now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cloud.deleted) != 1 || cloud.deleted[0] != "old-expired" {
+		t.Fatalf("deleted %v; only the orphan older than the hold may go — a credential a minute "+
+			"old may still be mid-issue on this node or newly tracked on one that just handed over",
+			cloud.deleted)
+	}
+	if result.Expired != 1 {
+		t.Errorf("Expired=%d, want 1", result.Expired)
 	}
 }

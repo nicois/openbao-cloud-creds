@@ -48,9 +48,20 @@ type ResponseData struct {
 	// DeleteErrors is how many deletions failed. A per-entity failure does not abort
 	// a pass, so this can be non-zero on an otherwise successful response.
 	DeleteErrors int
-	// HitLimit reports that max_deletes_per_pass stopped the pass early, so another
-	// pass has work to do.
+	// HitLimit reports that a delete budget stopped the pass short, so another pass has work to do.
+	// max_deletes_per_pass is applied PER CLASS (see Expired), so this can be set while deletions of
+	// the other class carried on.
 	HitLimit bool
+	// Expired is how many of Deleted had already expired upstream at the time of the pass.
+	//
+	// It is here because without it the numbers look wrong: max_deletes_per_pass bounds live and
+	// expired reclamations separately, so `deleted` can legitimately exceed the configured cap, and
+	// an operator has no way to tell that from a broken cap. It is also the more useful half of the
+	// count — a leak made entirely of expired credentials is clutter, while live ones are exposure.
+	//
+	// For TargetLocalExpired this equals Deleted by definition: those passes reclaim local tracking
+	// entries whose credential has already expired, which is the only thing they reclaim.
+	Expired int
 	// ConfirmationHold is how recent a candidate may be and still be left alone.
 	// Zero for TargetLocalExpired: the credential has already expired, so there is
 	// nothing a hold would protect.
@@ -68,6 +79,7 @@ func (r ResponseData) Map() map[string]interface{} {
 		"deleted":           r.Deleted,
 		"remaining":         r.Remaining,
 		"delete_errors":     r.DeleteErrors,
+		"expired":           r.Expired,
 		"hit_limit":         r.HitLimit,
 		"confirmation_hold": r.ConfirmationHold.String(),
 	}
