@@ -5,14 +5,14 @@ go 1.27.0
 require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-metrics v0.5.4
-	github.com/nicois/openbao-cloud-creds/pkg/capability v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.0.0-00010101000000-000000000000
-	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/worker v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/capability v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/worker v0.1.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
 
@@ -49,7 +49,7 @@ require (
 	github.com/mitchellh/go-testing-interface v1.14.2-0.20210821155943-2d9075ca8770 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.0.0
+	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.1.0
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/openbao/go-kms-wrapping/v2 v2.8.0 // indirect
 	github.com/openbao/openbao/api/v2 v2.6.0 // indirect

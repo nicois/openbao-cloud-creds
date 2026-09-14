@@ -4,9 +4,9 @@ go 1.27.0
 
 require (
 	github.com/hashicorp/go-hclog v1.6.3
-	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.0.0
-	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.0.0-00010101000000-000000000000
+	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.1.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
 
