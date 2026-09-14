@@ -71,6 +71,20 @@ type Plugin struct {
 	// Package is the Go package path of the plugin's main, e.g.
 	// "github.com/you/your-repo/plugin/cmd".
 	Package string
+	// Dir is where to run `go build`, and it exists because the default is a trap. The
+	// build otherwise runs in the TEST's module — the e2e module — so that module's
+	// go.sum has to cover the plugin main's whole dependency graph. It does not, and
+	// `go mod tidy` will not add it: nothing in an e2e module imports the plugin's
+	// main package, so tidy prunes those sums on every run. The failure is a
+	// "missing go.sum entry" for a package the caller never mentions.
+	//
+	// A workspace hides it, which is why this went unnoticed: with go.work present the
+	// build resolves anyway. Point Dir at the plugin's own module (e.g. "../plugin")
+	// and the build uses the go.sum that actually describes what is being built.
+	//
+	// Empty keeps the old behaviour, so this is additive for the callers that are
+	// already green.
+	Dir string
 }
 
 // Cluster is a running dev server plus a root-token client for driving it.
@@ -164,8 +178,11 @@ func buildPlugin(t *testing.T, pluginDir string, p Plugin) {
 	}
 	out := filepath.Join(pluginDir, p.Name)
 	cmd := exec.Command("go", "build", "-o", out, p.Package)
+	// Dir empty leaves the build in the test's module, which is the historical behaviour.
+	cmd.Dir = p.Dir
 	if combined, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building plugin %s (%s) failed: %v\n%s", p.Name, p.Package, err, combined)
+		t.Fatalf("building plugin %s (%s) in %q failed: %v\n%s",
+			p.Name, p.Package, cmd.Dir, err, combined)
 	}
 }
 
