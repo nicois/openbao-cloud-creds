@@ -165,3 +165,73 @@ func TestFirstStringFieldFindsNestedValues(t *testing.T) {
 		t.Errorf("unparseable input should yield empty, got %q", got)
 	}
 }
+
+// The numeric form of an account id, which is the half the uuid rule never covered. The case
+// above named "an account uuid" passed on uuidShaped, so nothing asserted this shape at all
+// and a real organization_id reached twelve committed recordings.
+//
+// Type preservation is asserted, not incidental: these recordings are replayed by a parity
+// test that compares JSON types, and turning a number into a string is one of the defects
+// that test exists to catch — so a "safer" redaction that quoted the value would break the
+// consumer while looking more careful.
+func TestScrubRemovesNumericAccountIdsAndKeepsTheirType(t *testing.T) {
+	r := NewRecorder(t, t.TempDir())
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "a numeric organization id stays a number",
+			input: `{"token":{"organization_id":7412037,"name":"x"}}`,
+			want:  `{"token":{"organization_id":0,"name":"x"}}`,
+		},
+		{
+			name:  "a string account id keeps its quotes",
+			input: `{"account_id":"acct-9182736455"}`,
+			want:  `{"account_id":"{redacted:account-id}"}`,
+		},
+		{
+			name:  "the encoded form, where every quote is escaped",
+			input: `"response":"{\"organization_id\":7412037}"`,
+			want:  `"response":"{\"organization_id\":0}"`,
+		},
+		{
+			name:  "already redacted input is left alone",
+			input: `{"organization_id":0}`,
+			want:  `{"organization_id":0}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := r.scrub(tc.input); got != tc.want {
+				t.Errorf("scrub:\n got  %s\n want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// A field name this rule does not know about must not be blanked. The rule is keyed on names
+// that mean "whose account", and widening it to every *_id would blank the token id and the
+// slot index — values the recordings exist to show.
+func TestScrubLeavesNonAccountIdsIntact(t *testing.T) {
+	r := NewRecorder(t, t.TempDir())
+
+	const body = `{"id":"585455852","rbac_version":null,"expires_in":3600,"page":11}`
+	if got := r.scrub(body); got != body {
+		t.Errorf("scrub altered fields that identify nothing:\n got  %s\n want %s", got, body)
+	}
+}
+
+// The gate, not the rule. refuseOnLeak re-scans the ENCODED file, so a pattern that insists on
+// a bare quote passes it vacuously — which is how a rule can look present and catch nothing.
+// Asserted by handing the gate a body the scrubber never saw.
+func TestTheGateRefusesAnUnscrubbedAccountId(t *testing.T) {
+	encoded := []byte(`{"question":"D","response":"{\"organization_id\":7412037}"}`)
+	if match := accountFieldShaped.FindString(string(encoded)); match == "" {
+		t.Fatal("the gate's own pattern does not match an account id in the encoded form it " +
+			"actually scans, so refuseOnLeak would pass this file")
+	}
+}

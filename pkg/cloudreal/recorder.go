@@ -62,6 +62,10 @@ const (
 	redactedLenFormat = redactedPrefix + "%d chars}"
 	redactedTagFormat = redactedPrefix + "%s}"
 
+	// redactedAccountNumber replaces a NUMERIC account id. It carries no redaction marker
+	// because it must stay a JSON number — see accountFieldShaped.
+	redactedAccountNumber = "0"
+
 	// minSecretLen is the shortest value worth registering for substring scrubbing. Below
 	// this a "secret" matches everywhere and turns every recording into confetti, which is
 	// its own way of destroying the evidence.
@@ -91,8 +95,29 @@ var (
 	// A credential quoted in an error body appears in no field this could match by name.
 	prefixedSecretShaped = regexp.MustCompile(`\b[a-z]{2,6}(?:_v?\d)?_[A-Za-z0-9]{16,}\b`)
 
-	// idShaped catches the long numeric/uuid ids that identify the account itself.
+	// uuidShaped catches the uuid form of an id that identifies the account itself.
 	uuidShaped = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+
+	// accountFieldShaped catches a JSON field whose NAME says it identifies the ACCOUNT
+	// rather than the request. Not a credential, but the package contract above promises to
+	// remove "account/organization ids", and a uuid rule only honours half of that: the
+	// numeric form sailed straight through, which is how a real organization_id reached ten
+	// committed recordings while a test case literally named "an account uuid" passed — it
+	// passed on the uuid rule, and nothing asserted the numeric shape at all.
+	//
+	// The value may be a JSON number or a JSON string and the replacement PRESERVES that
+	// type, because these recordings are replayed by a fake-parity test that compares types
+	// and "organization_id a string in the fake, a number in reality" is one of the exact
+	// defects that test exists to catch. A number is therefore blanked to zero rather than
+	// labelled; no real account id is zero, so that also makes scrubbing idempotent and
+	// keeps the gate below from firing on our own output.
+	//
+	// The optional backslashes are load-bearing. scrub runs on the raw body, but the
+	// fail-closed gate re-scans the ENCODED file, where every quote is \" — so a pattern
+	// insisting on a bare quote would pass the gate vacuously.
+	accountFieldShaped = regexp.MustCompile(
+		`(\\?"(?:organization_id|organisation_id|account_id|customer_id|owner_id|tenant_id)\\?"\s*:\s*)` +
+			`(\\?"[^"\\]*\\?"|-?[1-9][0-9]*)`)
 )
 
 // Rule is a caller-supplied redaction: a shape this recorder does not know about, and the
@@ -250,10 +275,29 @@ func (r *Recorder) scrub(body string) string {
 	out = prefixedSecretShaped.ReplaceAllString(out, fmt.Sprintf(redactedTagFormat, "prefixed-secret"))
 	out = emailShaped.ReplaceAllString(out, fmt.Sprintf(redactedTagFormat, "email"))
 	out = uuidShaped.ReplaceAllString(out, fmt.Sprintf(redactedTagFormat, "uuid"))
+	out = accountFieldShaped.ReplaceAllStringFunc(out, redactAccountField)
 	for _, secret := range r.known() {
 		out = strings.ReplaceAll(out, secret, fmt.Sprintf(redactedLenFormat, len(secret)))
 	}
 	return out
+}
+
+// redactAccountField removes an account-identifying value while keeping its JSON type: a
+// string becomes a labelled placeholder, a number becomes zero. Losing the value is the
+// point; losing the type would break the fake-parity replay that consumes these recordings.
+func redactAccountField(match string) string {
+	parts := accountFieldShaped.FindStringSubmatch(match)
+	field, value := parts[1], parts[2]
+	var quote string
+	switch {
+	case strings.HasPrefix(value, `\"`):
+		quote = `\"`
+	case strings.HasPrefix(value, `"`):
+		quote = `"`
+	default:
+		return field + redactedAccountNumber
+	}
+	return field + quote + fmt.Sprintf(redactedTagFormat, "account-id") + quote
 }
 
 // scrubHeaders keeps header NAMES — which answer "what does this API require?", one of the
@@ -296,6 +340,7 @@ func (r *Recorder) refuseOnLeak(name string, encoded []byte) {
 		"a prefixed secret":          prefixedSecretShaped,
 		"a credential-bearing field": tokenFieldShaped,
 		"a uuid":                     uuidShaped,
+		"an account identifier":      accountFieldShaped,
 	} {
 		if match := shape.FindString(text); match != "" && !strings.Contains(match, redactedPrefix) {
 			r.t.Fatalf("REFUSING TO WRITE %s: %s survived redaction (%q). These recordings are "+
