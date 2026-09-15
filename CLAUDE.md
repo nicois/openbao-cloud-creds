@@ -83,7 +83,7 @@ go build github.com/nicois/openbao-cloud-creds/...
 go test -race github.com/nicois/openbao-cloud-creds/...
 make test-conformance  # the cloud × category matrix + the shared suites over all ten plugins
 make test-e2e      # plugin binaries in a live OpenBao, driven over HTTP through the lease lifecycle (needs `bao`)
-make test-cloud-real-do  # calls the REAL DigitalOcean API and creates/deletes real PATs (needs CLOUDREAL_DO_TOKEN + a disposable account)
+make test-cloud-real-do  # the whole DO real-cloud surface, since -run TestRealDO matches both probes: calls the REAL DigitalOcean API and creates/deletes real PATs AND one real Spaces access key (needs CLOUDREAL_DO_TOKEN + a disposable account) — so the NEVER-RUN note on the next line covers this target too
 make test-cloud-real-do-spaces # calls the REAL DO Spaces-key API and creates/deletes real access keys (same CLOUDREAL_DO_TOKEN, needs the spaces_key scopes; optional CLOUDREAL_DO_SPACES_BUCKET/_REGION). NEVER RUN — this is the one probe with no result
 make test-cloud-real-aws # calls the REAL AWS STS API (needs CLOUDREAL_AWS_KEY=id:secret + CLOUDREAL_AWS_ROLE_ARN); $0, nothing to clean up — STS sessions expire on their own
 make lint          # golangci-lint v2 (pinned v2.13.1) across every module — config in .golangci.yml; plus a tagged pass (e2e, cloud_real) over TAGGED_LINT_TARGETS (a tagged surface is invisible to plain lint)
