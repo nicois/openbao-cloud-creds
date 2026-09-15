@@ -72,7 +72,7 @@ The plugin serves (1). Nothing here reopens (2), and a Spaces key issued by this
 This work originated inside an internal multi-cloud OpenBao raft cluster spike (6 clouds, Shamir seal on every node, WireGuard mesh). That infrastructure lives in a separate (private) repository. **This repo is the open-source extraction of just the credential-issuance plugins** — the cluster operations, terraform, CA, and seal management belong to the spike, not here.
 
 If you find references in commit history or older notes to:
-- "Aiven", "aiven-creds", "SRE-12109" — those are the upstream private project; ignore them.
+- a company name, a `*-creds` project name, or a ticket key (`SRE-…`) — those belong to the private upstream project; ignore them.
 - "the spike", "the multi-cloud raft cluster" — that's the infrastructure where these plugins were originally prototyped; not part of this repo.
 
 ## Build / test / lint

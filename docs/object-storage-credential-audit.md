@@ -1,7 +1,7 @@
 # Object Storage Credential Audit
 
 **Date:** 2026-05-30 (DigitalOcean rows re-verified and corrected 2026-08-21 — see [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md))
-**Question:** Can OpenBao serve as the source of long-lived object-storage credentials for droplet backups? Ideal target: 30-day validity, rotated every 7 days. Fallback: indefinite long-lived. Must be compatible with what Aiven services currently consume.
+**Question:** Can OpenBao serve as the source of long-lived object-storage credentials for droplet backups? Ideal target: 30-day validity, rotated every 7 days. Fallback: indefinite long-lived. Must be compatible with what the consuming services currently accept.
 
 ## TL;DR
 
@@ -17,9 +17,9 @@
 | Linode (Akamai) | Object Storage | Yes | Yes (`/object-storage/keys`) | No | **Strong fit** — bucket-scopable, NEW plugin needed |
 | DigitalOcean | Spaces | Yes | **Yes** (`POST /v2/spaces/keys`, `bearer_auth`, scope `spaces_key:create_credentials`; contested until 2026-09-15, now settled — see [handover](do-spaces-keys-handover.md)) | No | **Blocked for per-customer isolation** on the quota alone (200 keys / 100 buckets per account); API issuance is no longer an objection |
 
-## The Aiven Compatibility Contract (the linchpin)
+## The Consumer Compatibility Contract (the linchpin)
 
-Aiven services consume object-storage credentials as a **rohmu/pghoard config dict** (schema in `aiven-core/avn/schemas_pydantic_v1/object_storage_config/`). The S3 variant requires:
+The consuming services take object-storage credentials as a **rohmu/pghoard-style config dict** (rohmu and pghoard are public backup tools; the consumer validates the dict against its own schema). The S3 variant requires:
 
 - `aws_access_key_id`, `aws_secret_access_key` — **the key pair**
 - `aws_session_token` — **supported** (optional; used for STS-style temporary creds)
@@ -29,9 +29,9 @@ Aiven services consume object-storage credentials as a **rohmu/pghoard config di
 
 1. **The credential contract is an S3 access-key + secret pair (+ optional session token).** Not a bearer token, not a connection string. Any OpenBao plugin issuing backup creds MUST produce this shape.
 
-2. **All S3-compatible clouds funnel through one code path** (`_prepare_pghoard_s3_config`, `storage_type="s3"` with custom `host`/`region`). DO, UpCloud, OVH, Exoscale, OCI all use this. Only **GCS** (service-account JSON) and **Azure** (account_key / sas_token) use native, non-S3 config shapes.
+2. **All S3-compatible clouds funnel through one code path** on the consumer side (`storage_type="s3"` with custom `host`/`region`). DO, UpCloud, OVH, Exoscale, OCI all use this. Only **GCS** (service-account JSON) and **Azure** (account_key / sas_token) use native, non-S3 config shapes.
 
-3. **Rotation is already supported natively.** Aiven has a live short-lived-credential refresh loop for BYOC (`aiven/acorn/storage_key_apis/`): nodes hold a `temporary_credentials_refresh_token` and POST to a refresh endpoint that does AWS `sts:AssumeRole` (12h `valid_until`, ~1h `refresh_at`) or GCS impersonation, returning `{aws_access_key_id, aws_secret_access_key, aws_session_token, valid_until, refresh_at}`. **Services tolerate rotation** by re-reading config.
+3. **Rotation is already supported natively.** The consumer has a live short-lived-credential refresh loop for bring-your-own-cloud deployments: nodes hold a `temporary_credentials_refresh_token` and POST to a refresh endpoint that does AWS `sts:AssumeRole` (12h `valid_until`, ~1h `refresh_at`) or GCS impersonation, returning `{aws_access_key_id, aws_secret_access_key, aws_session_token, valid_until, refresh_at}`. **Services tolerate rotation** by re-reading config.
 
 4. **The long-lived requirement is real.** Non-BYOC clouds (e.g. DO) bake **static, non-expiring keys** into the node's pruned config so backups survive management-plane outages. The temporary-token path requires the management plane reachable every ~1h (breaks after 12h offline). **This is exactly the gap the 30d/7d model fills:** long enough to survive outages, short enough to limit blast radius.
 
@@ -57,12 +57,12 @@ Aiven services consume object-storage credentials as a **rohmu/pghoard config di
 - **Quota:** **5 HMAC keys per service account** (binding), 100 SAs/project (raisable) → ~500 ceiling, scale via one SA per role.
 - **Rotation:** No native expiry; plugin-tracked. 5/SA comfortably holds overlapping slots.
 - **Scoping:** Per-SA IAM (HMAC keys inherit SA permissions), not per-key.
-- **Note:** Aiven's GCS config path uses SA JSON (`credentials`), not S3/HMAC. Using HMAC would require routing GCS through the S3 config path (`storage.googleapis.com` endpoint) — verify Aiven supports this, or add HMAC support.
+- **Note:** the consumer's GCS config path uses SA JSON (`credentials`), not S3/HMAC. Using HMAC would require routing GCS through the S3 config path (`storage.googleapis.com` endpoint) — verify the consumer supports this, or add HMAC support.
 
 ### Azure Blob — Viable but NOT S3-compatible
 - **Credential:** **SAS tokens** — ideal technical primitive: arbitrary expiry (30d+ fine), generated **offline** (HMAC-signed with account key, no API call), unlimited (not server-stored).
 - **Rotation:** 30d SAS reissued every 7d = perfect native fit. BUT: **no per-lease revocation** — only account-key rotation (invalidates ALL outstanding SAS).
-- **S3 compatibility: NO.** Azure Blob uses query-string auth, not SigV4. Aiven's Azure path uses `account_key` or `sas_token` (native), so this is consistent with Aiven — but only if the backup target is Azure-native, not S3-shaped.
+- **S3 compatibility: NO.** Azure Blob uses query-string auth, not SigV4. the consumer's Azure path uses `account_key` or `sas_token` (native), so this is consistent with it — but only if the backup target is Azure-native, not S3-shaped.
 - **Quota:** SAS unlimited; account keys exactly 2.
 
 ### OCI Object Storage — Viable
@@ -173,7 +173,7 @@ Aiven services consume object-storage credentials as a **rohmu/pghoard config di
 
 4. **Two clouds aren't S3-shaped:** Azure (SAS, native) and GCS-via-SA-keys. GCS works via HMAC keys; Azure requires Azure-native backup tooling.
 
-5. **Aiven already tolerates rotation** via the BYOC refresh loop, and the node config schema accepts `aws_session_token`. This means STS-style temporary triplets are drop-in — the integration risk is low for S3-compatible clouds.
+5. **The consumer already tolerates rotation** via its refresh loop, and the node config schema accepts `aws_session_token`. This means STS-style temporary triplets are drop-in — the integration risk is low for S3-compatible clouds.
 
 ## Recommended Strategy
 
@@ -181,7 +181,7 @@ A new credential type — **`object-storage` roles** — within the existing plu
 
 - An object-storage role variant that provisions S3 keys instead of API tokens
 - N=2 (or higher where quota allows) slots per role, rotated every 7d, each key living ~30d
-- The credential envelope returns `{access_key_id, secret_access_key, [session_token], endpoint, region}` matching Aiven's S3 config contract
+- The credential envelope returns `{access_key_id, secret_access_key, [session_token], endpoint, region}` matching the consumer's S3 config contract
 - Reconciler safety via owner-tag/name-prefix scheme
 
 **Build priority (by fit):**
@@ -193,7 +193,7 @@ A new credential type — **`object-storage` roles** — within the existing plu
 6. **DigitalOcean Spaces** — ~~blocked; revisit only if the undocumented API is sanctioned~~ **(2026-08-21: the API is now public and per-bucket-scopable — ranks alongside Exoscale/Linode on fit for JIT/short-lived, but the 200-keys/account cap keeps it out for long-lived per-customer isolation)**
 
 **Open items to verify on the live dev cluster:**
-- Whether Aiven's GCS path can consume HMAC keys via the S3 config (vs. SA JSON)
+- Whether the consumer's GCS path can consume HMAC keys via the S3 config (vs. SA JSON)
 - Exact OVH per-user S3 credential cap and S3 hostname format
 - Linode and Vultr per-account key quotas
 - Whether the 30d-validity requirement is satisfiable as "continuous freshness via N=2 rotation" or needs a single literal 30d key (matters for AWS/OCI 2-key clouds)

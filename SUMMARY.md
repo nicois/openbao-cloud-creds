@@ -110,4 +110,4 @@ A fourth layer — **real clouds** — covers **DigitalOcean and AWS**: `plugins
 
 ## Genealogy
 
-This repo is the open-source extraction of just the credential-issuance plugins from a larger internal multi-cloud OpenBao raft-cluster spike. Cluster ops, terraform, CA, and seal management belong to that (private) spike, not here. References to "Aiven", "SRE-12109", or "the spike" in history are the upstream private project — ignore them.
+This repo is the open-source extraction of just the credential-issuance plugins from a larger internal multi-cloud OpenBao raft-cluster spike. Cluster ops, terraform, CA, and seal management belong to that (private) spike, not here. A company name, a ticket key or "the spike" appearing in older commit history refers to that private upstream project — ignore them.
