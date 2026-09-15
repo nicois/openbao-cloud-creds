@@ -64,7 +64,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	if err != nil {
 		return credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err), nil
 	}
-	lister := &doCloudLister{client: client, instanceID: instanceID}
+	lister := &doCloudLister{client: client, instanceID: instanceID, logger: b.Logger()}
 	registry := &leaseRegistry{storage: req.Storage}
 
 	cfg := reconciler.Config{

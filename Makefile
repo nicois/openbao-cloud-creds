@@ -18,7 +18,7 @@ TAGGED_LINT_TARGETS := e2e:e2e plugins/credential-do:cloud_real plugins/credenti
 E2E_BUILD_TAG := e2e
 CLOUD_REAL_BUILD_TAG := cloud_real
 
-.PHONY: build build-standalone dist test test-conformance test-e2e test-cloud-real-do test-cloud-real-aws lint fmt clean smoke-test
+.PHONY: build build-standalone dist test test-conformance test-e2e test-cloud-real-do test-cloud-real-do-spaces test-cloud-real-aws lint fmt clean smoke-test
 
 build:
 	go build $(MODULE_PREFIX)/...
@@ -72,12 +72,33 @@ test-e2e:
 # CLOUDREAL_DO_TOKEN may come from the environment, from .env.cloud-real (gitignored,
 # read by nothing but this target), or from DIGITALOCEAN_PAT / DIGITALOCEAN_TOKEN —
 # the names a machine with DO tooling on it already has exported.
+# It also runs the Spaces-key probe below (both match -run TestRealDO), so this target
+# is the whole DO real-cloud surface.
 test-cloud-real-do:
 	@set -a; [ -f .env.cloud-real ] && . ./.env.cloud-real; set +a; \
 	: $${CLOUDREAL_DO_TOKEN:=$${DIGITALOCEAN_PAT:-$$DIGITALOCEAN_TOKEN}}; \
-	export CLOUDREAL_DO_TOKEN; \
+	export CLOUDREAL_DO_TOKEN CLOUDREAL_DO_SPACES_BUCKET CLOUDREAL_DO_SPACES_REGION; \
 	test -n "$$CLOUDREAL_DO_TOKEN" || { echo "no DO token (CLOUDREAL_DO_TOKEN, DIGITALOCEAN_PAT, DIGITALOCEAN_TOKEN or .env.cloud-real)"; exit 1; }; \
 	cd plugins/credential-do && go test -tags=$(CLOUD_REAL_BUILD_TAG) -count=1 -v -run TestRealDO ./...
+
+# Just the Spaces-access-key probe: creates and deletes ONE real Spaces key on the
+# account. This is the credential type credential-do can actually issue (its token
+# mint path is fenced — KI-009), so this is the target that decides whether the
+# plugin works against real DigitalOcean at all. It pins what no fake can: that
+# POST /v2/spaces/keys answers a bearer PAT (DO's product docs say Spaces keys are
+# panel-only, its OpenAPI spec specifies the endpoint), the mint response's field
+# names, the list envelope, and that DELETE answers exactly 204.
+# The minter PAT needs the spaces_key scopes; a full-access PAT holds them.
+# CLOUDREAL_DO_SPACES_BUCKET is optional — the probe's grant names a bucket that need
+# not exist, and if DigitalOcean refuses that, point this at a real one to separate
+# "the endpoint is closed" from "the grant was rejected".
+# CLOUDREAL_DO_SPACES_REGION (default nyc3) decides the endpoint the probe checks.
+test-cloud-real-do-spaces:
+	@set -a; [ -f .env.cloud-real ] && . ./.env.cloud-real; set +a; \
+	: $${CLOUDREAL_DO_TOKEN:=$${DIGITALOCEAN_PAT:-$$DIGITALOCEAN_TOKEN}}; \
+	export CLOUDREAL_DO_TOKEN CLOUDREAL_DO_SPACES_BUCKET CLOUDREAL_DO_SPACES_REGION; \
+	test -n "$$CLOUDREAL_DO_TOKEN" || { echo "no DO token (CLOUDREAL_DO_TOKEN, DIGITALOCEAN_PAT, DIGITALOCEAN_TOKEN or .env.cloud-real)"; exit 1; }; \
+	cd plugins/credential-do && go test -tags=$(CLOUD_REAL_BUILD_TAG) -count=1 -v -run TestRealDOSpacesKeys ./...
 
 # Calls the REAL AWS STS API with a real IAM user's access key. Needs
 # CLOUDREAL_AWS_KEY (access_key_id:secret_access_key) and CLOUDREAL_AWS_ROLE_ARN (a

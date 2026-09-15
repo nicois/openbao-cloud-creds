@@ -44,7 +44,7 @@ func (b *backend) credsPaths() []*framework.Path {
 
 func (b *backend) secretDO() *framework.Secret {
 	return &framework.Secret{
-		Type:   "do_token",
+		Type:   secretTypeToken,
 		Revoke: b.pathCredsRevoke,
 		Renew:  b.pathCredsRenew,
 	}
@@ -53,15 +53,23 @@ func (b *backend) secretDO() *framework.Secret {
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
 
-	// Checked first, and before any mint — see RequireCredentialKind for why.
-	if errResp := credenvelope.RequireCredentialKind(
-		d.Get(fieldCredentialKind).(string), servedCredentialKind); errResp != nil {
-		return errResp, nil
-	}
-
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
 		return errResp, nil
+	}
+
+	// Checked before any MINT, which is what RequireCredentialKind's contract is about.
+	// It can no longer come before the role is loaded, because which shape is served is
+	// now a property of the role rather than of the plugin — loading a role is a storage
+	// read, so a refused pin still costs nothing upstream (asserted by the lease
+	// conformance category, which counts the fake's credentials across a refusal).
+	if errResp := credenvelope.RequireCredentialKind(
+		d.Get(fieldCredentialKind).(string), credentialKindFor(role.credentialType())); errResp != nil {
+		return errResp, nil
+	}
+
+	if role.issuesSpacesKey() {
+		return b.issueSpacesKey(ctx, req, d, role, roleName)
 	}
 
 	now := time.Now()
@@ -141,8 +149,8 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		// DO scopes are fine-grained `<resource>:<verb>` permissions the token carries.
 		Scope:          strings.Join(role.Scopes, ","),
 		ScopeKind:      credenvelope.ScopeKindScopes,
-		CredentialKind: servedCredentialKind,
-		IssuedBy:       "cloud-creds-do/v0.1",
+		CredentialKind: credentialKindFor(role.credentialType()),
+		IssuedBy:       issuedBy,
 		MinterSet:      setName,
 		MinterID:       minterID,
 	})
@@ -167,7 +175,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		}
 	}
 
-	resp := b.Secret("do_token").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret(secretTypeToken).Response(env.ToMap(), map[string]interface{}{
 		"upstream_token_id": tokenResp.Token.ID,
 		fieldRole:           roleName,
 		fieldMinterSet:      setName,

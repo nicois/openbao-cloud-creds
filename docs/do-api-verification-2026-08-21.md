@@ -259,10 +259,34 @@ works for is the control panel, which holds a session rather than a bearer token
 
 Not tested: OAuth (`doo_v1_`) tokens. They are a different credential class and
 require interactive authorization, so they cannot be minted headlessly regardless —
-already the rejected alternative under D1. Also noted without conclusion:
+already the rejected alternative under D1. Also noted without conclusion at the time:
 `/v2/actions`, `/v2/ssh_keys` and `/v2/spaces/keys` returned 404 on this account,
 which is odd but does not bear on the reasoning above — `/v2/tokens` is *routed and
 refused*, not absent.
+
+**Those three 404s were followed up 2026-09-15, and they do not hold together as
+evidence of an absent path.** DO's Edge Gateway decides routing *before* it
+authenticates, so an unauthenticated request separates "path unknown" from "path known,
+credential needed" at no cost and with no credential:
+
+| Unauthenticated `GET` | Status | Reading |
+|---|---|---|
+| `/v2/definitely-not-a-real-path` | **404** (`X-Response-From: Edge-Gateway`) | this is what an unrouted path looks like |
+| `/v2/spaces/keys` | **401** | routed |
+| `/v2/spaces/keys/<key>` (also `POST`/`DELETE`) | **401** | routed, per method |
+| `/v2/actions` | **401** | routed — yet it 404'd on the probe account |
+| `/v2/ssh_keys` | **404** | not a DO path at all; SSH keys are `/v2/account/keys` |
+| `/v2/tokens` | **401** | routed — and still 403 for every PAT (KI-009) |
+
+So of the three, one was simply the wrong URL, and the other two are routed at the edge:
+whatever produced those 404s was not the gateway saying the path does not exist. That
+removes the 404 as a reason to doubt Spaces-key issuance, and is why D4's verdict is
+superseded by `docs/do-spaces-keys-handover.md`.
+
+**It proves routing, not entitlement, and the distinction is the whole of KI-009.**
+`/v2/tokens` is routed too and is refused for every PAT. An unauthenticated 401 says a
+request will be *weighed*, never that it will be allowed, so this cannot stand in for
+`make test-cloud-real-do-spaces`. What it does is retire one piece of contrary evidence.
 
 **R2 — the health check needs `account:read` (from run 1, still stands).** This
 plugin's health check *is* `GET /v2/account` (`do_client.go`), which a granular PAT

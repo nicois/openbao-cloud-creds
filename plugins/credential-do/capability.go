@@ -44,20 +44,49 @@ import (
 const forbiddenMintHint = "the minter PAT is live but token management is refused at DigitalOcean's " +
 	"edge gateway, which no privilege changes: a full-access PAT is refused here exactly as a scoped " +
 	"one is, and DO's scope catalog has no PAT-management scope to grant. No PAT can mint on DO " +
-	"(KI-009 in docs/known-issues.md); credential-do cannot issue against real DigitalOcean"
+	"(KI-009 in docs/known-issues.md); use a role with " + fieldCredentialType + "=" +
+	credentialTypeSpacesKey + ", which is the credential type this cloud will actually issue"
+
+// forbiddenSpacesMintHint is the diagnosis for a refused SPACES-key mint, and it is the
+// opposite advice from forbiddenMintHint: this endpoint is not fenced, so a 403 here is an
+// ordinary missing privilege with an ordinary remedy. Kept separate precisely so an
+// operator is not told the cloud can never mint when it can.
+const forbiddenSpacesMintHint = "the minter PAT is live but not authorized to create Spaces " +
+	"access keys: issue a PAT holding spaces_key:create_credentials, spaces_key:read and " +
+	"spaces_key:delete (the last two are needed to reconcile and revoke). Unlike token " +
+	"management, this endpoint is NOT fenced — a PAT with those scopes works"
 
 // capabilityChecks builds the probes proving each active minter in the set can
 // mint what one stored role asks for. The dedup key is the minter plus the role's
-// scope string, which is the whole of what reaches DO's mint call.
+// mint shape, which is the whole of what reaches DO's mint call — and since this
+// plugin serves two credential types, the shape has to name which.
 func (b *backend) capabilityChecks(set *cloudconfig.MinterSet, roleJSON []byte) []capability.Check {
 	var role doRole
 	if err := json.Unmarshal(roleJSON, &role); err != nil {
 		return nil
 	}
 	apiURL := b.apiURLLocked()
-	return capability.ChecksPerMinter(set, role.Name, strings.Join(role.Scopes, ","), func(minter cloudconfig.Minter) func(context.Context) (int, error) {
+	return capability.ChecksPerMinter(set, role.Name, mintShapeOf(&role), func(minter cloudconfig.Minter) func(context.Context) (int, error) {
+		if role.issuesSpacesKey() {
+			return b.probeSpacesMint(apiURL, minter, role.Name, role.Grants)
+		}
 		return b.probeMint(apiURL, minter, role.Name, role.Scopes)
 	})
+}
+
+// mintShapeOf renders everything about a role that reaches the cloud's mint call, and so
+// everything that could make one minter's answer differ from another's. It is the cache
+// and dedup key, which is why the credential type is part of it: the two types are
+// different endpoints with different entitlements — on real DigitalOcean, one is fenced
+// and the other is not — so a verdict about one says nothing about the other.
+func mintShapeOf(role *doRole) string {
+	if role.issuesSpacesKey() {
+		// Grants are part of the shape: two Spaces roles with different grants ask the
+		// cloud different questions, since a grant names a bucket the minter may not be
+		// entitled to.
+		return credentialTypeSpacesKey + "|" + strings.Join(renderGrants(role.Grants), ",")
+	}
+	return credentialTypeToken + "|" + strings.Join(role.Scopes, ",")
 }
 
 // probeMint returns a probe that mints a token with the role's scopes and
@@ -83,6 +112,41 @@ func (b *backend) probeMint(apiURL string, minter cloudconfig.Minter, roleName s
 		if delStatus, delErr := client.DeleteToken(ctx, resp.Token.ID); delErr != nil && delStatus != http.StatusNotFound {
 			b.Logger().Warn("capability probe token could not be deleted; left for the owner-tag reconciler",
 				fieldCloud, cloudName, "token_id", resp.Token.ID, "status", delStatus, "error", delErr)
+		}
+		return status, nil
+	}
+}
+
+// probeSpacesMint returns a probe that mints a Spaces access key with the role's exact
+// grants and deletes it again. A failed delete does not fail the probe — minting is what
+// was being proved, and the probe key carries the owner prefix so the reconciler reclaims
+// it. Cleaning up matters more here than on the token path: a Spaces key has no upstream
+// expiry, and this credential type's account cap is a documented 200.
+//
+// Deliberately WITHOUT forbiddenMintHint. That hint says no PAT can ever mint on this
+// cloud, which is true of token management and false here: a 403 on this endpoint means
+// the minter PAT is missing `spaces_key:create_credentials`, which an operator fixes by
+// issuing a PAT that has it. Attaching the KI-009 explanation would send them to read that
+// the cloud will never cooperate.
+func (b *backend) probeSpacesMint(apiURL string, minter cloudconfig.Minter, roleName string,
+	grants []spacesGrant,
+) func(context.Context) (int, error) {
+	return func(ctx context.Context) (int, error) {
+		client := newDOClient(apiURL, minter.Token)
+		probeName := capability.ProbeName(ownertag.Prefix(b.ownerInstance()), roleName)
+		created, status, err := client.CreateSpacesKey(ctx, probeName, grants)
+		if err != nil {
+			if status == http.StatusForbidden {
+				return status, capability.WithHint(forbiddenSpacesMintHint,
+					fmt.Errorf("probe mint returned %d: %w", status, err))
+			}
+			return status, fmt.Errorf("probe mint returned %d: %w", status, err)
+		}
+		accessKey := created.Key.AccessKey
+		if delStatus, delErr := client.DeleteSpacesKey(ctx, accessKey); delErr != nil && delStatus != http.StatusNotFound {
+			b.Logger().Warn("capability probe Spaces key could not be deleted; left for the owner-tag "+
+				"reconciler (it has no upstream expiry, so nothing else will remove it)",
+				fieldCloud, cloudName, "access_key", accessKey, "status", delStatus, "error", delErr)
 		}
 		return status, nil
 	}

@@ -25,6 +25,13 @@ callable with an ordinary PAT, as a production consumer demonstrates. So there i
 credential this plugin's existing minter can mint; see
 [`do-spaces-keys-handover.md`](do-spaces-keys-handover.md).
 
+**As of 2026-09-15 that credential is implemented** (`credential_type=spaces_key` on a
+role), which narrows KI-009 from "the plugin cannot issue" to "the plugin cannot issue a
+PAT". The narrowing rests on evidence about the Spaces endpoint, not on a run of this
+repo's own probe against it — `make test-cloud-real-do-spaces` is written and has not
+been run, because no DO token is reachable here. Read the KI-009 entry's status block
+before citing DO as a working cloud.
+
 **KI-010 came from the same layer's second cloud, on its first run.** Where DO's
 finding was about a cloud, AWS's was about this repo's code: the plugin reported a
 caller's invalid request as `internal` and counted it against the minter's health.
@@ -430,13 +437,41 @@ credential wants).
 
 ---
 
-## KI-009 — `POST /v2/tokens` is fenced off from PAT auth, so `credential-do` cannot mint against real DigitalOcean — [CONFIRMED-BLOCKER 2026-08-21]
+## KI-009 — `POST /v2/tokens` is fenced off from PAT auth, so `credential-do` cannot mint a TOKEN against real DigitalOcean — [CONFIRMED-BLOCKER 2026-08-21, SCOPE NARROWED 2026-09-15]
 
 **Status:** confirmed against a real account and **not fixable in this repo**. The
-plugin is retained as the shape reference and for the fakes; it is no longer
-presented as production-viable. See
+plugin is retained as the shape reference and for the fakes; its **token** credential
+type is not presented as production-viable. See
 [`decisions.md`](decisions.md) ("Why `credential-do` stays the reference
 implementation even though it cannot mint").
+
+**Scope narrowed 2026-09-15: this is about one credential TYPE, not the plugin.** A
+`credential-do` role now selects `credential_type=token` (the fenced one) or
+`credential_type=spaces_key`, an S3-compatible Spaces access key minted through
+`POST /v2/spaces/keys` — a path that is in DigitalOcean's published spec, declared
+`bearer_auth`, and reported to work in production with a plain bearer PAT
+([`do-spaces-keys-handover.md`](do-spaces-keys-handover.md)). So "credential-do cannot
+issue against real DO" is no longer the right summary; "credential-do cannot issue a
+PAT" is. Everything below about the fence itself stands unchanged, and the fence is
+still what the real-cloud probe pins.
+
+**What has NOT been verified:** that `POST /v2/spaces/keys` answers *this* repo's
+bearer PAT. The evidence for it is a published spec plus another service's production
+use, and the contradicting evidence is DigitalOcean's own product docs plus an earlier
+real-account 404 — the same spec-versus-docs contest KI-009 itself settled the other
+way. `make test-cloud-real-do-spaces` exists to settle it and has not been run (no DO
+token is reachable from the development environment). If that probe answers 403 from
+`Edge-Gateway`, this entry's original scope was right after all and the plugin has
+nothing it can mint; the probe says so in those words.
+
+That gap is not hypothetical. Re-reading DO's *published* spec on 2026-09-15 — the one
+check that needs no credential — found the Spaces listing unpaginated in both the fake
+and the client, which against real DO would have shown the reconciler **20 of up to
+200** keys, on the one credential type with no upstream expiry to fall back on
+(fixed; [`decisions.md`](decisions.md), "Why the Spaces listing pages"). Two sides
+written from one reading of a spec agree with each other whatever the spec says, so
+treat every remaining Spaces field name and status code as of that provenance until the
+probe runs.
 
 **Re-verified 2026-08-31, and the fence is NOT origin-dependent.** The same PAT was
 used from two different network origins in the same minute: `/v2/regions` answered
@@ -505,16 +540,20 @@ repo accepted has simply already come true.
   sets, metrics, conformance, e2e — is unaffected, because the fake stands in for
   the cloud in all of it.
 
-**No headless alternative exists.** OAuth tokens (`doo_v1_`) are documented and
-scopable but require interactive user authorization, so they cannot be minted by a
-plugin (already recorded as the rejected alternative under D1). Spaces keys are
-S3-style object-storage credentials — a different credential type, out of scope,
-and themselves of doubtful API-issuability (D4 is **contested**: in DO's spec, but
-documented as control-panel-only and 404 on a real account, which makes
-control-panel-only credential management look like DO policy rather than a
-`/v2/tokens` quirk)
-([`object-storage-credential-audit.md`](object-storage-credential-audit.md)). DO
-offers no headless way to issue a short-lived API credential.
+**No headless alternative exists *for a PAT*.** OAuth tokens (`doo_v1_`) are
+documented and scopable but require interactive user authorization, so they cannot be
+minted by a plugin (already recorded as the rejected alternative under D1). DO offers
+no headless way to issue a short-lived DigitalOcean **API** credential.
+
+*Revised 2026-09-15:* this paragraph used to dismiss Spaces keys in the same breath, on
+two grounds that no longer hold together. They are indeed a different credential type —
+but "out of scope" was a judgement about object storage as a *product substrate* (per-
+customer isolation at ~100k services, where the 100-bucket-per-account cap binds), not
+about whether this plugin may issue one; and their API-issuability, recorded as
+contested, is now supported by a published spec entry plus another service's production
+use of a bearer PAT. So a Spaces key **is** the headless alternative, for a different
+credential shape, and the plugin issues it. The distinction to keep: the fence closes
+DigitalOcean's own API to headless issuance; it says nothing about the S3 API.
 
 **How this is pinned, and what would tell us it changed**
 

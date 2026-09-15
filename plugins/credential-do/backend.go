@@ -84,6 +84,7 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		),
 		Secrets: []*framework.Secret{
 			b.secretDO(),
+			b.secretDOSpacesKey(),
 		},
 	}
 

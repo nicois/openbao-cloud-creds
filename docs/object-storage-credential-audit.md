@@ -126,7 +126,7 @@ Aiven services consume object-storage credentials as a **rohmu/pghoard config di
 >
 > **Revision 3 (2026-09-15) — the API objection is cleared; Revision 2's caution was right to
 > demand real-account evidence, and that evidence has now arrived from the opposite direction.**
-> The Aiven management plane creates Spaces keys in production with an ordinary
+> A production service outside this repo creates Spaces keys with an ordinary
 > `Authorization: Bearer <PAT>` against `/v2/spaces/keys`, with unit tests pinning the create,
 > list and delete requests. A running service is stronger evidence than a probe, so the spec was
 > right and the product docs are stale. The 404 seen on 2026-08-21 was consistent with
@@ -141,9 +141,21 @@ Aiven services consume object-storage credentials as a **rohmu/pghoard config di
 > See [`docs/do-spaces-keys-handover.md`](do-spaces-keys-handover.md), which also notes why this
 > matters beyond object storage: KI-009 leaves `credential-do` with no mintable credential at all,
 > and a Spaces key is one.
+>
+> **Built on 2026-09-15**, as a per-role `credential_type=spaces_key` on `credential-do` — so this
+> audit's subject is now partly *in* the repo, and the boundary needs stating precisely. What was
+> built is the *issuance of a Spaces access key as a leased credential*. What remains out of scope
+> is what this audit was actually assessing: object storage as a **substrate for per-customer
+> isolation**, which the bucket cap and the outage-survival requirement block on every cloud, on
+> grounds an API has no bearing on. A reader arriving at this document because "DO Spaces keys work
+> now" should not conclude the verdict below has moved; it has not.
+>
+> One caveat carried from Revision 3: the production evidence is another service's, not this
+> repository's. `make test-cloud-real-do-spaces` is the probe that would make it first-hand, and it
+> has not been run — no DO token is reachable from the development environment.
 
 - **Credential:** `POST /v2/spaces/keys` (secret returned once, in `key_create_response.secret_key`); list `GET /v2/spaces/keys`; get `GET /v2/spaces/keys/{access_key}`; modify `PUT`/`PATCH /v2/spaces/keys/{access_key}`; revoke `DELETE /v2/spaces/keys/{access_key}`. Tagged **Spaces Keys** in the public spec, and callable with a bearer PAT — confirmed against a production consumer, see Revision 3.
-- **Scoping:** Per-bucket `grants: [{bucket, permission}]` with `read` / `readwrite` / `fullaccess`. `fullaccess` cannot be mixed with scoped grants and takes precedence if both are sent. Comparable granularity to Exoscale/Linode, better than OVH's per-user coarseness.
+- **Scoping:** Per-bucket `grants: [{bucket, permission}]` with `read` / `readwrite` / `fullaccess`. The spec both documents a `400` refusing a `fullaccess` mixed with scoped grants and says `fullaccess` is prioritised if both are sent, so this plugin refuses the mix at role write — correct under either reading. Comparable granularity to Exoscale/Linode, better than OVH's per-user coarseness.
 - **Minter privilege:** dedicated `spaces_key:{read,create_credentials,update,delete}` PAT scopes — so a Spaces minter can be genuinely least-privilege (unlike the `credential-do` PAT minter, whose token-creation capability is unscopable).
 - **Native expiry:** None — consistent with cross-cutting finding #1; the plugin would own the TTL via JIT revoke or phased rotation.
 - **Safety boundary:** settable `name` (so the `cloud-creds-<role>-` owner-prefix scheme works) and a returned `created_at` (so the reconciler's `ConfirmationHold` age check is satisfiable — cf. F1 in `docs/state-assumption-verification-2026-05-31.md`, where missing create timestamps forced Exoscale/Vultr fail-closed).

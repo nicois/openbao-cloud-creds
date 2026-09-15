@@ -11,8 +11,35 @@ import (
 // The constructor is called once per category so no category inherits another's
 // upstream state.
 type Plugin struct {
+	// Cloud is the plugin DIRECTORY's cloud name (plugins/credential-<Cloud>). Several
+	// entries may share it — see Variant.
 	Cloud string
-	New   func(t *testing.T) Harness
+	// Variant distinguishes two conformance SUBJECTS drawn from one plugin, and is empty
+	// for the nine plugins that have only one.
+	//
+	// It exists because a Harness declares exactly one CredentialKind, ScopeKind,
+	// SecretType and TrackingPrefix, which is right — those are the contract a client
+	// and the lease core see — but a plugin may serve more than one credential type,
+	// chosen per role. `credential-do` does: a personal access token and an
+	// S3-compatible Spaces key. Without variants the shared suites covered whichever
+	// type the harness happened to name and NOTHING covered the other, which on that
+	// cloud meant covering the type real DigitalOcean refuses to mint (KI-009) instead
+	// of the type it serves.
+	//
+	// Keying registration on Cloud while naming subtests by Subject is deliberate: a
+	// variant must not be able to satisfy "every plugin directory is registered", or
+	// adding one to a cloud could hide the absence of another cloud entirely.
+	Variant string
+	New     func(t *testing.T) Harness
+}
+
+// Subject names this entry for subtest names and coverage tables: the cloud, plus the
+// variant where there is one.
+func (p Plugin) Subject() string {
+	if p.Variant == "" {
+		return p.Cloud
+	}
+	return p.Cloud + "-" + p.Variant
 }
 
 // suite binds a category to its runner and to the harness fields it needs. The
@@ -183,10 +210,10 @@ func ValidateHarness(h Harness) error {
 // neither wired nor declared fails, so an absent invariant can never be silent.
 func RunConformance(t *testing.T, p Plugin) {
 	t.Helper()
-	t.Run(p.Cloud, func(t *testing.T) {
+	t.Run(p.Subject(), func(t *testing.T) {
 		h0 := p.New(t)
 		if err := ValidateHarness(h0); err != nil {
-			t.Fatalf("%s conformance harness is invalid: %v", p.Cloud, err)
+			t.Fatalf("%s conformance harness is invalid: %v", p.Subject(), err)
 		}
 		for _, s := range suites {
 			t.Run(string(s.name), func(t *testing.T) {
@@ -194,7 +221,7 @@ func RunConformance(t *testing.T, p Plugin) {
 				// deny knobs must not leak between categories.
 				h := p.New(t)
 				if reason, skipped := h.Skips[s.name]; skipped {
-					t.Skipf("%s: category %q not exercised: %s", p.Cloud, s.name, reason)
+					t.Skipf("%s: category %q not exercised: %s", p.Subject(), s.name, reason)
 				}
 				s.run(t, h)
 			})

@@ -31,7 +31,8 @@ the role** rather than issue a lease it cannot honour.
 
 | Cloud | Mint-time lifetime control | Issued credential expires by itself? | At lease end | Credential can outlive lease? | Role TTL bounds enforced at write |
 |---|---|---|---|---|---|
-| DigitalOcean | none (request carries only `name` + `scopes`) | no | hard revoke `DELETE /v2/tokens/{id}` | only if revoke fails (reconciler is the backstop) | none needed — any TTL is enforceable by revoke |
+| DigitalOcean (`credential_type=token`) | none (request carries only `name` + `scopes`) | no | hard revoke `DELETE /v2/tokens/{id}` | only if revoke fails (reconciler is the backstop) | none needed — any TTL is enforceable by revoke |
+| DigitalOcean (`credential_type=spaces_key`) | **none, and none exists** — the Spaces API has no TTL, expiry or rotation field | no | hard revoke `DELETE /v2/spaces/keys/{access_key}` | only if revoke fails (reconciler is the backstop) | none needed — any TTL is enforceable by revoke |
 | AWS | yes — `DurationSeconds` = role TTL | yes, exactly at lease end | nothing (STS cannot be revoked) | no | **900s ≤ TTL ≤ 43200s** (STS `DurationSeconds` range), both bounds on `default_ttl` and `max_ttl` |
 | GCP | yes — `lifetime` = role TTL | yes, exactly at lease end | nothing (token cannot be revoked) | no | **TTL ≤ 43200s** (and ≤3600s in practice without the credential-lifetime-extension org policy). GCP documents **no minimum**, so no floor |
 | Azure | yes — `endDateTime` = mint + role TTL | yes, exactly at lease end | hard revoke `removePassword` | no | none documented by Microsoft; renewal refused (below) |
@@ -81,8 +82,8 @@ the role** rather than issue a lease it cannot honour.
   lease never *overstates* validity, which is the invariant that matters for
   clients; operators should size the rotation period as the real blast-radius
   window and use the emergency-rotate endpoint for incident response.
-- **Revoke-failure window on the four no-native-expiry clouds.** For DO,
-  Exoscale, Vultr and Akamai, a credential whose revoke cannot be performed
+- **Revoke-failure window on the four no-native-expiry clouds.** For DO (both of its
+  credential types), Exoscale, Vultr and Akamai, a credential whose revoke cannot be performed
   (issuing minter gone with no fallback in the set — KI-002) does **not** lapse
   on its own. The owner-tagged reconciler deletes it, but for Exoscale and Vultr
   the background reconciler skips entities whose age is unconfirmable (KI-004),
@@ -94,6 +95,16 @@ the role** rather than issue a lease it cannot honour.
   lease end would add defence in depth for the revoke-failure case above. Not
   implemented — it needs verification against a real Akamai account (the deferred
   real-cloud pass, audit #7).
+- **A DO Spaces key is the purest case of "revoke is the entire lifecycle" (2026-09-15).**
+  DigitalOcean's Spaces API has no expiry field of any kind, so there is nothing to send
+  and nothing to fall back on: revoke at lease end plus the owner-tag reconciler is the
+  *only* bound on an issued key, and its secret is unrecoverable after create, so the
+  lease's `internal_data` carrying the `access_key` is what makes revoke possible at all.
+  The row above therefore belongs with Exoscale/Vultr/Akamai rather than with anything
+  that expires. Two consequences worth naming: a Spaces role stays **renewable** (renewal
+  just defers the revoke, which is honest), and the revoke-failure window below applies to
+  it in full — with the extra sting that Spaces keys count against a per-account cap of
+  200, so an unreclaimed one consumes capacity indefinitely rather than merely existing.
 - **DO may have a native expiry the plugin does not use.** DO's control panel now
   requires an expiry when creating a personal access token, so the (undocumented)
   `POST /v2/tokens` endpoint may accept or even require one; the plugin sends only

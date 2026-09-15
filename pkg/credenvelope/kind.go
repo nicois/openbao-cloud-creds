@@ -71,6 +71,32 @@ const (
 	// KindOCIAuthToken: `{auth_token, user_id}` — an OCI auth token used as a
 	// password alongside the user it belongs to.
 	KindOCIAuthToken CredentialKind = "oci_auth_token"
+
+	// KindS3Credentials: `{access_key_id, secret_access_key, endpoint, region}`, plus
+	// `session_token` when the issuing cloud grants a temporary one — everything needed
+	// to construct an S3 client, and nothing else.
+	//
+	// Named for the PROTOCOL rather than for a cloud, because the S3 API is a de-facto
+	// standard and this shape is deliberately expected to be served by several plugins:
+	// DigitalOcean Spaces today, and equally Exoscale SOS, Linode/Akamai Object Storage,
+	// Cloudflare R2, MinIO or AWS S3 itself. A client that can parse it is configured for
+	// object storage, not for a vendor, which is the whole reason to standardise it.
+	//
+	// Why `endpoint` and `region` are in the CREDENTIAL block rather than in metadata:
+	// an S3 client cannot be constructed without them, and they are not derivable from
+	// the key material. Every S3-compatible vendor uses a different host, and SigV4
+	// signs a region string whether or not the vendor routes on it — so a client that
+	// had to infer either would be back to hard-coding per-cloud knowledge, which is
+	// precisely what naming a shape is for. They are therefore REQUIRED of every plugin
+	// declaring this kind, even where the cloud's own API does not return them (DO does
+	// not; the plugin derives them from the role's region).
+	//
+	// Why it is distinct from KindSigV4Session, which is also SigV4: that shape is an
+	// expiring STS session — three fields, a session token, no endpoint. This one is a
+	// long-lived object-storage key with no session token and its own endpoint. They are
+	// not substitutable in either direction, so a client must be able to refuse the one
+	// it cannot use.
+	KindS3Credentials CredentialKind = "s3_credentials"
 )
 
 // AllCredentialKinds is the closed vocabulary. Adding one is additive and does NOT
@@ -79,7 +105,7 @@ func AllCredentialKinds() []CredentialKind {
 	return []CredentialKind{
 		KindSigV4Session, KindOAuth2Bearer, KindBasicAuth, KindBearerToken,
 		KindScopedToken, KindKeySecret, KindAzureClientSecret, KindEdgeGrid,
-		KindOCIAuthToken,
+		KindOCIAuthToken, KindS3Credentials,
 	}
 }
 

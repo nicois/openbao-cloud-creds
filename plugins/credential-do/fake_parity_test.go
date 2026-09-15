@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -25,8 +26,12 @@ import (
 const (
 	parityRecordDir = "testdata/cloud-real"
 	tokensPath      = "/v2/tokens"
+	spacesKeysPath  = "/v2/spaces/keys"
 	jsonContentType = "application/json"
 	mintRequestBody = `{"name":"parity-probe","scopes":["account:read"]}`
+	// The grant is per-bucket because an account-wide one is expressed as an EMPTY bucket,
+	// which would leave `grants[].bucket` out of the shape entirely.
+	spacesCreateRequestBody = `{"name":"parity-probe","grants":[{"bucket":"parity","permission":"read"}]}`
 )
 
 // The responder constants. DigitalOcean states which layer answered a request in
@@ -100,6 +105,28 @@ func TestDOFakeMatchesRecordedRealResponses(t *testing.T) {
 			fakeStatus, fakeBody := fakeMintForbiddenBody(t)
 			assertFakeBody(t, name, recorded, fakeStatus, fakeBody)
 			asserted++
+		// The Spaces recordings are compared by SHAPE, not bytes — see
+		// TestJSONShapeDescribesFieldsAndTypes. They appear the first time
+		// `make test-cloud-real-do-spaces` runs; until then these branches are the
+		// standing arrangement that a run's evidence is checked rather than filed.
+		case recorded.Request.Method == http.MethodPost &&
+			recorded.Request.Path == spacesKeysPath &&
+			recorded.Status == http.StatusCreated:
+			fakeStatus, fakeBody := fakeSpacesKeyCreate(t)
+			assertFakeShape(t, name, recorded, fakeStatus, fakeBody)
+			asserted++
+		case recorded.Request.Method == http.MethodGet &&
+			recorded.Request.Path == spacesKeysPath &&
+			recorded.Status == http.StatusOK:
+			fakeStatus, fakeBody := fakeSpacesKeyList(t)
+			assertFakeShape(t, name, recorded, fakeStatus, fakeBody)
+			asserted++
+		case recorded.Request.Method == http.MethodDelete &&
+			strings.HasPrefix(recorded.Request.Path, spacesKeysPath+"/") &&
+			recorded.Status == http.StatusNoContent:
+			fakeStatus, fakeBody := fakeSpacesKeyDelete(t)
+			assertFakeShape(t, name, recorded, fakeStatus, fakeBody)
+			asserted++
 		default:
 			t.Errorf("recording %s is neither asserted nor listed in unassertable. Either drive the "+
 				"fake to produce this response and compare, or say in unassertable why the fake is not "+
@@ -151,6 +178,240 @@ func TestRecordedEvidenceForFencedTokenEndpoint(t *testing.T) {
 	}
 }
 
+// TestJSONShapeDescribesFieldsAndTypes covers the comparison the Spaces recordings need.
+//
+// The token recordings are compared byte for byte, because an error body is entirely
+// protocol. A Spaces recording cannot be: its values are the account's own — a redacted
+// access key, a real created_at, whatever buckets the account has — so what the fake is
+// answerable for is the SHAPE. That is also the part that actually breaks things: a
+// mint response whose secret arrives under a different key hands out an empty credential,
+// and no assertion on values would notice while an assertion on shape does.
+func TestJSONShapeDescribesFieldsAndTypes(t *testing.T) {
+	cases := []struct {
+		name  string
+		value interface{}
+		want  []string
+	}{
+		{
+			name: "nested objects and arrays",
+			value: mustDecode(t, `{"key":{"name":"probe","access_key":"DO00X","grants":`+
+				`[{"bucket":"b","permission":"read"}]}}`),
+			want: []string{
+				"key.access_key: string",
+				"key.grants[].bucket: string",
+				"key.grants[].permission: string",
+				"key.name: string",
+			},
+		},
+		{
+			// The envelope is the whole point of one of the assumptions being pinned: a
+			// listing under any other key decodes as empty and reclaims nothing.
+			name:  "list envelope",
+			value: mustDecode(t, `{"keys":[{"name":"probe"}]}`),
+			want:  []string{"keys[].name: string"},
+		},
+		{
+			// A type change is a shape change: created_at as a number would not parse, and
+			// the reconciler's confirmation hold would never clear.
+			name:  "leaf types are part of the shape",
+			value: mustDecode(t, `{"key":{"created_at":1700000000}}`),
+			want:  []string{"key.created_at: number"},
+		},
+		{
+			// An empty collection must not read as "no such field", or a fake that sends
+			// nothing would match a real response that sends a populated list.
+			name:  "empty collections are named",
+			value: mustDecode(t, `{"keys":[],"meta":{}}`),
+			want:  []string{"keys: empty array", "meta: empty object"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := jsonShape(tc.value)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("jsonShape() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The field paths DigitalOcean's OpenAPI spec gives the Spaces-key endpoints. Written out
+// as literals, from the spec rather than from the fake, so that editing the fake's field
+// names cannot quietly keep this test passing — the plugin's client and the fake are both
+// written from one reading of that spec, which is exactly the agreement no in-process test
+// can question.
+//
+// This is the best available stand-in and not the real thing: it pins the fake to the SPEC,
+// while `make test-cloud-real-do-spaces` pins it to DigitalOcean. When a recording exists,
+// TestDOFakeMatchesRecordedRealResponses compares the same shapes against the real
+// response and this test becomes the lesser of the two.
+var (
+	documentedSpacesCreateShape = []string{
+		"key.access_key: string",
+		"key.created_at: string",
+		"key.grants[].bucket: string",
+		"key.grants[].permission: string",
+		"key.name: string",
+		// Only here, and nowhere else in the key's life.
+		"key.secret_key: string",
+	}
+	documentedSpacesListShape = []string{
+		"keys[].access_key: string",
+		"keys[].created_at: string",
+		"keys[].grants[].bucket: string",
+		"keys[].grants[].permission: string",
+		"keys[].name: string",
+		// The listing is PAGINATED, which the first transcription of this list missed — the
+		// spec composes the response from `pagination` and `meta` as well as `keys`, and
+		// marks meta required. `links` is empty on a single-page listing (the spec types
+		// `pages` as an anyOf including the empty object) and carries pages.next/last when
+		// pages remain; a client that ignores it sees 20 of an account's keys.
+		"links: empty object",
+		"meta.total: number",
+	}
+)
+
+func TestDOFakeSpacesShapesMatchTheDocumentedAPI(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
+		status, body := fakeSpacesKeyCreate(t)
+		assertShape(t, "POST "+spacesKeysPath, status, http.StatusCreated, body, documentedSpacesCreateShape)
+	})
+	t.Run("list", func(t *testing.T) {
+		status, body := fakeSpacesKeyList(t)
+		assertShape(t, "GET "+spacesKeysPath, status, http.StatusOK, body, documentedSpacesListShape)
+	})
+	t.Run("delete", func(t *testing.T) {
+		status, body := fakeSpacesKeyDelete(t)
+		// 204 with NO body: DeleteSpacesKey accepts only 204, so this is the one shape a
+		// revoke may be answered with, and a body would mean the fake had invented one.
+		assertShape(t, "DELETE "+spacesKeysPath+"/<access key>", status, http.StatusNoContent, body, nil)
+	})
+}
+
+// fakeSpacesKeyCreate drives the fake's mint over HTTP and returns what a client sees.
+// Over HTTP rather than by calling the handler, because the JSON encoding is the part
+// being compared.
+func fakeSpacesKeyCreate(t *testing.T) (status int, body interface{}) {
+	t.Helper()
+	server := fakes.NewDOServer()
+	defer server.Close()
+	return callFake(t, server.URL+spacesKeysPath, http.MethodPost, spacesCreateRequestBody)
+}
+
+func fakeSpacesKeyList(t *testing.T) (status int, body interface{}) {
+	t.Helper()
+	server := fakes.NewDOServer()
+	defer server.Close()
+	// Seeded through the mint path, so the listing reports a key the fake really issued
+	// rather than one planted in its map with whatever fields a test chose.
+	if status, _ := callFake(t, server.URL+spacesKeysPath, http.MethodPost, spacesCreateRequestBody); status != http.StatusCreated {
+		t.Fatalf("seeding a key through the fake's mint returned %d", status)
+	}
+	return callFake(t, server.URL+spacesKeysPath, http.MethodGet, "")
+}
+
+func fakeSpacesKeyDelete(t *testing.T) (status int, body interface{}) {
+	t.Helper()
+	server := fakes.NewDOServer()
+	defer server.Close()
+	created, decoded := callFake(t, server.URL+spacesKeysPath, http.MethodPost, spacesCreateRequestBody)
+	if created != http.StatusCreated {
+		t.Fatalf("seeding a key through the fake's mint returned %d", created)
+	}
+	accessKey := accessKeyOf(t, decoded)
+	return callFake(t, server.URL+spacesKeysPath+"/"+accessKey, http.MethodDelete, "")
+}
+
+// accessKeyOf reads the access key out of a mint response the way the plugin's client
+// does, so a fake that renamed the field fails here rather than silently.
+func accessKeyOf(t *testing.T, body interface{}) string {
+	t.Helper()
+	wrapper, ok := body.(map[string]interface{})
+	if !ok {
+		t.Fatalf("the fake's mint response is not a JSON object: %T", body)
+	}
+	key, ok := wrapper["key"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("the fake's mint response has no `key` object: %v", wrapper)
+	}
+	accessKey, ok := key["access_key"].(string)
+	if !ok || accessKey == "" {
+		t.Fatalf("the fake's mint response has no access_key: %v", key)
+	}
+	return accessKey
+}
+
+// callFake performs one request against the fake and decodes the response. An empty
+// requestBody sends none.
+func callFake(t *testing.T, url, method, requestBody string) (status int, body interface{}) {
+	t.Helper()
+	reader := io.Reader(http.NoBody)
+	if requestBody != "" {
+		reader = strings.NewReader(requestBody)
+	}
+	req, err := http.NewRequestWithContext(t.Context(), method, url, reader)
+	if err != nil {
+		t.Fatalf("building the %s request failed: %v", method, err)
+	}
+	if requestBody != "" {
+		req.Header.Set("Content-Type", jsonContentType)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s to the fake failed: %v", method, err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading the fake's body failed: %v", err)
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return resp.StatusCode, nil
+	}
+	var decoded interface{}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("the fake returned non-JSON (%q): %v", string(raw), err)
+	}
+	return resp.StatusCode, decoded
+}
+
+// assertFakeShape compares a recording to the fake by field paths and leaf types.
+func assertFakeShape(t *testing.T, name string, recorded recordedResponse, fakeStatus int, fakeBody interface{}) {
+	t.Helper()
+	assertShape(t, name, fakeStatus, recorded.Status, fakeBody, jsonShape(recorded.Body))
+}
+
+func assertShape(t *testing.T, subject string, gotStatus, wantStatus int, gotBody interface{}, wantShape []string) {
+	t.Helper()
+	if gotStatus != wantStatus {
+		t.Errorf("%s: the fake answered %d, want %d", subject, gotStatus, wantStatus)
+	}
+	got := jsonShape(gotBody)
+	if len(got) == 0 && len(wantShape) == 0 {
+		return
+	}
+	if !reflect.DeepEqual(got, wantShape) {
+		t.Errorf("%s: the fake's response shape does not match.\n  fake: %v\n  want: %v\n"+
+			"A field name only the fake uses is a field the plugin decodes in tests and misses in "+
+			"production — for the mint response that means an empty credential returned as a success.",
+			subject, got, wantShape)
+	}
+}
+
+// mustDecode is how these cases are written: as the JSON a response really carries,
+// rather than as hand-built Go maps that could not have come off the wire.
+func mustDecode(t *testing.T, raw string) interface{} {
+	t.Helper()
+	var decoded interface{}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatalf("test fixture %q is not JSON: %v", raw, err)
+	}
+	return decoded
+}
+
 // fakeMintForbiddenBody drives the fake to the one state whose real counterpart is
 // recorded: a minter that authenticates but may not manage tokens.
 func fakeMintForbiddenBody(t *testing.T) (status int, body interface{}) {
@@ -193,6 +454,69 @@ func assertFakeBody(t *testing.T, name string, recorded recordedResponse, fakeSt
 			"A fake that invents friendlier errors is a fake whose error handling is untested.",
 			name, mustJSON(t, fakeBody), mustJSON(t, recorded.Body))
 	}
+}
+
+// jsonShape renders a decoded body as its sorted field paths and leaf types, so two
+// responses can be compared without comparing one account's data to a fake's invented
+// values. Array elements collapse to one `[]` path: the fake sends one key and a real
+// account sends however many it has, and the difference is not a shape difference.
+func jsonShape(value interface{}) []string {
+	if value == nil {
+		// No body at all — a 204, which is the only thing a Spaces delete may answer with.
+		// Reported as no shape rather than as a null leaf so that "empty" compares equal
+		// however the empty response reached here.
+		return nil
+	}
+	seen := make(map[string]bool)
+	collectShape(value, "", seen)
+	shape := make([]string, 0, len(seen))
+	for path := range seen {
+		shape = append(shape, path)
+	}
+	sort.Strings(shape)
+	return shape
+}
+
+func collectShape(value interface{}, path string, seen map[string]bool) {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if len(typed) == 0 {
+			seen[describeLeaf(path, "empty object")] = true
+			return
+		}
+		for key, nested := range typed {
+			child := key
+			if path != "" {
+				child = path + "." + key
+			}
+			collectShape(nested, child, seen)
+		}
+	case []interface{}:
+		if len(typed) == 0 {
+			seen[describeLeaf(path, "empty array")] = true
+			return
+		}
+		for _, element := range typed {
+			collectShape(element, path+"[]", seen)
+		}
+	case string:
+		seen[describeLeaf(path, "string")] = true
+	case float64:
+		seen[describeLeaf(path, "number")] = true
+	case bool:
+		seen[describeLeaf(path, "bool")] = true
+	default:
+		// Explicit null. Kept as its own type rather than folded into the field's other
+		// shape: a field that is sometimes null is something a decoder has to handle.
+		seen[describeLeaf(path, "null")] = true
+	}
+}
+
+func describeLeaf(path, kind string) string {
+	if path == "" {
+		return kind
+	}
+	return path + ": " + kind
 }
 
 func readRecording(t *testing.T, name string) recordedResponse {

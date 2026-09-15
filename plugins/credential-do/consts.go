@@ -67,14 +67,71 @@ const (
 	neverExpiresKey = "never_expires"
 )
 
-// servedCredentialKind is the shape of the `credential` block this plugin emits, and
+// The two credential types this plugin issues, selected per ROLE by `credential_type`.
+//
+//   - credentialTypeToken is a personal access token: the original shape, and the one
+//     that CANNOT be minted against real DigitalOcean, because /v2/tokens is refused at
+//     the edge gateway for every PAT (KI-009). Kept because it is the code-shape
+//     reference the conformance and e2e layers are built on.
+//   - credentialTypeSpacesKey is an S3-compatible Spaces access key: /v2/spaces/keys IS
+//     reachable with a bearer PAT, so this is what the plugin can actually issue.
+//
+// Token is the DEFAULT, because every role written before this field existed omits it
+// and must keep issuing exactly what it issued before.
+const (
+	credentialTypeToken     = "token"
+	credentialTypeSpacesKey = "spaces_key"
+)
+
+// Role fields belonging to the Spaces credential type. Region and endpoint are role
+// fields rather than config fields because one account's keys may serve buckets in
+// several regions, and the endpoint is part of the credential a client is handed.
+const (
+	fieldCredentialType = "credential_type"
+	fieldGrants         = "grants"
+	fieldRegion         = "region"
+	fieldEndpoint       = "endpoint"
+)
+
+// credentialKindFor names the shape of the `credential` block a role emits, which is
 // what a client may pin with `credential_kind` on a credential read.
 //
-// A constant because this cloud serves exactly one shape today. When a cloud gains a
-// second — AWS SES over SMTP is the live example, since the SMTP protocol has nowhere
-// to put a session token — this becomes a function of the ROLE, and the pin check
-// below is already the place that enforces it.
-const servedCredentialKind = credenvelope.KindScopedToken
+// A function of the ROLE rather than a constant: a cloud that gains a second credential
+// type stops having "which cloud" determine "which shape", and the pin check in
+// pathCredsRead is where that is enforced.
+func credentialKindFor(credentialType string) credenvelope.CredentialKind {
+	if credentialType == credentialTypeSpacesKey {
+		return credenvelope.KindS3Credentials
+	}
+	return credenvelope.KindScopedToken
+}
+
+// The two lease secret types. They are distinct because their revokes are distinct — one
+// deletes a token by id, the other a Spaces key by access key — and OpenBao dispatches
+// revoke on the secret type, so collapsing them would send every revoke down one path.
+const (
+	secretTypeToken     = "do_token"
+	secretTypeSpacesKey = "do_spaces_key"
+)
+
+// Keys of the S3 credential block. Named by the credential KIND rather than by this
+// cloud, because credenvelope.KindS3Credentials is a shared shape: a second plugin
+// serving it must emit these same four spellings, which is what the registry-wide
+// one-kind-one-key-set conformance test enforces.
+const (
+	credKeyAccessKeyID     = "access_key_id"
+	credKeySecretAccessKey = "secret_access_key"
+	credKeyEndpoint        = "endpoint"
+	credKeyRegion          = "region"
+)
+
+// internalKeyAccessKey is the lease internal_data key holding the issued Spaces key's
+// access key — the only identifier DigitalOcean gives it, so it is what revoke deletes by.
+const internalKeyAccessKey = "upstream_access_key"
+
+// issuedBy stamps metadata.issued_by. One constant, both credential types: it identifies
+// the mount's software, not the credential shape.
+const issuedBy = "cloud-creds-do/v0.1"
 
 // fieldCredentialKind is the optional request field a client uses to pin the shape it
 // can parse. Omitting it still works and still tells the client what it got, in

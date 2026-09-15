@@ -35,6 +35,15 @@ This document answers two questions:
 Two of the ten are now implemented (DigitalOcean, AWS). The rest of this document is
 still the plan and the evidence behind it; the per-cloud sections say which.
 
+**Update 2026-09-15: DigitalOcean has a *second* probe, and it has never been run.**
+`credential-do` now issues Spaces access keys as well as PATs, and
+`make test-cloud-real-do-spaces` is the probe for that path — the one that decides
+whether this plugin can issue against real DigitalOcean at all. It needs a PAT with the
+`spaces_key` scopes, which no environment here has, and it **fails rather than skips**
+without one. So the layer's verified score is still two clouds, and DO's entry in the
+table below is still "plugin blocked": the new credential type's real-cloud status is
+*unknown*, not good. See the DigitalOcean section.
+
 > **Confidence is stated per cloud and it matters.** Signup terms, trial credits
 > and which API a trial account may call change frequently and are not always
 > documented. Where a claim was not verifiable from the plugin's own code or from
@@ -67,7 +76,7 @@ by default.
 | **AWS** | yes — permanent free tier | card | **$0** (IAM + STS are unmetered) | **DONE 2026-08-21** — probe passes; found KI-010 | high (confirmed) |
 | **GCP** | yes — $300/90d trial, then free tier | card | **$0** (IAM Credentials calls are free) | **viable** | high on cost, medium on post-trial project rights |
 | **Azure** | yes — Entra tenant needs no subscription | card for a *subscription* only | **$0** (app registrations + secrets are Entra-free-tier) | **viable, and cheapest to keep** | medium-high |
-| **DigitalOcean** | account is free; card/PayPal verification | card or PayPal ($5 hold) | **$0** (PATs are free) | **DONE 2026-08-21** — account fine, **plugin blocked** (KI-009: no PAT can mint) | high (confirmed) |
+| **DigitalOcean** | account is free; card/PayPal verification | card or PayPal ($5 hold) | **$0** (PATs and Spaces keys are both free) | **PARTLY DONE** — 2026-08-21: account fine, **token type blocked** (KI-009: no PAT can mint). The `spaces_key` type's probe is written and **unrun** (2026-09-15) | high on the token verdict, **none** on Spaces |
 | **OCI** | yes — Always Free, indefinite | card (verification hold only) | **$0** (auth tokens are free) | account viable, **plugin blocked** (signing is a stub, G8) | high on account |
 | **Exoscale** | trial organisation with credit | card or business verification | **$0** (IAM roles + API keys are free) | probably viable | medium, unverified |
 | **UpCloud** | trial after identity verification | card or ID check | **$0** (account tokens are free) | probably viable | medium, unverified |
@@ -226,6 +235,30 @@ tested against reality, it was wrong about the thing that mattered most. Detail 
 the recorded evidence:
 [`do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md),
 "Real-account probe"; consequences for the plugin: [`known-issues.md`](known-issues.md).
+
+**Not done: DO's *other* credential type (2026-09-15).** The plugin now issues Spaces
+access keys as well (`credential_type=spaces_key`, `POST /v2/spaces/keys`), and that path
+is the one worth a real call now, for the same reason `/v2/tokens` was: the evidence is
+contested. DigitalOcean's published spec has the endpoint with `bearer_auth`; its product
+docs say three times that Spaces keys are panel-only; the 2026-08-21 probe got a 404 on
+that path; and another service uses it in production with a plain bearer PAT. Four
+sources, two verdicts.
+
+`make test-cloud-real-do-spaces` is written and **has not been run** — there is no DO
+token in this environment, and the probe fails rather than skips without one. Requirements
+are small: any account with Spaces enabled — the probe's grant names a bucket that need not
+exist — and a PAT holding `spaces_key:create_credentials`, `spaces_key:read` and
+`spaces_key:delete`, since the probe deletes what it mints and sweeps what a crashed
+earlier run left (a full-access PAT holds all three).
+`CLOUDREAL_DO_SPACES_REGION` (default `nyc3`) and an optional
+`CLOUDREAL_DO_SPACES_BUCKET` are the only knobs; the probe creates exactly one key with a
+narrow per-bucket `read` grant and deletes it, and sweeps any key left by a crashed
+earlier run. Cost is $0 — the key is free, and no bucket or object is created.
+
+Two outcomes are worth naming in advance, because the probe reports them differently:
+a 403 answered by `Edge-Gateway` means KI-009 repeats on this endpoint and the plugin has
+nothing it can mint at all; a 403 from a *service* is only a verdict about that PAT's
+scopes, which an operator can fix.
 
 ### OCI — account is free, the plugin is what blocks
 

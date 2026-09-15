@@ -109,28 +109,36 @@ func (c *doClient) CheckHealth(ctx context.Context) (int, error) {
 }
 
 func (c *doClient) ListTokens(ctx context.Context) ([]tokenInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v2/tokens", http.NoBody)
-	if err != nil {
+	var result listTokensResponse
+	if err := c.listJSON(ctx, "/v2/tokens", "list tokens", &result); err != nil {
 		return nil, err
+	}
+	return result.Tokens, nil
+}
+
+// listJSON performs an authenticated GET and decodes the response into out. The plugin's
+// two listing endpoints — tokens and Spaces keys, one per credential class — differ only
+// in path, envelope and the noun in the error, so the transport handling lives here once:
+// a listing is the reconciler's only view of what exists upstream, and two copies of it
+// could drift into treating a failure differently on one class than the other.
+func (c *doClient) listJSON(ctx context.Context, path, operation string, out interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, http.NoBody)
+	if err != nil {
+		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("DO API list tokens returned %d: %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("DO API %s returned %d: %s", operation, resp.StatusCode, string(bodyBytes))
 	}
-
-	var result listTokensResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-	return result.Tokens, nil
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func (c *doClient) DeleteToken(ctx context.Context, tokenID string) (int, error) {

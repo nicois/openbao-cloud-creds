@@ -246,6 +246,29 @@ against, and `plugins/credential-aws/fake_parity_test.go` instead holds
 `fakeSTSClient` to the *set of elements real STS sends* and re-applies every scrub
 gate to the committed recordings.
 
+**A third DO probe exists and has never been run (2026-09-15).**
+`plugins/credential-do/real_cloud_spaces_test.go` (`make test-cloud-real-do-spaces`)
+probes the credential type the plugin can actually issue — `POST /v2/spaces/keys` — and
+it is written to answer four assumptions that no fake can test, because the fake and the
+plugin were written from one reading of the same spec and therefore agree by
+construction: that the endpoint answers a bearer PAT with `201`, that the key material
+is under `key.access_key`/`key.secret_key` (a wrong name mints successfully and hands
+back an *empty* credential whose access key the lease also cannot record, so it is
+unrevocable), that the list envelope is `keys` alongside `links` and a required
+`meta.total` (a wrong one makes every listing decode as empty, silently disabling orphan
+reclamation for a credential with no upstream expiry), and that `DELETE` answers exactly
+`204` (anything else makes every revoke look failed — the KI-002 class).
+
+It has **not been run**: no DO token is reachable from the development environment, and
+the probe fails rather than skips without one, by the rule this layer is built on. So the
+Spaces credential type currently sits exactly where the token type sat before
+2026-08-21 — every layer below the real cloud agrees it works. So `credential-do`'s
+*verified* real-cloud status is unchanged. Two things reduce the
+exposure in the meantime: the probe withholds its recordings until it has been told what
+in the response is secret (so a field name nobody anticipated cannot leak into a public
+repository), and `fake_parity_test.go` pins the fake's Spaces shapes to literals written
+from DO's published spec — weaker than a recording, and labelled as such in the test.
+
 **What is still open, and should not be glossed:**
 - **Nine clouds have no real-cloud test at all.** DO was chosen first because its
   mint endpoint is undocumented, so it carried the most assumption risk — and that

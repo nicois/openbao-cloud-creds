@@ -47,6 +47,20 @@ const (
 	// can do whatever the minting account can. scope is EMPTY for this kind, because
 	// there is no narrowing to report and reporting one would be a lie (UpCloud, OVH).
 	ScopeKindAccount ScopeKind = "account"
+	// ScopeKindGrants: scope is a list of per-RESOURCE grants, each
+	// `<resource>:<permission>` (DigitalOcean Spaces buckets: `backups:read`). The
+	// privilege is a pairing, not a flat list — the same permission means different
+	// access depending on the resource it is attached to.
+	//
+	// Distinct from ScopeKindScopes even though both render as `<a>:<b>` pairs, because
+	// the two halves mean opposite things: a scope's left half is the resource TYPE a
+	// verb applies to across the account (`droplet:create`), while a grant's left half
+	// is one named INSTANCE. A client that read grants as scopes would conclude a
+	// credential scoped to one bucket could act on every bucket.
+	//
+	// An account-wide grant is rendered with `*` as the resource, since the wire form
+	// (an empty resource name) would otherwise read as a missing field.
+	ScopeKindGrants ScopeKind = "grants"
 )
 
 // AllScopeKinds is the closed vocabulary, for validation and for the docs. Adding
@@ -55,6 +69,7 @@ const (
 func AllScopeKinds() []ScopeKind {
 	return []ScopeKind{
 		ScopeKindScopes, ScopeKindACL, ScopeKindRole, ScopeKindIdentity, ScopeKindAccount,
+		ScopeKindGrants,
 	}
 }
 

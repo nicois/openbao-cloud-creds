@@ -89,13 +89,16 @@ func TestReconcile_CreatedAtDrivesDeleteVsSkip(t *testing.T) {
 
 // TestDeleteEntity_404IsSuccess proves the lister treats an upstream 404 (the
 // entity is already gone) as a successful delete rather than a hard error that
-// would wedge the whole reconcile pass (audit F5).
+// would wedge the whole reconcile pass (audit F5). Asserted for EVERY credential
+// class: the tolerance is per-endpoint code, so a new class starts without it.
 func TestDeleteEntity_404IsSuccess(t *testing.T) {
 	srv := fakes.NewDOServer()
 	defer srv.Close()
 	lister := &doCloudLister{client: newDOClient(srv.URL, "minter-token"), instanceID: testOwnerInstance}
-	if err := lister.DeleteEntity(t.Context(), "nonexistent-id"); err != nil {
-		t.Fatalf("DeleteEntity should treat upstream 404 as success, got: %v", err)
+	for _, class := range []string{credentialTypeToken, credentialTypeSpacesKey} {
+		if err := lister.DeleteEntity(t.Context(), classedID(class, "nonexistent-id")); err != nil {
+			t.Errorf("DeleteEntity(%s) should treat upstream 404 as success, got: %v", class, err)
+		}
 	}
 }
 

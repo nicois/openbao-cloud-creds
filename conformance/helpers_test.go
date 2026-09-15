@@ -50,6 +50,9 @@ const (
 	fieldMinterSet        = "minter_set"
 	fieldDisabled         = "disabled"
 	fieldVerifyCapability = "verify_minter_capability"
+	fieldCredentialType   = "credential_type"
+	fieldGrants           = "grants"
+	fieldRegion           = "region"
 )
 
 // TTLs used by the harness roles. Each is inside the cloud's enforceable range

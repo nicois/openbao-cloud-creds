@@ -13,9 +13,24 @@ import (
 // e2ePlugin is a registry row: either a case constructor or a declared reason
 // the cloud cannot be driven end-to-end. Exactly one, never both.
 type e2ePlugin struct {
+	// Cloud is the plugin DIRECTORY/binary name (credential-<Cloud>). Rows may share it.
 	Cloud string
-	New   func(t *testing.T) e2eCase
-	Skip  string
+	// Variant distinguishes two SUBJECTS driven through one plugin binary, and is empty for
+	// the plugins that serve a single credential type. A variant row is another scenario run
+	// against the same binary and the same mount — so it needs no second binary built, and it
+	// must not count towards "every plugin on disk is registered", or adding one could mask a
+	// cloud that has no row at all.
+	Variant string
+	New     func(t *testing.T) e2eCase
+	Skip    string
+}
+
+// Subject names a row for subtest names and the coverage matrix.
+func (p e2ePlugin) Subject() string {
+	if p.Variant == "" {
+		return p.Cloud
+	}
+	return p.Cloud + "-" + p.Variant
 }
 
 // registry is the single table of every plugin. A plugin on disk that is absent
@@ -24,6 +39,9 @@ type e2ePlugin struct {
 // — see docs/openbao-integration-gaps.md (G8).
 var registry = []e2ePlugin{
 	{Cloud: "do", New: doCase},
+	// A second SUBJECT from the same plugin binary, not a second plugin: credential-do serves two
+	// credential types selected per role, and each has its own secret type and revoke path.
+	{Cloud: "do", Variant: "spaces", New: doSpacesCase},
 	{Cloud: "upcloud", New: upcloudCase},
 	{Cloud: "azure", New: azureCase},
 	{Cloud: "exoscale", New: exoscaleCase},
@@ -49,14 +67,20 @@ func TestE2E(t *testing.T) {
 	// The package to build is named here rather than derived inside the harness, so a
 	// caller in another repository (or another module path) supplies its own.
 	driven := make([]baotest.Plugin, 0, len(registry))
+	// One binary per CLOUD, however many subjects it serves: registering the same plugin twice
+	// with OpenBao would fail the mount, and a variant is another scenario against the binary
+	// that is already there.
+	built := make(map[string]bool, len(registry))
 	for _, p := range registry {
-		if p.Skip == "" {
-			name := pluginBinary(p.Cloud)
-			driven = append(driven, baotest.Plugin{
-				Name:    name,
-				Package: modulePrefix + "/plugins/" + name + "/cmd",
-			})
+		if p.Skip != "" || built[p.Cloud] {
+			continue
 		}
+		built[p.Cloud] = true
+		name := pluginBinary(p.Cloud)
+		driven = append(driven, baotest.Plugin{
+			Name:    name,
+			Package: modulePrefix + "/plugins/" + name + "/cmd",
+		})
 	}
 	cluster := baotest.Start(t, driven...)
 
@@ -64,7 +88,7 @@ func TestE2E(t *testing.T) {
 		if p.Skip != "" {
 			continue
 		}
-		t.Run(p.Cloud, func(t *testing.T) {
+		t.Run(p.Subject(), func(t *testing.T) {
 			baotest.RunScenario(t, cluster, p.New(t))
 		})
 	}
@@ -115,14 +139,14 @@ func TestE2EMatrix(t *testing.T) {
 	for _, p := range registry {
 		switch {
 		case p.New != nil && p.Skip != "":
-			t.Errorf("%s has both a case and a skip reason; it must have exactly one", p.Cloud)
+			t.Errorf("%s has both a case and a skip reason; it must have exactly one", p.Subject())
 		case p.New == nil && p.Skip == "":
 			t.Errorf("%s has neither a case nor a skip reason: wire it, or declare why the "+
-				"cloud cannot be driven end-to-end", p.Cloud)
+				"cloud cannot be driven end-to-end", p.Subject())
 		case p.New != nil:
-			t.Logf("%-10s %-8s %s", p.Cloud, "driven", "-")
+			t.Logf("%-10s %-8s %s", p.Subject(), "driven", "-")
 		default:
-			t.Logf("%-10s %-8s %s", p.Cloud, "GAP", p.Skip)
+			t.Logf("%-10s %-8s %s", p.Subject(), "GAP", p.Skip)
 		}
 	}
 }

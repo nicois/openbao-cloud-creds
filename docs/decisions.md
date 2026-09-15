@@ -2,6 +2,207 @@
 
 Short notes on choices that aren't obvious from the [techrfc](techrfc.md) and would otherwise need to be re-derived from scratch.
 
+## Why a role picks the credential type, and why DO Spaces keys are that second type (2026-09-15)
+
+KI-009 left `credential-do` in a peculiar position: complete, correct, the origin of the shared
+fake — and unable to mint anything, because `POST /v2/tokens` is refused at DigitalOcean's edge
+gateway for every PAT. `POST /v2/spaces/keys` is a different proposition (published spec,
+`bearer_auth`, granular `spaces_key:*` scopes) and is reachable with the minter the plugin already
+holds, so it is what this cloud can actually issue. See
+[`do-spaces-keys-handover.md`](do-spaces-keys-handover.md) for that evidence.
+
+**The type is a ROLE field (`credential_type`), not a second plugin, a second mount, or a config
+setting.** A plugin per credential type would duplicate config, minter sets, the recovery state
+machine and the reconciler for one cloud, and an operator would have to keep two mounts' minter
+credentials in step. A config-level setting would make the choice per *mount* — but the choice is
+about what a particular consumer needs, which is exactly what a role already expresses. Roles are
+also where privilege is written, and the two types' privilege vocabularies are disjoint (`scopes`
+versus `grants`), so the field that selects the type belongs beside the fields it governs.
+
+`token` is the default, because every role written before the field existed omits it and must keep
+issuing precisely what it issued before. The fields of the *other* type are then **refused** rather
+than ignored: `scopes` on a Spaces role would let an operator believe they had narrowed a
+credential they had not, and an ignored field is the failure mode that survives review, because
+the role reads correctly.
+
+Consequences that are not obvious until they bite:
+
+- **Two secret types** (`do_token`, `do_spaces_key`), because OpenBao dispatches revoke on the
+  secret type and the revokes are different endpoints keyed on different identifiers. One type for
+  both would send every revoke down one path.
+- **Two tracking prefixes**, and therefore reconciler ids that carry their class — see below.
+- **The credential kind stops being a per-plugin constant.** It is now
+  `credentialKindFor(role.credentialType())`, which is what the shape-pinning design anticipated
+  ("becomes a function of the role when a cloud gains a second"); the pin check in `pathCredsRead`
+  needed no change.
+- **Only one of the two can be verified against real DigitalOcean**, so the conformance registry
+  had to gain a *variant* rather than treating "do" as one subject.
+
+## Why S3 is its own credential kind, with `endpoint` and `region` inside the credential (2026-09-15)
+
+The handover note proposed reusing `KindKeySecret` — an access-key/secret-key pair — since a
+Spaces key *is* one. That was rejected: the S3 API is a de-facto standard, so the shape that
+addresses it deserves a name, and the name has to be big enough for every backend that will serve
+it. `KindS3Credentials` is `{access_key_id, secret_access_key, endpoint, region}` plus
+`session_token` where the issuing cloud grants a temporary one, and it is deliberately expected to
+be served by more than one plugin: Exoscale SOS, Linode/Akamai Object Storage, Cloudflare R2,
+MinIO, AWS S3 itself.
+
+**`endpoint` and `region` live in the `credential` block, not in `metadata`.** An S3 client cannot
+be constructed without them and neither is derivable from the key material: every S3-compatible
+vendor uses a different host, and SigV4 signs a region string whether or not the vendor routes on
+it. A client that had to fetch one from metadata and the other from the credential — or worse,
+infer the host from which cloud it asked — would be back to hard-coding per-cloud knowledge, which
+is the thing naming a shape exists to remove. They are therefore **required** of every plugin
+declaring this kind, including where the cloud's own API returns neither (DigitalOcean does not;
+the plugin derives the endpoint from the role's `region`, and an operator whose buckets sit behind
+another host overrides it with the role's `endpoint`).
+
+Two related calls:
+
+- **Not `KindSigV4Session`**, though both are signed with SigV4. That kind is an expiring STS
+  session: three fields, a session token, no endpoint. This one is a long-lived object-storage key
+  with an endpoint and no session token. Neither substitutes for the other, so a client has to be
+  able to refuse the one it cannot use — which is the entire point of a pinnable kind.
+- **AWS-style key names, not DigitalOcean's.** DO returns `access_key`/`secret_key`; the block
+  emits `access_key_id`/`secret_access_key`. The kind is named for the protocol, so its keys are
+  spelled the way every S3 client already spells them; letting one vendor's field names into a
+  shared shape would make the second plugin serving it either wrong or inconsistent. The
+  registry-wide one-kind-one-key-set conformance test is what holds the next one to it.
+
+Adding a kind is additive and does **not** bump `api_version` (still `"4"`) — an unknown kind is
+already a refusal a client can act on.
+
+## Why Spaces grants are parsed, and why they are a distinct `ScopeKind` (2026-09-15)
+
+This plugin passes token `scopes` through unvalidated, on the grounds that DO adds scopes and a
+pass-through needs no code change. Grants are handled the *opposite* way, for one reason: a list
+mixing `fullaccess` with per-bucket grants has **no established meaning**. DO's spec asserts both
+halves of a contradiction — it documents a `400` whose description is "Cannot mix fullaccess
+permission with scoped permissions", and it also says a fullaccess permission "will be prioritized
+if fullaccess and scoped permissions are both added". Nothing available here settles which the API
+does, and no probe has been run.
+
+That is what makes the check worth having rather than a reason to wait for the answer: refusing the
+combination at role write is correct under **either** reading. If DO refuses the mix, an operator
+learns at role write instead of at every issuance. If DO prioritises `fullaccess`, a role that
+reads as least-privilege would have issued an account-wide key, silently, with nothing downstream
+able to notice. Refusing requires recognising the permission values, so they are recognised. The
+cost is that a permission DO adds later needs a one-line change; the alternative is a typo
+(`readwite`) minting a key whose privilege nobody has established.
+
+Also refused: `read`/`readwrite` against `*` (DigitalOcean expresses account-wide only as
+`fullaccess`, and a silently widened grant is the failure this exists to prevent), and
+`fullaccess` attached to a single bucket — the spec's only example of that permission pairs it with
+an empty bucket, the whole account, and says nothing about what naming a bucket beside it does).
+
+`ScopeKindGrants` is separate from `ScopeKindScopes` even though both render as `a:b` pairs,
+because the halves mean opposite things: a scope's left half is a resource *type* a verb applies
+to across the account (`droplet:create`), while a grant's left half is one named *instance*
+(`backups:read`). A client that read grants as scopes would conclude that a credential confined to
+one bucket could act on every bucket. Account-wide is rendered `*` everywhere a human or a client
+sees it, and only becomes DO's empty-bucket form on the wire, because a blank field reads as a
+missing one in a role definition or an audit record.
+
+## Why reconciler ids carry their credential class (2026-09-15)
+
+`pkg/reconciler` moves opaque ids between a lister and a registry, which is the right shape — but
+it means the two classes are indistinguishable to it. So both sides speak `token:<id>` and
+`spaces_key:<access key>`, and `/reconcile`'s `found` list now reports those class-prefixed ids
+(an operator-visible change).
+
+Two independent reasons, neither cosmetic:
+
+- `DeleteEntity` receives nothing but an id, and the classes are different endpoints. A bare id
+  would have to be guessed at, and a guess deletes from an id space the credential may not belong
+  to — which on a 404 reports success and leaves a live credential in place. An unclassed id is
+  therefore **refused**, not defaulted to a token.
+- Ownership is decided by membership of a set. The id spaces are independent, so the same string
+  can name a live credential in one class and an orphan in the other; one key space would let a
+  tracked token shield a Spaces key from reclamation forever.
+
+**A class that cannot be listed warns and is skipped; only a pass where *every* class failed is an
+error.** That asymmetry is the point rather than laxity: on real DigitalOcean `GET /v2/tokens` is
+fenced, so an all-or-nothing pass would disable orphan reclamation for Spaces keys — the class
+that works, and the one that needs it most, since a Spaces key has no upstream expiry and counts
+against a per-account cap until something deletes it. Skipping is safe in the direction that
+matters: an unlisted credential is never nominated for deletion, so a partial listing can only
+under-reclaim. Every class failing is different — then the pass has learned nothing, and an empty
+listing would be indistinguishable from an empty account.
+
+## Why the conformance registry has variants, not one subject per plugin (2026-09-15)
+
+One plugin now serves two credential types that share nothing the shared suites assert: different
+endpoint, credential kind, scope kind, secret type, tracking prefix, revoke, and mint-refusal
+knob. A harness declares one of each, so a single `do` entry would have exercised the lease
+contract, the owner-tag invariant and the error taxonomy for the type that **cannot** be minted
+against real DigitalOcean and not for the type that can. `do-spaces` is therefore a second
+subject drawn from the same `Factory`, and the same reasoning applies to `e2e/`. Nothing about the
+categories changed; what changed is what counts as a subject.
+
+## Why a real-cloud recording is withheld until its secret is known (2026-09-15)
+
+The recorder scrubs fail-closed and refuses to write anything bearing a registered secret, a
+`dop_v1_` token, a uuid or an email — but it can only refuse what it has been *told*, and the
+mint response's field names were the very thing the probe existed to verify. A response carrying
+key material under a name nobody anticipated would have been scrubbed by key name at best and
+written verbatim at worst, into a public repository.
+
+So the mint's recordings are **held in memory** until the caller has decoded the response and
+registered the actual values (`withhold()` / `release(secret, accessKey)`). Registration checks
+the real string rather than a guessed shape, which is the only version of this that is not itself
+an assumption. Two smaller things fell out of it:
+
+- **An access key travels in the DELETE *URL***, which structural JSON scrubbing never sees, and
+  it had also become part of the recording's filename. Id-shaped path segments are now collapsed
+  in both.
+- **The fail-closed gates return errors instead of calling `t.Fatalf`**, which is what makes them
+  testable at all; `real_cloud_record_gate_test.go` exercises them with no credentials.
+
+Because the Spaces recordings' *values* are the account's own and are redacted, fixture parity
+cannot byte-compare them: `fake_parity_test.go` compares sorted `path: type` shapes instead. And
+until a real run exists, the fake is pinned to shapes written from DO's published spec — the
+lesser of the two checks, explicitly labelled as such in the test.
+
+## Why the Spaces listing pages, and why a partial one is an error (2026-09-15)
+
+Found by re-reading DO's published spec rather than the notes taken from it — which is the check
+still available with no credential, and it found the fake *and* the client wrong in the same way.
+DigitalOcean paginates `GET /v2/spaces/keys` at `per_page=20` by default (max 200) and returns
+`links.pages.next` plus a required `meta.total`. Both sides ignored all of it: the fake answered
+every listing in one page, so the client's single unparameterised `GET` looked correct while against
+real DO it would have seen **20 of up to 200** keys.
+
+Three decisions came out of the fix.
+
+**All-or-error, never a partial listing.** `ListSpacesKeys` walks every page and returns nothing at
+all if the traversal cannot complete. This is the credential type where truncation does the most
+damage: a Spaces key has **no upstream expiry**, so the owner-tag reconciler is the only thing that
+ever reclaims a leaked one, and a key the listing omits is indistinguishable from a key that was
+deleted — the reconciler reads it as *gone upstream* and stops tracking it, so it lives until
+somebody finds it by hand, still consuming the account's cap. A listing *error* is the safe
+direction, because a failed pass deletes nothing. The `spacesListMaxPages` bound (50 × 200) is a
+runaway stop, and it errors rather than returning what it has, for the same reason.
+
+**Pages are requested by number, not by following `links.pages.next`.** DO supplies a ready-made
+URL and it is tempting to follow it. That URL comes from the response body, and the request carries
+the *minter's* bearer token — following an upstream-chosen address would let a compromised or
+misconfigured API walk the minter credential to a host of its choosing. The link's **presence** is
+read as "more pages exist"; the address is always this client's own.
+
+**The fake sorts before it pages.** Not cosmetic: paging over Go's randomised map iteration puts one
+key on two pages and another on none, so a client that pages *correctly* would look broken
+intermittently. Manufacturing a bug that belongs to the fake alone is the one failure a fake must
+never have. Sorted on access key, the only field guaranteed unique.
+
+The token listing beside it is deliberately **not** paginated, and says so in a comment.
+`/v2/tokens` is absent from the spec (KI-009) and fenced for every PAT, so a page size and envelope
+invented for it would be a shape nothing can ever verify — the opposite of what a fake is for.
+
+Ordering note worth keeping, because it recurs: the client's paging test **passed vacuously** until
+the fake was corrected, since the fake handed back all 45 seeded keys in one page. Fix the fake
+first, then the client's test can fail honestly.
+
 ## Durability of an issued credential, and where orphans come from (2026-09-02)
 
 Two questions that get asked separately and answer each other: is a credential durably tracked
@@ -1047,10 +1248,13 @@ Decisions inside that:
   the registry — two clouds sharing a kind must declare identical key sets — because it
   is a claim about ten separate plugins. Where a shape is genuinely cloud-specific the
   name says so; inventing a generic name for EdgeGrid's quadruple would describe nothing.
-- **The served kind is a per-plugin constant today, not a role field.** Each cloud
-  serves one shape, so a constant is the honest encoding, and the comment at each site
-  says it becomes a function of the role when a cloud gains a second. The enforcement
-  point is already in the right place, so that change stays local.
+- **The served kind is a per-plugin constant wherever a cloud serves one shape, and a
+  function of the role where it does not.** A constant was the honest encoding while
+  every cloud served one shape, with a comment at each site saying it becomes a role
+  function when a cloud gains a second. That happened on 2026-09-15: `credential-do`
+  issues either a scoped token or an S3-compatible Spaces key, selected by the role, so
+  it now calls `credentialKindFor(role.credentialType())`. The prediction held — the
+  enforcement point was already right, and the change stayed inside that one plugin.
 
 What this does NOT decide is whether SES-over-SMTP gets built. It needs a long-lived
 IAM key, which is a phased-rotation problem (the OCI strategy) rather than a JIT one —

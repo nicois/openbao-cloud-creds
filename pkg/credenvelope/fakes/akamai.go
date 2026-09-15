@@ -358,13 +358,13 @@ func (s *AkamaiServer) validateEdgeGridSignature(r *http.Request, auth string) b
 		bodyHash = base64.StdEncoding.EncodeToString(sum[:])
 	}
 
-	scheme := "https"
+	scheme := schemeHTTPS
 	if r.URL.Scheme != "" {
 		scheme = r.URL.Scheme
 	}
 	// Behind httptest the request's scheme is empty and the transport speaks
 	// plain HTTP, matching the plugin which reads req.URL.Scheme ("http").
-	if scheme == "https" {
+	if scheme == schemeHTTPS {
 		scheme = "http"
 	}
 
@@ -439,7 +439,7 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		writeJSON(w, map[string]interface{}{
 			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/forbidden",
-			jsonKeyTitle:  "Forbidden",
+			jsonKeyTitle:  titleForbidden,
 			jsonKeyDetail: fmt.Sprintf("you may not grant access to apiId %d", forbidden),
 		})
 		return

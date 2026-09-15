@@ -130,7 +130,7 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 	if err != nil {
 		return err
 	}
-	lister := &doCloudLister{client: client, instanceID: instanceID}
+	lister := &doCloudLister{client: client, instanceID: instanceID, logger: b.Logger()}
 	registry := &leaseRegistry{storage: storage}
 
 	b.mu.RLock()

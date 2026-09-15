@@ -23,6 +23,9 @@ var registry = []plugintest.Plugin{
 	{Cloud: "aws", New: awsHarness},
 	{Cloud: "azure", New: azureHarness},
 	{Cloud: "do", New: doHarness},
+	// A second SUBJECT from the same plugin directory, not a second plugin: credential-do serves
+	// two credential types selected per role, so one harness cannot declare both.
+	{Cloud: "do", Variant: "spaces", New: doSpacesHarness},
 	{Cloud: "exoscale", New: exoscaleHarness},
 	{Cloud: "gcp", New: gcpHarness},
 	{Cloud: "oci", New: ociHarness},
@@ -92,7 +95,7 @@ func TestConformanceMatrix(t *testing.T) {
 	for _, p := range registry {
 		h := p.New(t)
 		if err := plugintest.ValidateHarness(h); err != nil {
-			t.Errorf("%s: invalid conformance harness: %v", p.Cloud, err)
+			t.Errorf("%s: invalid conformance harness: %v", p.Subject(), err)
 			continue
 		}
 		cells := make([]string, 0, len(categories))
@@ -100,12 +103,12 @@ func TestConformanceMatrix(t *testing.T) {
 			reason, skipped := h.Skips[c]
 			if skipped {
 				cells = append(cells, pad("SKIP", shortName(string(c))))
-				gaps = append(gaps, fmt.Sprintf("%s/%s: %s", p.Cloud, c, reason))
+				gaps = append(gaps, fmt.Sprintf("%s/%s: %s", p.Subject(), c, reason))
 				continue
 			}
 			cells = append(cells, pad("run", shortName(string(c))))
 		}
-		t.Logf("%-10s %s", p.Cloud, strings.Join(cells, " "))
+		t.Logf("%-10s %s", p.Subject(), strings.Join(cells, " "))
 	}
 
 	sort.Strings(gaps)

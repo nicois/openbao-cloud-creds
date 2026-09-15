@@ -33,6 +33,15 @@ const (
 	fieldMinterSet    = baotest.FieldMinterSet
 )
 
+// Field names belonging to one cloud's role schema. DigitalOcean's are here rather than in its
+// case file because two cases share them.
+const (
+	doSpacesCredentialType = "spaces_key"
+	fieldCredentialType    = "credential_type"
+	fieldGrants            = "grants"
+	fieldRegion            = "region"
+)
+
 // TTLs the cases request. Each is inside its cloud's enforceable range
 // (docs/ttl-semantics.md) and is asserted against the lease OpenBao creates, so a value core
 // would clamp shows up as a failure rather than as a shorter lease nobody looked at.
