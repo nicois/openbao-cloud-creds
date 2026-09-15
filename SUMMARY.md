@@ -96,7 +96,6 @@ make test-cloud-real-do  # the REAL DigitalOcean API with a real PAT (opt-in, di
 | [`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md) | What each test layer proves | Which gaps `e2e/` closes, which stay open (G1–G9) and where they're tracked |
 | [`docs/free-account-viability.md`](docs/free-account-viability.md) | Free-account viability per cloud + the CI design | Whether a cloud can be exercised for real, at what cost; how the fakes get validated against recordings |
 | [`docs/audit-2026-08-22.md`](docs/audit-2026-08-22.md) | Enterprise-readiness audit: 31 findings, what each fix was, and what was deliberately left | **Start here when resuming** |
-| [`docs/audit-2026-05-31.md`](docs/audit-2026-05-31.md), [`docs/audit-2026-06-01.md`](docs/audit-2026-06-01.md) | Earlier repository audits + resolutions | Audit history |
 
 ## Testing status
 

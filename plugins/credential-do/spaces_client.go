@@ -18,7 +18,7 @@ import (
 // PAT holding the `spaces_key:*` scopes. DO's own product docs claim the opposite
 // ("cannot currently be created, edited, or deleted using the DigitalOcean API or CLI")
 // and are wrong: the endpoint is in production use with bearer-PAT auth. See
-// docs/do-spaces-keys-handover.md.
+// docs/cloud-credential-research.md, "DigitalOcean Spaces access keys".
 //
 // Two properties of this API shape every caller below:
 //

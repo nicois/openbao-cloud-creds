@@ -153,8 +153,8 @@ Properties relevant to this repo's machinery:
   the mint-and-hand-over model.
 - **`name` is settable and `created_at` is returned** — so both the
   `cloud-creds-<role>-` owner-prefix safety boundary and the reconciler's
-  `ConfirmationHold` age check (which needs a create timestamp, cf. F1 in
-  `state-assumption-verification-2026-05-31.md`) are satisfiable.
+  `ConfirmationHold` age check (which needs a create timestamp, absent which the
+  reconciler fails closed — `known-issues.md` KI-004) are satisfiable.
 - **No native expiry field** — consistent with cross-cutting finding #1 in the
   object-storage audit: the plugin would own the TTL, via JIT revoke or phased
   rotation.
@@ -280,8 +280,10 @@ credential needed" at no cost and with no credential:
 
 So of the three, one was simply the wrong URL, and the other two are routed at the edge:
 whatever produced those 404s was not the gateway saying the path does not exist. That
-removes the 404 as a reason to doubt Spaces-key issuance, and is why D4's verdict is
-superseded by `docs/do-spaces-keys-handover.md`.
+removes the 404 as a reason to doubt Spaces-key issuance, and is why D4's **contested**
+verdict is superseded — the findings that replace it are in
+[`cloud-credential-research.md`](cloud-credential-research.md), "DigitalOcean Spaces
+access keys".
 
 **It proves routing, not entitlement, and the distinction is the whole of KI-009.**
 `/v2/tokens` is routed too and is refused for every PAT. An unauthenticated 401 says a

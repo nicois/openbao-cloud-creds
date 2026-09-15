@@ -3,7 +3,7 @@
 **Date:** 2026-05-29 (research) — all clouds below were subsequently **built** (see Status column, updated 2026-05-30)
 **Purpose:** Determine JIT feasibility, scoping model, and strategy per cloud for the OpenBao credential plugin.
 
-This was the pre-build investigation. Every cloud except DO Spaces is now implemented as a working plugin; the Status column reflects build state, the rest of the table reflects the API findings that drove each design. **DO findings were re-verified 2026-08-21** — see the note under the table and [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md).
+This was the pre-build investigation. Every cloud below is now implemented as a working plugin, and DigitalOcean serves two credential types rather than one; the Status column reflects build state, the rest of the table reflects the API findings that drove each design. **DO findings were re-verified 2026-08-21** — see the note under the table and [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md) — and the Spaces-key findings again on 2026-09-15.
 
 ## Summary Table
 
@@ -19,7 +19,7 @@ This was the pre-build investigation. Every cloud except DO Spaces is now implem
 | GCP | JIT (direct) | SA impersonation `generateAccessToken` | N/A (token expires) | Yes (impersonation tokens) | IAM bindings | SA identity | **Built** (no OpenBao GCP engine exists) |
 | Azure | JIT (direct) | Graph `addPassword` on app registration | Graph `removePassword` | SP secrets have configurable expiry | RBAC | Tags + name prefix on app registration | **Built** (no OpenBao Azure engine exists) |
 | Oracle (OCI) | **Phased rotation** | `POST /users/{id}/authTokens` | `DELETE .../{id}` | No | IAM policies on groups/compartments | User/credential ID | **Built** (max 2 tokens/user → N=2 slots) |
-| DO Spaces | **Deferred** | `POST /v2/spaces/keys` (public since ~2026-08) | `DELETE /v2/spaces/keys/{access_key}` | No | Per-bucket `grants` (read/readwrite/fullaccess) | Name prefix + `created_at` | Not built — out of scope, quota-bounded (was "blocked, no API"; see note) |
+| DigitalOcean (Spaces keys) | JIT | `POST /v2/spaces/keys` (in the public spec, `bearer_auth`) | `DELETE /v2/spaces/keys/{access_key}` | No | Per-bucket `grants` (read/readwrite/fullaccess) | Name prefix + `created_at` | **Built** as `credential_type=spaces_key` on `credential-do` — the type that cloud can actually mint (was "deferred, no API"; see the DO Spaces findings below) |
 
 > **Note (2026-08-21, DO re-verification):** Two DO rows above were corrected against DigitalOcean's current public OpenAPI spec — full findings in [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md). (1) `POST /v2/tokens` is **not** a public documented endpoint: the spec has no `/v2/tokens` path and DO documents PAT creation as control-panel-only, so the reference plugin rides a control-panel-internal endpoint. (2) DO scopes are fine-grained `<resource>:<verb>` (e.g. `droplet:create`), not the coarse `read`/`write` originally recorded. (3) DO Spaces keys **are** now API-issuable (`/v2/spaces/keys`, full CRUD, per-bucket grants) — the deferral's "no API" premise is void; the 200-keys/account cap is the remaining blocker for the long-lived per-customer use case.
 
@@ -41,7 +41,8 @@ the feasibility findings belong with the rest of the per-cloud API facts:
 
 | Cloud | Health call | Can health reveal a privilege gap? | Probe mint | Probe cleanup | Probe residue |
 |-------|-------------|-----------------------------------|-----------|---------------|---------------|
-| DigitalOcean | `GET /v2/account` | No — and DO has **no scope-introspection API** at all, so nothing short of minting can tell | `POST /v2/tokens` with the role's scope string | `DELETE /v2/tokens/{id}` | none |
+| DigitalOcean (token) | `GET /v2/account` | No — and DO has **no scope-introspection API** at all, so nothing short of minting can tell | `POST /v2/tokens` with the role's scope string | `DELETE /v2/tokens/{id}` | none |
+| DigitalOcean (Spaces key) | `GET /v2/account` | No — same absence of introspection; a PAT authorized for droplets looks identical to one authorized for Spaces keys | `POST /v2/spaces/keys` with the role's exact grants | `DELETE /v2/spaces/keys/{access_key}` | none, and cleanup matters more here (a Spaces key has no upstream expiry) |
 | UpCloud | `GET /1.3/account` | No — `can_create_tokens` is fixed at creation and not reported by the account endpoint | `POST /1.3/account/tokens`, `expires_in=10m` | `DELETE .../tokens/{id}` | none |
 | OVH | mints a token | N/A — on OVH the health call *is* a mint, so health and capability coincide | `client_credentials` grant | **impossible** (no revoke API) | one 1h access token |
 | Exoscale | `GET /v2/zone` | No — answers for any live key; grantability of a specific `role-id` is invisible | `POST /api-key` bound to the role's role-id | `DELETE /api-key/{id}` | none |
@@ -68,7 +69,83 @@ probe must pin the requested lifetime to the cloud's documented minimum.
 - **Safety boundary:** Name prefix `cloud-creds-<role>-<lease_id>`
 - **Minter:** Long-lived PAT with token-creation privileges (an account-level capability, NOT a settable token scope).
 - **Minter self-rotation:** **Not feasible** (verified 2026-06-01, re-confirmed 2026-08-21 — the only token-management scopes in the spec are `dedicated_inference_tokens:*`, a different resource; and per the bullet above the endpoint isn't public at all). DO's scope catalog has no `token:*` / token-management scope, so a token created via `POST /v2/tokens` cannot be granted the privilege to create further tokens — self-rotation would break after one cycle. The `minter-sets/<set>/rotate` endpoint therefore rejects on DO ("rotate out-of-band"). Operators rotate the DO minter PAT manually; the `cloud_creds_minter_age_seconds` gauge + near-expiry warn-log surface staleness.
-- **DO Spaces keys:** **Now API-issuable** (re-verified 2026-08-21; this bullet previously read "No public API for create/delete. Only via web UI."). The public spec carries a **Spaces Keys** tag: `GET`/`POST /v2/spaces/keys` and `GET`/`PUT`/`PATCH`/`DELETE /v2/spaces/keys/{access_key}`, with per-bucket `grants` (`read`/`readwrite`/`fullaccess`), the secret returned once on create, a settable `name`, a returned `created_at`, and dedicated `spaces_key:{read,create_credentials,update,delete}` scopes — so a Spaces minter can be least-privilege, unlike the PAT minter. No native expiry. Still not built and still out of scope for this repo, but the reason changed: the API blocker is gone, the 200-keys/account cap remains for long-lived per-customer isolation. See `docs/object-storage-credential-audit.md` and `docs/do-api-verification-2026-08-21.md` (D4).
+- **DO Spaces keys are the other credential type this plugin serves**, and the one it can mint against the real cloud. Full findings in the next section (this bullet previously read "No public API for create/delete. Only via web UI.", which was wrong).
+
+### DigitalOcean Spaces access keys (`credential_type=spaces_key`, 2026-09-15)
+
+The second credential type on `credential-do`, and — given KI-009 — the only one it can
+issue against real DigitalOcean. Keep this apart from the question of whether object
+storage is a viable *per-customer product substrate*, which is a different question with
+the opposite answer (`docs/object-storage-credential-audit.md`).
+
+- **The endpoint is public, specified, and `bearer_auth`.** The spec's **Spaces Keys** tag
+  carries full CRUD with a granular scope per operation:
+
+  | Operation | Path | Scope |
+  |---|---|---|
+  | create | `POST /v2/spaces/keys` | `spaces_key:create_credentials` |
+  | list | `GET /v2/spaces/keys` | `spaces_key:read` |
+  | get | `GET /v2/spaces/keys/{access_key}` | `spaces_key:read` |
+  | modify | `PUT`/`PATCH /v2/spaces/keys/{access_key}` | `spaces_key:update` |
+  | revoke | `DELETE /v2/spaces/keys/{access_key}` | `spaces_key:delete` |
+
+  So a Spaces minter can be least-privilege, unlike the PAT minter — it needs
+  `spaces_key:create_credentials` to mint, plus `:read` and `:delete` to reconcile and
+  revoke.
+- **Mint shape.** Request `{name, grants: [{bucket, permission}]}`; the `201` answers
+  `{key: {name, access_key, secret_key, grants, created_at}}` and the spec is explicit
+  that *"we return secret keys only once upon creation"*.
+- **`permission` is a free-form string in the spec, not an enum** — `read`, `readwrite`,
+  `fullaccess` and `""` are described, and `grants: []` is legal. Account-wide access is
+  `[{bucket: "", permission: "fullaccess"}]`. **The spec says two incompatible things
+  about mixing `fullaccess` with scoped grants:** it documents a `400` ("Cannot mix
+  fullaccess permission with scoped permissions") *and* says `fullaccess` "will be
+  prioritized" if both are present. Under the first reading such a role fails every
+  issuance; under the second it silently hands out an account-wide key. That is why the
+  plugin **parses** grants and refuses the mix at role write rather than passing the
+  string through — right under both readings (`plugins/credential-do/spaces_grants.go`).
+- **There is no expiry field of any kind** — no TTL, no rotation endpoint. A key lives
+  until deleted, which makes revoke the entire lifecycle rather than an optimisation, and
+  makes the owner-tag reconciler the only backstop ([`ttl-semantics.md`](ttl-semantics.md)).
+  Two consequences the implementation depends on: the `access_key` must be in the lease's
+  `internal_data` and in the tracking record, because the `secret_key` is unrecoverable
+  after create and revoke needs the access key; and an unreclaimed key consumes account
+  capacity indefinitely, since Spaces keys count against a per-account cap of 200.
+- **The listing pages, and a client that ignores that sees a fraction of the account.**
+  DO defaults `per_page` to **20** and caps it at **200**, and answers `keys` alongside
+  `links.pages.next`/`.last` and a required `meta.total`. On the one credential type with
+  no upstream expiry, a single-page read would show the reconciler 20 of up to 200 keys
+  and leak the rest forever, so `ListSpacesKeys` walks every page and returns
+  all-or-error — never a partial listing, because the reconciler cannot tell a key it was
+  not shown from one that was deleted. It requests pages by *number* rather than following
+  the response-supplied `links.pages.next` URL, because the request carries the minter's
+  bearer token.
+- **The evidence that it answers an ordinary bearer PAT is a production service outside
+  this repo**, which creates, lists and deletes Spaces keys with
+  `Authorization: Bearer <DO API token>` and pins those requests in its own tests. That
+  outranks two things that say otherwise, and **both are wrong**: DO's product docs, which
+  state three times that Spaces keys are panel-only, and a 2026-08-21 real-account probe
+  that answered `404`. A single probe's status code is not an entitlement — the same lesson
+  as KI-009, in the opposite direction.
+- **KI-009 does not generalise to it.** `/v2/tokens` is absent from the published spec
+  entirely, while `/v2/spaces/keys` is fully specified and declared `bearer_auth`. The
+  Edge Gateway fence is specific to undocumented token management, not a property of DO
+  management endpoints in general.
+- **Minter self-rotation is still infeasible on DO** for the reason in the bullet above:
+  the `spaces_key:*` scopes govern Spaces keys, not PATs, and the minter is a PAT.
+- **What is still unverified, and should be stated when citing any of the above.** This
+  repo's own probe (`make test-cloud-real-do-spaces`) has never been run, so *this
+  plugin's* behaviour against real DO is unknown; the plugin's Spaces client and the DO
+  fake were written from one reading of the spec and therefore agree by construction
+  ([`openbao-integration-gaps.md`](openbao-integration-gaps.md) holds what each layer
+  proves and what the probe would settle); and whether DO validates that a grant's bucket
+  exists is untested, which if it does is a finding about *role writes* — a role passing
+  every gate and failing every issuance.
+
+Design rationale for the type — why a new `s3_credentials` credential kind rather than
+reusing an existing one, why AWS-style key names, why `endpoint` and `region` ride inside
+the credential block, and why reconciler ids carry their credential class — is in the
+2026-09-15 entries of [`decisions.md`](decisions.md).
 
 ### UpCloud
 
@@ -179,15 +256,13 @@ All clouds need full JIT implementations calling cloud APIs directly, except OCI
 
 | Strategy | Clouds |
 |----------|--------|
-| JIT (create/delete) | DO, UpCloud, OVH, Exoscale, Vultr, Akamai, GCP (impersonation), Azure (SP secret), AWS (STS direct) |
+| JIT (create/delete) | DO (PATs, and Spaces keys), UpCloud, OVH, Exoscale, Vultr, Akamai, GCP (impersonation), Azure (SP secret), AWS (STS direct) |
 | Phased rotation | Oracle (OCI) |
-| Deferred | DO Spaces (object storage — out of scope; API now exists, quota-bounded) |
 
 ### Shared infrastructure (all built)
 
 - `pkg/credenvelope/` — envelope + error codes, used by all
 - `pkg/recovery/` — minter recovery state machine, used by all
-- `pkg/metrics/` — per-node access metrics, used by all
 - `pkg/reconciler/` — orphan reclamation, used by JIT plugins
 - `pkg/worker/` — background worker lifecycle, used by all
 - Phased-rotation slot management lives **in-plugin** (`plugins/credential-oci/slots.go`), not in a shared `pkg/rotator/`. OCI is the only cloud that needs it, so per YAGNI it was not extracted into a shared package.

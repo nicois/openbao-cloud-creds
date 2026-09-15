@@ -9,7 +9,7 @@ fake — and unable to mint anything, because `POST /v2/tokens` is refused at Di
 gateway for every PAT. `POST /v2/spaces/keys` is a different proposition (published spec,
 `bearer_auth`, granular `spaces_key:*` scopes) and is reachable with the minter the plugin already
 holds, so it is what this cloud can actually issue. See
-[`do-spaces-keys-handover.md`](do-spaces-keys-handover.md) for that evidence.
+[`cloud-credential-research.md`](cloud-credential-research.md) for that evidence.
 
 **The type is a ROLE field (`credential_type`), not a second plugin, a second mount, or a config
 setting.** A plugin per credential type would duplicate config, minter sets, the recovery state
@@ -1375,7 +1375,7 @@ three races, in increasing order of how easily an hour beats them:
 A test keeps the worker's hold at or above the manual floor, since the two are set
 independently and the unattended one must not be the weaker.
 
-## Why minter self-rotation exists on six clouds and is refused on four
+## Why minter self-rotation exists on six clouds and is refused on four (2026-09-15)
 
 Every plugin serves `minter-sets/<set>/rotate`, but only Azure, UpCloud, AWS, Akamai, GCP and
 Exoscale implement `RotateMinter`; DO, OVH, Vultr and OCI reject before any state change. That

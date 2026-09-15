@@ -15,7 +15,7 @@
 | OVH | Object Storage (S3) | Yes | Yes (`s3Credentials`) | No | **Viable** — ~2/user cap |
 | Vultr | Object Storage | Yes | Yes (`/v2/object-storage`) | No | **Viable but awkward** — 1 key/store, destructive rotation |
 | Linode (Akamai) | Object Storage | Yes | Yes (`/object-storage/keys`) | No | **Strong fit** — bucket-scopable, NEW plugin needed |
-| DigitalOcean | Spaces | Yes | **Yes** (`POST /v2/spaces/keys`, `bearer_auth`, scope `spaces_key:create_credentials`; contested until 2026-09-15, now settled — see [handover](do-spaces-keys-handover.md)) | No | **Blocked for per-customer isolation** on the quota alone (200 keys / 100 buckets per account); API issuance is no longer an objection |
+| DigitalOcean | Spaces | Yes | **Yes** (`POST /v2/spaces/keys`, `bearer_auth`, scope `spaces_key:create_credentials`; contested until 2026-09-15, now settled — see Revision 3 below) | No | **Blocked for per-customer isolation** on the quota alone (200 keys / 100 buckets per account); API issuance is no longer an objection |
 
 ## The Consumer Compatibility Contract (the linchpin)
 
@@ -138,9 +138,9 @@ The consuming services take object-storage credentials as a **rohmu/pghoard-styl
 > the discriminator is visible in the spec: `/v2/tokens` is absent from it entirely, while
 > `/v2/spaces/keys` is fully specified with `bearer_auth`.
 >
-> See [`docs/do-spaces-keys-handover.md`](do-spaces-keys-handover.md), which also notes why this
-> matters beyond object storage: KI-009 leaves `credential-do` with no mintable credential at all,
-> and a Spaces key is one.
+> Why this matters beyond object storage: KI-009 leaves `credential-do` with no mintable
+> credential at all, and a Spaces key is one. The API findings in full are in
+> [`cloud-credential-research.md`](cloud-credential-research.md), "DigitalOcean Spaces access keys".
 >
 > **Built on 2026-09-15**, as a per-role `credential_type=spaces_key` on `credential-do` — so this
 > audit's subject is now partly *in* the repo, and the boundary needs stating precisely. What was
@@ -158,10 +158,10 @@ The consuming services take object-storage credentials as a **rohmu/pghoard-styl
 - **Scoping:** Per-bucket `grants: [{bucket, permission}]` with `read` / `readwrite` / `fullaccess`. The spec both documents a `400` refusing a `fullaccess` mixed with scoped grants and says `fullaccess` is prioritised if both are sent, so this plugin refuses the mix at role write — correct under either reading. Comparable granularity to Exoscale/Linode, better than OVH's per-user coarseness. **The bucket is the floor: there is no prefix scoping** — the spec's `grant` schema is `bucket` + `permission` and nothing else (no path, resource pattern or condition), so a key confined to `customers/acme/*` inside a shared bucket cannot be expressed at all. That makes the *bucket* the per-customer isolation unit on DO, which is what walks straight into the quota line below. Only clouds with a real policy language do prefixes — on AWS it is a session policy over `arn:aws:s3:::bucket/prefix/*`, already expressible through the `inline_policy` role field with no code change. See [`decisions.md`](decisions.md), "Why prefix-scoped S3 credentials are NOT built".
 - **Minter privilege:** dedicated `spaces_key:{read,create_credentials,update,delete}` PAT scopes — so a Spaces minter can be genuinely least-privilege (unlike the `credential-do` PAT minter, whose token-creation capability is unscopable).
 - **Native expiry:** None — consistent with cross-cutting finding #1; the plugin would own the TTL via JIT revoke or phased rotation.
-- **Safety boundary:** settable `name` (so the `cloud-creds-<role>-` owner-prefix scheme works) and a returned `created_at` (so the reconciler's `ConfirmationHold` age check is satisfiable — cf. F1 in `docs/state-assumption-verification-2026-05-31.md`, where missing create timestamps forced Exoscale/Vultr fail-closed).
+- **Safety boundary:** settable `name` (so the `cloud-creds-<role>-` owner-prefix scheme works) and a returned `created_at` (so the reconciler's `ConfirmationHold` age check is satisfiable — the check skips an entity whose age it cannot confirm, which is why Exoscale and Vultr, whose listings carry no create timestamp, are fail-closed: [`known-issues.md`](known-issues.md) KI-004).
 - **Quota:** 200 access keys **and 100 buckets** per *account* (both raisable via support; documented at `products/spaces/details/limits/`). The cap is **per account, not per team** — and buckets cannot be moved between accounts, so team sharding is not a lever for an existing estate. Per-customer isolation is therefore bounded by the *bucket* cap before the key cap, and both are orders of magnitude short of ~100k services.
 - **Availability, not just quota — the disqualifier for the driving use case.** The requirement behind Path A is that *customer workloads keep reading their backups through an OpenBao outage*. Renewal is what needs OpenBao reachable, so a credential whose lifetime is shorter than the worst-case outage window cannot serve an availability-critical path at all. That rules out JIT for backup access on **every** cloud, independent of DO's quota: the only shapes that satisfy it are phased rotation (credential valid until its slot's next scheduled rotation, so an outage defers rotation rather than invalidating access — the OCI strategy) or credentials this repo does not manage at all. Rotation IS available on DO now that API management is confirmed (Revision 3), so unlike the earlier reading it is the quota rather than the API that bounds this.
-- **Verdict:** Blocked for the *driving* use case — per-customer isolation at ~100k services — on the quota (100 buckets binding before 200 keys) and on the availability requirement, which rules out short-lived issuance on every cloud. The API objection is **cleared** (Revision 3). Object storage as a whole remains out of scope for this repo (see below). But note the narrower case that is not blocked at all: a handful of operational keys for the management plane, which is what [`docs/do-spaces-keys-handover.md`](do-spaces-keys-handover.md) is about.
+- **Verdict:** Blocked for the *driving* use case — per-customer isolation at ~100k services — on the quota (100 buckets binding before 200 keys) and on the availability requirement, which rules out short-lived issuance on every cloud. The API objection is **cleared** (Revision 3). Object storage as a whole remains out of scope for this repo (see below). But note the narrower case that is not blocked at all, and is what `credential_type=spaces_key` serves: a handful of operational keys for the management plane.
 
 ## Cross-Cutting Findings
 

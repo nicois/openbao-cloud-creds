@@ -22,8 +22,8 @@ It is still true, and it is no longer a dead end. The fence is specific to
 DigitalOcean's *token* management — `/v2/tokens` is absent from their published spec
 entirely — while `POST /v2/spaces/keys` is fully specified, `bearer_auth`, and
 callable with an ordinary PAT, as a production consumer demonstrates. So there is a
-credential this plugin's existing minter can mint; see
-[`do-spaces-keys-handover.md`](do-spaces-keys-handover.md).
+credential this plugin's existing minter can mint; the API findings behind it are in
+[`cloud-credential-research.md`](cloud-credential-research.md).
 
 **As of 2026-09-15 that credential is implemented** (`credential_type=spaces_key` on a
 role), which narrows KI-009 from "the plugin cannot issue" to "the plugin cannot issue a
@@ -450,7 +450,7 @@ implementation even though it cannot mint").
 `credential_type=spaces_key`, an S3-compatible Spaces access key minted through
 `POST /v2/spaces/keys` — a path that is in DigitalOcean's published spec, declared
 `bearer_auth`, and reported to work in production with a plain bearer PAT
-([`do-spaces-keys-handover.md`](do-spaces-keys-handover.md)). So "credential-do cannot
+([`cloud-credential-research.md`](cloud-credential-research.md)). So "credential-do cannot
 issue against real DO" is no longer the right summary; "credential-do cannot issue a
 PAT" is. Everything below about the fence itself stands unchanged, and the fence is
 still what the real-cloud probe pins.

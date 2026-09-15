@@ -30,8 +30,8 @@ import (
 // are load-bearing, and each has a consequence if wrong:
 //
 //	POST answers a bearer PAT with 201   -> if not, the credential type cannot be issued
-//	                                        at all and docs/do-spaces-keys-handover.md's
-//	                                        premise is wrong
+//	                                        at all and the premise this plugin was built
+//	                                        on is wrong
 //	`key.access_key` / `key.secret_key`  -> a wrong field name mints successfully and
 //	                                        hands the caller an EMPTY credential, while
 //	                                        the access key the lease records for revoke is
@@ -276,7 +276,7 @@ func reportMintRefusal(t *testing.T, minter *doClient, status int, scrubbedErr s
 			t.Fatalf("POST %s -> %d answered by %q: the path is fenced off from API-token auth, "+
 				"exactly as /v2/tokens is (KI-009). DigitalOcean's product docs would then be right "+
 				"and its OpenAPI spec wrong, and credential-do has NOTHING it can mint — revisit "+
-				"docs/do-spaces-keys-handover.md and docs/object-storage-credential-audit.md, and "+
+				"docs/cloud-credential-research.md and docs/object-storage-credential-audit.md, and "+
 				"say so in known-issues.md.\n%s", spacesKeysPath, status, responder, scrubbedErr)
 		}
 		t.Fatalf("POST %s -> %d answered by %q: a privilege verdict, not a fence. The minter PAT "+
