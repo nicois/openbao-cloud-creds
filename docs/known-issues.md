@@ -18,6 +18,13 @@ entry here: it says the reference plugin cannot issue against the real cloud. It
 was found by the real-cloud layer within its first two runs, which is what that
 layer is for.
 
+It is still true, and it is no longer a dead end. The fence is specific to
+DigitalOcean's *token* management — `/v2/tokens` is absent from their published spec
+entirely — while `POST /v2/spaces/keys` is fully specified, `bearer_auth`, and
+callable with an ordinary PAT, as a production consumer demonstrates. So there is a
+credential this plugin's existing minter can mint; see
+[`do-spaces-keys-handover.md`](do-spaces-keys-handover.md).
+
 **KI-010 came from the same layer's second cloud, on its first run.** Where DO's
 finding was about a cloud, AWS's was about this repo's code: the plugin reported a
 caller's invalid request as `internal` and counted it against the minter's health.
