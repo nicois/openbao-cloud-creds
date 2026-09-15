@@ -104,6 +104,49 @@ one bucket could act on every bucket. Account-wide is rendered `*` everywhere a 
 sees it, and only becomes DO's empty-bucket form on the wire, because a blank field reads as a
 missing one in a role definition or an audit record.
 
+## Why prefix-scoped S3 credentials are NOT built, and what would change that (2026-09-15)
+
+Asked directly: can a client request a Spaces credential confined to an object-key prefix it
+supplies, so one customer's key cannot reach another customer's data inside a shared bucket? Not
+built, on three separate grounds — any one of which is sufficient, which is why this is a decision
+rather than a backlog item.
+
+**DigitalOcean has no prefix vocabulary.** The spec's `grant` schema is exactly `bucket` +
+`permission`, both required, and nothing else — no path, no resource pattern, no condition block.
+The finest grain a Spaces key has is one whole bucket, and `fullaccess` is not even that (it is
+account-wide whichever bucket it names, which is what `checkGrantPrivilege` refuses). There is
+nothing to send, so no amount of plugin work produces a prefix-scoped Spaces key.
+
+**A client-supplied prefix is not an isolation boundary.** If the caller names the prefix, the same
+token and the same role can name a different one on the next call, so the result is a convention
+rather than a control. Isolation requires that something *authorizes* the choice, and that something
+is necessarily server-side: the role, or the ACL path. The OpenBao-idiomatic form is role-per-
+customer plus a templated policy (`…/creds/customer-{{identity.entity.name}}`), which makes the
+boundary an authorization fact and needs no new plugin surface at all. This is also why no plugin
+here takes a privilege-narrowing request field: `creds/<role>` accepts `role`, `credential_kind`
+(a parse-shape pin) and `shard_key` (affinity), none of which can widen or narrow privilege.
+
+**Where prefixes are genuinely wanted, AWS already does it with no code change.** `inline_policy`
+and `policy_arns` on an AWS role become STS **session policies**, which can only intersect — so
+`arn:aws:s3:::bucket/customers/acme/*` on a per-customer role is the whole feature, today. The other
+S3 backends are bucket-scopable at best (Exoscale, Linode) or coarser (OVH per-user, GCS per-SA).
+Prefix scoping is a property of clouds with a policy language, not of the `s3_credentials` kind.
+
+Two conditions would reopen it, and only these two:
+
+1. **DigitalOcean adds a prefix or condition to `grant`.** Then the question is worth re-asking from
+   scratch — including whether a role should carry a template with a constrained request-supplied
+   substitution, which is the only client-supplied form that is not privilege self-selection. Such a
+   design also needs a `pkg/plugintest` assertion that a request can never *widen* a role, and
+   `metadata.scope` reporting the resolved value rather than the template, or an audit record would
+   not say what was issued.
+2. **Bucket-per-customer becomes acceptable.** The isolation unit on DO *is* the bucket, so this
+   works now — bounded by **100 buckets per account** (raisable by support, but binding before the
+   200-key cap, and buckets cannot move between accounts so sharding an existing estate is no
+   lever). Fine for tens of customers; orders of magnitude short of the driving figure in
+   [`object-storage-credential-audit.md`](object-storage-credential-audit.md), which is why that
+   audit's per-customer verdict rests on quota alone.
+
 ## Why reconciler ids carry their credential class (2026-09-15)
 
 `pkg/reconciler` moves opaque ids between a lister and a registry, which is the right shape — but
