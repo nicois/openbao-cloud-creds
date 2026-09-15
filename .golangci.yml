@@ -1,6 +1,6 @@
 # golangci-lint v2 config tuned for "slow accretion" code smells.
-# Adopted from qualcheck/.golangci.yml, reconciled with this repo's deliberate
-# exclusions (see docs/superpowers/specs/2026-05-31-golangci-config-upgrade-design.md).
+# Adopted from a stricter upstream config, reconciled with this repo's deliberate
+# exclusions — each of which is commented at the setting it applies to.
 # Run with: golangci-lint run   (golangci-lint v2.x)
 
 version: "2"

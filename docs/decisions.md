@@ -578,7 +578,7 @@ in the config itself (not inline), e.g. the `(io.Closer).Close` errcheck
 exclusion and `revive`'s disabled `unused-parameter`/`unused-receiver` for the
 SDK-mandated handler signatures. Test files are excluded from the
 complexity/literal linters (test code legitimately repeats literals and is
-structurally loose). See `docs/superpowers/specs/2026-05-31-golangci-config-upgrade-design.md`.
+structurally loose).
 
 ## Why minter rotation retires with a grace period instead of deleting immediately
 
@@ -1374,3 +1374,44 @@ three races, in increasing order of how easily an hour beats them:
 
 A test keeps the worker's hold at or above the manual floor, since the two are set
 independently and the unattended one must not be the weaker.
+
+## Why minter self-rotation exists on six clouds and is refused on four
+
+Every plugin serves `minter-sets/<set>/rotate`, but only Azure, UpCloud, AWS, Akamai, GCP and
+Exoscale implement `RotateMinter`; DO, OVH, Vultr and OCI reject before any state change. That
+split is not effort left undone — it was verified against each cloud's API on 2026-06-01, and
+each side of it rests on an external fact that can change, so it is recorded rather than left
+as an absence of code.
+
+Feasible means a minter can mint a successor **of its own privileged kind**, and that the
+successor is itself mint-capable — otherwise the chain rotates once and then wedges. That is a
+different call from the JIT mint path: DO's `CreateToken` mints a scoped short-lived token, never
+a successor PAT, which is why `RotateMinter` is new per-cloud client code and not a reuse. On four
+of the six the successor inherits capability structurally — an Azure secret authenticates as the
+SP with its own `addPassword` right, an AWS access key carries the IAM user's policy including
+`iam:CreateAccessKey`, a GCP key authenticates as the SA with its key-create role, and an Akamai
+client created at `READ-WRITE` on the Identity-Management API can create further clients. UpCloud
+and Exoscale instead carry an explicit input forward (`can_create_tokens: true`, the
+key-management `role_id`), which is why those two are the ones with a field to get wrong.
+
+The four refusals are API-level impossibilities, not policy:
+
+- **DigitalOcean** has no token-management scope in its catalog (`token:*` does not exist), so a
+  created token could never be granted the right to create further tokens. KI-009 fences the
+  endpoint anyway.
+- **OVH**'s `client_credentials` grant mints short-lived *access tokens*; nothing there mints a
+  new client credential.
+- **Vultr** has one account-wide API key, and regenerating it invalidates the old one
+  immediately — so there is no make-before-break overlap, which is exactly what grace-separated
+  retirement needs.
+- **OCI** minter users are 2-auth-tokens-tight, the same cap that forces that cloud onto phased
+  rotation for its *issued* credentials.
+
+Two of the six carry a live caveat. **GCP's** `iam.disableServiceAccountKeyCreation` org policy is
+enforced *by default* for organizations created on or after 2024-05-03, so `keys.create` fails
+outright in most modern organizations; the client detects that policy's sentinel and names it,
+because reported as a generic failure it sends an operator to rotate a credential that is fine.
+**Exoscale** is the lowest-confidence of the six: the exact IAM action identifier for key creation
+is not enumerated in Exoscale's public documentation, so the operator pre-provisions a
+key-management role and the successor reuses that same `role_id`. It is fake-tested like the rest,
+but it is the one to confirm against a live account before relying on it.

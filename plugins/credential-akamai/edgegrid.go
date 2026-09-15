@@ -88,6 +88,10 @@ func signRequestAt(req *http.Request, cred *edgeGridCredential, timestamp, nonce
 	}
 
 	// Canonical request: method\tscheme\thost\tpath+query\theaders\tbody_hash\t
+	//
+	// The empty headers field is correct, not an omission: EdgeGrid signs only the
+	// headers an operator has designated for signing on the API client, and none are
+	// designated here. Filling it in would change the signature and be rejected.
 	canonicalRequest := fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t",
 		req.Method, scheme, host, pathAndQuery, "", bodyHash)
 
