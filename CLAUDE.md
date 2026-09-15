@@ -97,7 +97,7 @@ make smoke-test    # build each plugin + register/enable in a live OpenBao dev s
 
 - Go 1.27.0 (workspace `go.work` + per-module `go.mod`)
 - One plugin = one Go module under `plugins/<name>/`
-- Shared code under `pkg/` — plugins import; never the other way around. Genuinely-identical helper bodies are extracted into focused `pkg/` packages with cloud identity passed as a parameter (e.g. `pkg/telemetry` for metric emitters, `pkg/metricspath` for the metrics query endpoints, `pkg/localexpiry` for no-revoke local-entry pruning), preserving per-plugin module isolation — never collapse the plugin modules themselves
+- Shared code under `pkg/` — plugins import; never the other way around. Genuinely-identical helper bodies are extracted into focused `pkg/` packages with cloud identity passed as a parameter (e.g. `pkg/telemetry` for metric emitters, `pkg/localexpiry` for no-revoke local-entry pruning), preserving per-plugin module isolation — never collapse the plugin modules themselves
 - Each plugin keeps a `consts.go` defining its `cloudName`, `metricNamespace`, and field-name constants (`fieldCloud`/`fieldRole`/`fieldMinterSet`/…); HTTP status codes use `net/http` constants and TTL/duration values are named consts (no magic numbers/literals — enforced by lint)
 - Mount path is always `cloud-creds/<cloud>/...`
 - Owner-tag scheme always uses prefix `cloud-creds-<role>-` or label `owner=cloud-creds`

@@ -570,7 +570,7 @@ Rationale: with one plugin per cloud and ten near-parallel plugins, the failure
 mode is *drift* — a helper that subtly diverges, a magic number that means
 something different in one cloud, copy-paste that rots. The complexity and
 duplication linters fire on exactly that drift, which is what pushed the
-genuinely-shared code into `pkg/` (telemetry, metricspath, localexpiry) instead
+genuinely-shared code into `pkg/` (telemetry, localexpiry, ownertag) instead
 of ten copies. The no-nolint rule is load-bearing: when a linter fires, the fix
 is to restructure (extract a helper, name a constant, drop a dead param), not to
 suppress — suppressions are where drift hides. Carried-forward exceptions live
