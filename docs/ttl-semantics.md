@@ -102,9 +102,9 @@ the role** rather than issue a lease it cannot honour.
   lease's `internal_data` carrying the `access_key` is what makes revoke possible at all.
   The row above therefore belongs with Exoscale/Vultr/Akamai rather than with anything
   that expires. Two consequences worth naming: a Spaces role stays **renewable** (renewal
-  just defers the revoke, which is honest), and the revoke-failure window below applies to
-  it in full — with the extra sting that Spaces keys count against a per-account cap of
-  200, so an unreclaimed one consumes capacity indefinitely rather than merely existing.
+  just defers the revoke, which is honest), and an unreclaimed key consumes capacity
+  indefinitely rather than merely existing, because Spaces keys count against a
+  per-account cap of 200.
 - **DO may have a native expiry the plugin does not use.** DO's control panel now
   requires an expiry when creating a personal access token, so the (undocumented)
   `POST /v2/tokens` endpoint may accept or even require one; the plugin sends only

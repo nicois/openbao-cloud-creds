@@ -252,8 +252,8 @@ exist — and a PAT holding `spaces_key:create_credentials`, `spaces_key:read` a
 earlier run left (a full-access PAT holds all three).
 `CLOUDREAL_DO_SPACES_REGION` (default `nyc3`) and an optional
 `CLOUDREAL_DO_SPACES_BUCKET` are the only knobs; the probe creates exactly one key with a
-narrow per-bucket `read` grant and deletes it, and sweeps any key left by a crashed
-earlier run. Cost is $0 — the key is free, and no bucket or object is created.
+narrow per-bucket `read` grant. Cost is $0 — the key is free, and no bucket or object is
+created.
 
 Two outcomes are worth naming in advance, because the probe reports them differently:
 a 403 answered by `Edge-Gateway` means KI-009 repeats on this endpoint and the plugin has

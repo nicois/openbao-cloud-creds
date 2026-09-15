@@ -246,7 +246,7 @@ against, and `plugins/credential-aws/fake_parity_test.go` instead holds
 `fakeSTSClient` to the *set of elements real STS sends* and re-applies every scrub
 gate to the committed recordings.
 
-**A third DO probe exists and has never been run (2026-09-15).**
+**A third probe exists and has never been run (2026-09-15).**
 `plugins/credential-do/real_cloud_spaces_test.go` (`make test-cloud-real-do-spaces`)
 probes the credential type the plugin can actually issue — `POST /v2/spaces/keys` — and
 it is written to answer four assumptions that no fake can test, because the fake and the
@@ -262,7 +262,7 @@ reclamation for a credential with no upstream expiry), and that `DELETE` answers
 It has **not been run**: no DO token is reachable from the development environment, and
 the probe fails rather than skips without one, by the rule this layer is built on. So the
 Spaces credential type currently sits exactly where the token type sat before
-2026-08-21 — every layer below the real cloud agrees it works. So `credential-do`'s
+2026-08-21 — every layer below the real cloud agrees it works, and `credential-do`'s
 *verified* real-cloud status is unchanged. Two things reduce the
 exposure in the meantime: the probe withholds its recordings until it has been told what
 in the response is secret (so a field name nobody anticipated cannot leak into a public
