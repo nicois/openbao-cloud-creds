@@ -38,6 +38,8 @@ func upcloudCase(t *testing.T) e2eCase {
 		TTLSeconds: shortTTL,
 		Renewable:  false,
 		HardRevoke: true,
-		Upstream:   srv.ProvisionedCount,
+		// Every hard-revoke cloud can also be purged: the same delete call serves both.
+		DeletesIssuedCredentials: true,
+		Upstream:                 srv.ProvisionedCount,
 	}
 }

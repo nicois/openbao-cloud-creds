@@ -131,7 +131,7 @@ runtime `minter_insufficient_privilege` idea was deliberately not pursued (see
 | `upstream_unavailable` | 503 | Cloud unreachable, or answered 5xx | Yes, backoff |
 | `upstream_request_invalid` | 400 | Cloud rejected the request's content (400/409/422) | No — fix config |
 | `config_invalid` | 400 | Operator input is missing, malformed, or names something that does not exist; also a failed capability probe | No — fix config |
-| `unsupported` | 501 | This cloud cannot do it and never will (e.g. minter rotation on DO/OVH/Vultr/OCI) | No — never |
+| `unsupported` | 501 | This cloud cannot do it and never will (minter rotation on DO/OVH/Vultr/OCI; `revoke-upstream` on AWS/GCP/OVH/OCI, where the message names the containment the operator does have) | No — never |
 | `credential_kind_unsupported` | 400 | The caller pinned a `credential_kind` this role does not serve, or one this binary does not know | **Yes, asking for a different shape** — the one refusal a client can resolve without an operator |
 | `pool_exhausted` | 503 | All slots simultaneously unavailable | Yes, short backoff |
 | `lease_revoke_failed` | 500 | Couldn't revoke upstream cleanly | Operator alert |
@@ -297,11 +297,55 @@ Every plugin runs a reconciliation worker:
 
 ### Safeguards (defense in depth)
 
-1. **`disable_auto_delete` per role** — emergency operator switch; halts upstream deletes for that role; metrics still emit.
+1. ~~**`disable_auto_delete` per role** — emergency operator switch; halts upstream deletes for that role; metrics still emit.~~ **Withdrawn 2026-09-16, never implemented.** It was declared as a struct field read by nothing (audit A6) and is now removed. Halting the reconciler is the opposite of what an incident needs — the reconciler is what reclaims a leaked credential no lease points at any more — and what was actually missing was a way to delete credentials *sooner*. That is served by the two containment levers below.
 2. **Dry-run mode** — `bao write cloud-creds/<cloud>/reconcile mode=dry_run` runs the worker but only logs/metrics; no deletes.
 3. **Rate limit** — max 10 deletes per reconciliation pass per cloud (configurable). Worker stops + alerts if more should be deleted; operator must investigate.
 4. **Bootstrap delay** — 24h after plugin start before reconciler runs (avoids "plugin upgrade with empty registry" deleting everything); configurable.
 5. **Audit log** — every auto-delete writes a structured log line and emits `cloud_creds_auto_deleted_total{cloud, role, reason}`.
+
+### Containment: a credential we issued has leaked
+
+The reconciler is housekeeping, on a cadence of hours, and it only ever touches what nothing points at. Containment is a separate pair of levers, both taking the one identifier an incident supplies — the role name — and **deleting the role is not one of them**: it leaves live leases renewable and every issued credential working, which is the same as doing nothing except that it looks decisive.
+
+```bash
+# 1. Close the tap. Nothing but the flag is needed, and it works while the cloud is down.
+bao write cloud-creds/exoscale/roles/deploy disabled=true
+
+# 2. Ask how big the incident is. This changes nothing and arms nothing.
+bao write cloud-creds/exoscale/roles/deploy/revoke-upstream mode=dry_run
+```
+
+```json
+{ "role": "deploy", "mode": "dry_run", "armed": false, "cutoff": "2026-09-16T09:12:04Z",
+  "tracked": 1840, "deleted": 0, "remaining": 1840, "failed": 0, "complete": false }
+```
+
+```bash
+# 3. Empty the bucket. One bounded pass runs inline; the rest continues in the background.
+bao write cloud-creds/exoscale/roles/deploy/revoke-upstream
+```
+
+```json
+{ "role": "deploy", "mode": "normal", "armed": true, "cutoff": "2026-09-16T09:13:41Z",
+  "tracked": 1840, "deleted": 50, "remaining": 1790, "failed": 0, "complete": false }
+```
+
+```bash
+# 4. Watch it finish. Same keys, so automation waits on one field.
+bao read cloud-creds/exoscale/roles/deploy/revoke-upstream
+```
+
+```json
+{ "role": "deploy", "armed": false, "cutoff": "2026-09-16T09:13:41Z",
+  "tracked": 1840, "deleted": 1840, "remaining": 0, "failed": 0, "complete": true }
+```
+
+Four properties are worth stating because each has a tempting wrong alternative:
+
+- **The purge is armed, not done synchronously.** 1840 credentials is 1840 upstream API calls against the quota the mount issues from; doing them in the request would either exceed the deadline or take issuance down for the credentials that did *not* leak.
+- **The cutoff is the arm time.** The role goes on issuing (step 1 is a separate decision), and credentials issued after the call — including the ones the responder mints to run the response with — are out of scope. Without that, a busy mount's purge never terminates.
+- **Step 3 works even though step 1 already ran.** The purge reads the stored role directly rather than through the issuance loader, which refuses a disabled role; otherwise the sequence above would demand re-enabling issuance mid-incident.
+- **Step 2 or 3 on AWS, GCP, OVH or OCI is refused**, with `unsupported` and that cloud's own remedy: on the first three the credential cannot be deleted at all and the role's `max_ttl` is the blast radius, while on OCI the credential belongs to a rotation slot and `rotate-slot/<role>/<slot_index>` replaces it for every holder.
 
 ## Access metrics (per-node, eventually consistent)
 

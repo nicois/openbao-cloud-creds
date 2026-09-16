@@ -90,6 +90,14 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the minter set this role mints from (required)",
 				},
+				fieldDisabled: {
+					Type: framework.TypeBool,
+					Description: "When true the role issues nothing, answering role_disabled. This is " +
+						"the lever for a suspected credential leak: deleting the role stops nothing, " +
+						"because live leases stay renewable and issued credentials keep working. " +
+						"Writing it alone is enough — a write to an existing role changes only the " +
+						"fields it carries. Reversible; it destroys nothing already issued",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -126,8 +134,27 @@ func validateSTSTTLs(defaultTTL, maxTTL time.Duration) *logical.Response {
 	return nil
 }
 
+// optionalRoleFields reads the two role fields that are absent-or-set rather than
+// empty-or-set: the session-tag map and the external id. GetOk distinguishes the two,
+// which is what keeps a field the operator never mentioned out of the stored role — and
+// out of the AssumeRole call, where an empty external id is not the same as none.
+func optionalRoleFields(d *framework.FieldData) (sessionTags map[string]string, externalID string) {
+	if tagsRaw, ok := d.GetOk("session_tags"); ok && tagsRaw != nil {
+		sessionTags = tagsRaw.(map[string]string)
+	}
+	if eid, ok := d.GetOk("external_id"); ok {
+		externalID = eid.(string)
+	}
+	return sessionTags, externalID
+}
+
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
+	// A write to an existing role changes the fields it carries and leaves the rest as
+	// they were, so `disabled=true` on its own is a complete request.
+	if err := cloudconfig.PrefillRoleWrite(ctx, req.Storage, "roles/"+name, d, storedRoleData); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
+	}
 	defaultTTL := time.Duration(d.Get(fieldDefaultTTL).(int)) * time.Second
 	maxTTL := time.Duration(d.Get(fieldMaxTTL).(int)) * time.Second
 	iamRoleARN := d.Get(fieldIAMRoleARN).(string)
@@ -171,15 +198,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
-	var sessionTags map[string]string
-	if tagsRaw, ok := d.GetOk("session_tags"); ok && tagsRaw != nil {
-		sessionTags = tagsRaw.(map[string]string)
-	}
-
-	var externalID string
-	if eid, ok := d.GetOk("external_id"); ok {
-		externalID = eid.(string)
-	}
+	sessionTags, externalID := optionalRoleFields(d)
 
 	awsR := &awsRole{
 		Name:        name,
@@ -189,6 +208,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		SessionTags: sessionTags,
 		ExternalID:  externalID,
 		MinterSet:   minterSet,
+		Disabled:    d.Get(fieldDisabled).(bool),
 
 		PolicyARNs:   policyARNs,
 		InlinePolicy: inlinePolicy,
@@ -226,13 +246,23 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 		return credenvelope.InternalResponse(b.Logger().Warn, "parsing a stored entry", err), nil
 	}
 
+	return &logical.Response{Data: roleData(&role)}, nil
+}
+
+// roleData renders a role for its read endpoint, in the same field names and units the
+// write schema accepts. That is what lets a write to an existing role prefill from it
+// (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
+func roleData(role *awsRole) map[string]interface{} {
 	data := map[string]interface{}{
 		fieldName:       role.Name,
 		fieldDefaultTTL: int(role.DefaultTTL.Seconds()),
 		fieldMaxTTL:     int(role.MaxTTL.Seconds()),
 		fieldIAMRoleARN: role.IAMRoleARN,
 		fieldMinterSet:  role.MinterSet,
+		fieldDisabled:   role.Disabled,
 	}
+	// An unset optional field is omitted rather than reported empty, so a role that
+	// never had one is not prefilled with one either.
 	if role.SessionTags != nil {
 		data["session_tags"] = role.SessionTags
 	}
@@ -245,8 +275,16 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 	if role.ExternalID != "" {
 		data["external_id"] = role.ExternalID
 	}
+	return data
+}
 
-	return &logical.Response{Data: data}, nil
+// storedRoleData renders a STORED role the same way, for a write that is patching one.
+func storedRoleData(raw []byte) (map[string]interface{}, error) {
+	var role awsRole
+	if err := json.Unmarshal(raw, &role); err != nil {
+		return nil, err
+	}
+	return roleData(&role), nil
 }
 
 func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {

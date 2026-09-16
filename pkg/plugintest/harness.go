@@ -54,6 +54,11 @@ const (
 	// what the client should do. Catches the class KI-010 belongs to — a real
 	// failure mode collapsing into `internal`.
 	CategoryErrorTaxonomy Category = "error-taxonomy"
+	// CategoryContainment covers the two levers an operator has when issued
+	// credentials are believed to have leaked: stop the role issuing more, and
+	// destroy what is already out there. Both must work from one call, without the
+	// role's definition to hand.
+	CategoryContainment Category = "containment"
 )
 
 // Harness is supplied by the conformance table, one per plugin. Fields are
@@ -96,6 +101,15 @@ type Harness struct {
 	ProvisionedCount func() int
 	// ExpectsHardRevoke is true when lease revoke deletes an upstream entity.
 	ExpectsHardRevoke bool
+	// DeletesIssuedCredentials is true when the cloud can destroy a credential this
+	// subject has already issued, ahead of whatever expiry it carries.
+	//
+	// A SEPARATE fact from ExpectsHardRevoke, which says that a LEASE ENDING deletes
+	// one. They coincide on every subject today, and keeping them one field would make
+	// the two unaskable apart: it is this fact, not the lease's, that decides whether
+	// revoke-upstream acts or refuses, and whether a capability probe is expected to
+	// leave nothing behind.
+	DeletesIssuedCredentials bool
 	// TrackingPrefix is the storage prefix a plugin writes its active-credential
 	// record under, e.g. "active-tokens/". Set it and the revoke category asserts
 	// the durability rule that record exists for: a credential whose tracking
@@ -133,10 +147,6 @@ type Harness struct {
 	// case skips rather than passing vacuously.
 	WriteSetWithMinters func(t *testing.T, b logical.Backend, storage logical.Storage, minterIDs ...string) *logical.Response
 
-	// PlantDisabledProbeRole writes a DISABLED role bound to the default set
-	// straight to storage (there is no disable endpoint), so the suite can check
-	// a disabled role is not probed.
-	PlantDisabledProbeRole func(t *testing.T, storage logical.Storage)
 	// DenyMint makes the upstream refuse the mint call while the health call
 	// keeps succeeding — the "authenticates but cannot mint" shape. It must be
 	// sticky until AllowMint, not a one-shot next-request override.

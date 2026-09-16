@@ -128,7 +128,28 @@ A reconciliation worker runs every 6h (configurable, with a 24h bootstrap delay 
 
 Untagged upstream entities are never considered. This is the load-bearing safety invariant.
 
-Safeguards: per-role `disable_auto_delete` switch, dry-run mode, max 10 deletes per pass per cloud, 24h bootstrap delay, audit logging.
+Safeguards: dry-run mode, a per-class `max_deletes_per_pass` cap, a confirmation hold (1h on the timer-driven pass), 24h bootstrap delay, and structured log lines naming every deletion.
+
+> **`disable_auto_delete` was never built, and is withdrawn (2026-09-16).** It was proposed here as an emergency operator switch halting the reconciler's upstream deletes for one role, and it was declared as a struct field read by nothing (audit A6). It is withdrawn rather than implemented, because it is the wrong lever twice over: halting the reconciler *stops* the one mechanism that reclaims a leaked credential nobody holds a lease for, and what an incident needs is deleting credentials faster, not more slowly. That need is now served by two levers of its own — see [Containment](#containment) — and the struct field is gone.
+
+## Containment {#containment}
+
+Deleting a role stops nothing: the lease core keeps live leases renewable, and every credential already issued keeps working (on DO/Exoscale/Vultr/Akamai, indefinitely, since those credentials have no upstream expiry). Two levers exist instead, both addressed by **role name**, which is what an incident actually supplies:
+
+1. **`disabled=true` on the role** — stop issuing more. Accepted by every plugin's role write path, and usable with nothing but the flag and no healthy upstream.
+2. **`roles/<name>/revoke-upstream`** — delete what the role already issued, from the mount's own `active-*/` tracking records. `mode=dry_run` reports the count and arms nothing. A normal write arms a durable `purge/<role>` intent whose **cutoff is the arm time** (so credentials issued during the response — including the responder's own — are out of scope, and the purge terminates), runs one bounded pass inline, and returns progress; a worker on the active node continues in bounded passes across restarts and failover. Both operations answer in one schema on every cloud: `role`, `armed`, `cutoff`, `tracked`, `deleted`, `remaining`, `failed`, `complete`, plus the `mode` a write ran in.
+
+The levers are independent by requirement: a responder must be able to stop the bleeding without destroying credentials live consumers are using, and to destroy what leaked without taking issuance down. A purge therefore leaves the role issuing, and works on a role that is already disabled.
+
+The lever available is per-cloud:
+
+| Cloud | Containment for an already-issued credential |
+| :---- | :---- |
+| DO (tokens and Spaces keys), UpCloud, Azure, Exoscale, Vultr, Akamai | `revoke-upstream` deletes it |
+| AWS, GCP, OVH | **none** — the credential only expires, so the role's `max_ttl` IS the blast radius (≤12h, ≤12h, exactly 1h) |
+| OCI | `rotate-slot/<role>/<slot_index>` — a slot's credential is shared by every holder, so replacing it invalidates it for all of them |
+
+On those four the endpoint **refuses** with `unsupported`, naming the cloud's reason and its own remedy. A success reporting zero deletions is the harmful alternative: mid-incident it reads as containment.
 
 ## Per-node access metrics
 
@@ -143,7 +164,8 @@ Each plugin instance accumulates access events in memory and flushes to a per-no
 | `cloud-creds/<cloud>/config` | write | Configure plugin: operational + cloud settings (`flush_interval`, `reconcile_cadence`, `minter_expiry_warn`, `minter_retire_grace`, `verify_minter_capability`, region/endpoints). **Minters are NOT configured here** — see minter-sets. |
 | `cloud-creds/<cloud>/minter-sets/<name>` | write/read/delete/list | CRUD on named minter sets. Each set independently validated by the OBC-006 rule (over active, non-retired minters). Roles bind to a set. |
 | `cloud-creds/<cloud>/minter-sets/<name>/rotate` | write | Operator-initiated minter self-rotation (`minter_id=<id>`). Mints a mint-capable successor, health-checks it, capability-probes it against every role bound to the set, swaps it in, and marks the old minter retired (deleted by the sweep after `minter_retire_grace`). Implemented for Azure/UpCloud/AWS/Akamai/GCP/Exoscale; DO/OVH/Vultr/OCI reject (API cannot mint a mint-capable successor). |
-| `cloud-creds/<cloud>/roles/<name>` | write/read/delete/list | CRUD on credential roles. Each role has a **required** `minter_set` field naming the set it mints from. |
+| `cloud-creds/<cloud>/roles/<name>` | write/read/delete/list | CRUD on credential roles. Each role has a **required** `minter_set` field naming the set it mints from, and a `disabled` flag (settable since 2026-09-16 on all ten plugins) that stops issuance without deleting anything. |
+| `cloud-creds/<cloud>/roles/<name>/revoke-upstream` | write/read | Delete the credentials this role has ALREADY issued (`mode=dry_run` first). Arms a durable intent whose scope is what was issued when the call was made; runs one bounded pass inline and continues in a background worker; read the path for progress. Refused with `unsupported` on AWS/GCP/OVH (a credential that only expires — the role's `max_ttl` is the blast radius) and on OCI (rotate the slot instead). See [Containment](#containment). |
 | `cloud-creds/<cloud>/creds/<role>` | read | Issue a credential lease |
 | `cloud-creds/<cloud>/rotate-slot/<role>/<slot_id>` | write | Force immediate rotation (phased-rotation only) |
 | `cloud-creds/<cloud>/reconcile` | write | Trigger reconciliation; supports `mode=dry_run` |
@@ -244,7 +266,7 @@ Returns last-access information for a specific cloud entity, merged across plugi
 | QN-004 | Does UpCloud's API support headless per-request token creation? If yes, UpCloud SHOULD switch to JIT; if no, phased-rotation is correct. Verification before the UpCloud follow-up RFC. |
 | QN-005 | What level of OVH OAuth2 service-account coverage exists today for the OVH APIs in scope (cloud project, dedicated cloud, etc.)? Determines whether OVH ships via OAuth2 or requires browser automation. |
 | QN-006 | Is the chosen 7d retention for retired metrics rows operator-acceptable, or do auditors require longer retention? |
-| QN-007 | Should the reconciler's `disable_auto_delete` switch be per-role (current proposal) or also offer a per-cloud kill-switch for incident response? |
+| QN-007 | **ANSWERED 2026-09-16: neither — the question's premise was wrong.** Incident response does not want the reconciler's deletes *halted* (that disables the one mechanism reclaiming a leaked credential nobody holds a lease for); it wants credentials deleted *faster*. `disable_auto_delete` is withdrawn at either scope, and containment is two role-scoped levers instead: `disabled=true` and `roles/<name>/revoke-upstream` — see [Containment](#containment). Scope is the **role**, because that is already the privilege boundary; a per-mount kill switch would take down every unaffected role in the mount. |
 
 # Potential Future Work
 

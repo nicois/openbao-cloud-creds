@@ -49,6 +49,8 @@ func doSpacesCase(t *testing.T) e2eCase {
 		// so renewal only defers the revoke that is the credential's whole bound.
 		Renewable:  true,
 		HardRevoke: true,
+		// Every hard-revoke cloud can also be purged: the same delete call serves both.
+		DeletesIssuedCredentials: true,
 		// The Spaces-key count, not the token count: a summed count would let this row pass on
 		// the other type's numbers.
 		Upstream: srv.ProvisionedSpacesKeyCount,

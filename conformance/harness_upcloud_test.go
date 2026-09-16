@@ -58,9 +58,10 @@ func upcloudHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, upcloudOtherToken)))
 		},
-		ProvisionedCount:  srv.ProvisionedCount,
-		ExpectsHardRevoke: true,
-		TrackingPrefix:    "active-tokens/",
+		ProvisionedCount:         srv.ProvisionedCount,
+		ExpectsHardRevoke:        true,
+		DeletesIssuedCredentials: true,
+		TrackingPrefix:           "active-tokens/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
@@ -87,9 +88,8 @@ func upcloudHarness(t *testing.T) plugintest.Harness {
 			}
 			return plugintest.TryWrite(t, b, storage, setPath, minterSet(minters...))
 		},
-		PlantDisabledProbeRole: plantDisabledRole,
-		DenyMint:               func() { srv.SetForbidMintForTokenPrefix(upcloudMinterPrefix) },
-		AllowMint:              func() { srv.SetForbidMintForTokenPrefix("") },
+		DenyMint:  func() { srv.SetForbidMintForTokenPrefix(upcloudMinterPrefix) },
+		AllowMint: func() { srv.SetForbidMintForTokenPrefix("") },
 		FailNextMintWithStatus: func(_ *testing.T, status int) string {
 			srv.SetNextStatus(status)
 			return ""

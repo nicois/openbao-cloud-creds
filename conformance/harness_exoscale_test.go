@@ -63,9 +63,10 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(exoscaleMinter(replacementMinterID, exoscaleOtherKey)))
 		},
-		ProvisionedCount:  srv.ProvisionedCount,
-		ExpectsHardRevoke: true,
-		TrackingPrefix:    "active-tokens/",
+		ProvisionedCount:         srv.ProvisionedCount,
+		ExpectsHardRevoke:        true,
+		DeletesIssuedCredentials: true,
+		TrackingPrefix:           "active-tokens/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
@@ -82,9 +83,8 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 			return plugintest.TryWrite(t, b, storage, setPath,
 				minterSet(exoscaleMinter(minterID, exoscaleLiveKey)))
 		},
-		PlantDisabledProbeRole: plantDisabledRole,
-		DenyMint:               func() { srv.SetForbidCreateForKeyPrefix(exoscaleMinterKeyPrefix) },
-		AllowMint:              func() { srv.SetForbidCreateForKeyPrefix("") },
+		DenyMint:  func() { srv.SetForbidCreateForKeyPrefix(exoscaleMinterKeyPrefix) },
+		AllowMint: func() { srv.SetForbidCreateForKeyPrefix("") },
 		FailNextMintWithStatus: func(_ *testing.T, status int) string {
 			srv.SetNextStatus(status)
 			return ""

@@ -20,7 +20,7 @@ plugins/<x>/*_test  only what is true of <x> alone.
 
 `pkg/plugintest` must never import a plugin (that would be an import cycle, since every plugin imports `pkg/plugintest`). The `conformance/` module is where the two meet; it is test-only, so plugin-module isolation still holds.
 
-## The eight categories
+## The nine categories
 
 `plugintest.AllCategories()` is the list. Each is one shared suite over one `Harness`:
 
@@ -34,6 +34,7 @@ plugins/<x>/*_test  only what is true of <x> alone.
 | `minter-visibility` | a minter's recovery state is durable and readable from the minter-set endpoint, so an operator can see WHICH minter is failing (A25, A27) |
 | `reconciler-safety` | the reconciler never touches an entity outside the owner-tag scheme, `dry_run` deletes nothing, two mounts sharing one cloud account never reclaim each other's live credentials (A19), and `/reconcile` answers in the one uniform schema (A28) |
 | `error-taxonomy` | every error a client can receive carries a code from `credenvelope.AllCodes()`, and the code says what the client should *do* |
+| `containment` | the two levers an operator has when issued credentials have leaked: `disabled=true` is settable through the role's own write path and stops issuance at once (with nothing but the flag, and while the cloud refuses to mint), and `roles/<name>/revoke-upstream` deletes what the role already issued — on an already-disabled role, dry-running without deleting, idempotently, leaving the role issuing, in one uniform report — and *refuses* with `unsupported` where the cloud cannot delete an issued credential |
 
 `error-taxonomy` is the second category **no cloud may opt out of** (its `requires`
 returns nothing, like `lease`). Individual cases that need a knob — a mint refusal, a
@@ -60,6 +61,18 @@ and destroys the credential a client tried to keep. The only way to say "not
 renewable" is to register no callback. Never "fix" a renewability failure by
 assigning `resp.Secret.Renewable = false`; remove the callback.
 
+`containment` requires only `RolePath`, so effectively no cloud opts out; the cases that
+need an issued credential to delete gate themselves on `DeletesIssuedCredentials` and print
+why. Two of its assertions exist because the *natural* implementation breaks them. A purge
+built on the plugin's own role loader answers an operator's second call with `role_disabled`,
+leaving them to re-enable the role — reopening issuance mid-incident — to destroy what
+leaked; hence `RevokingUpstreamWorksOnADisabledRole`, which was proven to catch exactly that
+by injecting the refusal into one plugin and watching the case fail. And on a cloud that
+cannot delete an issued credential, the endpoint must **refuse** rather than report zero
+deletions: a clean report is what a responder reads as containment. When adding a cloud, the
+question to answer is which lever it has — deletion, a rotation slot, or nothing but the
+role's `max_ttl` — because the refusal has to name it.
+
 **Durability of an issued credential is settled and documented** — see
 [`docs/decisions.md`](docs/decisions.md) ("Durability of an issued credential, and where orphans
 come from"). Short version: core persists the lease synchronously before the client sees anything,
@@ -68,7 +81,7 @@ IS responsible for is the `active-*/` tracking record — and revoking immediate
 fails, which the `revoke` category now asserts via `Harness.TrackingPrefix`. Note the prefixes are
 not uniform across clouds; declaring the wrong one yields a green test that asserts nothing.
 
-Adding a category means: a `Run<X>Suite` in `pkg/plugintest`, an entry in the `suites` registry in `conformance.go` naming the `Harness` fields it needs, and then ten harnesses that either wire those fields or declare the gap. That last step is the point — a new category cannot land half-applied.
+Adding a category means: a `Run<X>Suite` in `pkg/plugintest`, an entry in the `suites` registry in `conformance.go` naming the `Harness` fields it needs, and then every harness in the table — eleven subjects across ten clouds — either wiring those fields or declaring the gap. That last step is the point — a new category cannot land half-applied.
 
 ## The layer above: `e2e/`
 
@@ -85,14 +98,13 @@ renewability lie above — were invisible to every in-process test.
 
 The scenario itself is **`baotest.RunScenario`** in
 [`pkg/baotest/scenario.go`](pkg/baotest/scenario.go), not in this module. `e2e/` is a
-registry plus nine per-cloud vocabulary files, each returning a `baotest.Case`: the
-three write bodies, the TTL and renewability contract, whether revoke is hard, and a
-`func() int` reading the fake's count. `Case` is to this layer exactly what
-`plugintest.Harness` is to conformance.
+registry plus one vocabulary file per driven subject, each returning a `baotest.Case`: the
+three write bodies, the TTL and renewability contract, what a lease ending and an operator's
+purge each do to the credential, and a `func() int` reading the fake's count. `Case` is to this layer exactly what `plugintest.Harness` is to conformance.
 
 Adding a cloud therefore means writing a `Case`, never writing assertions. If you find
 yourself adding an assertion to a case file, it belongs in `pkg/baotest/scenario.go`
-where all eight consumers get it — the reason it moved there is that a second
+where every consumer gets it — the reason it moved there is that a second
 repository wrote its own version and quietly omitted a third of the checks
 ([`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md), "The scenario
 is importable too").

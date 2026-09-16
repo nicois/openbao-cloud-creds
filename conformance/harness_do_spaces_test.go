@@ -72,9 +72,10 @@ func doSpacesHarness(t *testing.T) plugintest.Harness {
 		// Spaces keys are counted on their own, not summed with tokens: the two classes draw on
 		// separate upstream quotas, and a summed count would let a revoke assertion pass because
 		// the OTHER class's count happened to move.
-		ProvisionedCount:  srv.ProvisionedSpacesKeyCount,
-		ExpectsHardRevoke: true,
-		TrackingPrefix:    "active-spaces-keys/",
+		ProvisionedCount:         srv.ProvisionedSpacesKeyCount,
+		ExpectsHardRevoke:        true,
+		DeletesIssuedCredentials: true,
+		TrackingPrefix:           "active-spaces-keys/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, config(verify))
@@ -95,7 +96,6 @@ func doSpacesHarness(t *testing.T) plugintest.Harness {
 			}
 			return plugintest.TryWrite(t, b, storage, setPath, minterSet(minters...))
 		},
-		PlantDisabledProbeRole: plantDisabledRole,
 		// The Spaces-specific refusal. Using the token knob here would deny a mint this role
 		// never makes, and the capability suite would then assert that an ALLOWED minter is
 		// rejected — passing or failing for reasons unrelated to what it means to test.

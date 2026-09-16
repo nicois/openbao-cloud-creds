@@ -78,24 +78,6 @@ func tokenMinter(id, token string) map[string]interface{} {
 	return map[string]interface{}{fieldID: id, fieldToken: token, fieldNeverExpires: true}
 }
 
-// plantDisabledRole writes a DISABLED role straight to storage. There is no
-// disable endpoint — Disabled is set out of band — so the capability suite's
-// "a disabled role must not block a minter-set write" case needs this. Only the
-// fields the set-write path reads are planted; a disabled role is never probed,
-// so its mint-shape fields are irrelevant.
-func plantDisabledRole(t *testing.T, storage logical.Storage) {
-	t.Helper()
-	entry, err := logical.StorageEntryJSON(probeRolePath, map[string]interface{}{
-		fieldName: probeRoleName, fieldMinterSet: defaultSet, fieldDisabled: true,
-	})
-	if err != nil {
-		t.Fatalf("building the disabled role entry failed: %v", err)
-	}
-	if err := storage.Put(t.Context(), entry); err != nil {
-		t.Fatalf("planting the disabled role failed: %v", err)
-	}
-}
-
 // Aged seeding constants for the reconciler-safety suite's reclamation case.
 //
 // The timestamp is far enough in the past to clear any confirmation hold the

@@ -93,8 +93,14 @@ func (g Gate) VerifySuccessor(ctx context.Context, storage logical.Storage, setN
 // what that role asks for. Call it before persisting the role: this is what stops
 // an operator defining a role whose minting key is unsuitable, and it also means
 // a set must exist and be capable before roles can be attached to it.
+//
+// A DISABLED role is not probed. It asks nothing of a minter, and the write that
+// disables one is the write most likely to be made while the cloud is refusing us —
+// a compromised minter, a revoked key, an account locked out — so a probe standing
+// in front of it would make the containment lever fail exactly when it is needed. A
+// set write excludes disabled roles for the same reason (RolesBoundTo).
 func (g Gate) VerifyRole(ctx context.Context, storage logical.Storage, setName string, roleJSON []byte, checks ChecksFunc) *logical.Response {
-	if !g.Enabled {
+	if !g.Enabled || disabledRole(roleJSON) {
 		return nil
 	}
 	set, err := LoadMinterSet(ctx, storage, setName)
@@ -105,6 +111,17 @@ func (g Gate) VerifyRole(ctx context.Context, storage logical.Storage, setName s
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", setName)
 	}
 	return g.run(ctx, storage, checks(set, roleJSON))
+}
+
+// disabledRole reports whether the role being written is turned off. An unparseable
+// role reads as enabled, so it is probed: that is the safe direction, since the only
+// cost is a probe and the alternative is a malformed role skipping verification.
+func disabledRole(roleJSON []byte) bool {
+	var probe boundRole
+	if err := json.Unmarshal(roleJSON, &probe); err != nil {
+		return false
+	}
+	return probe.Disabled
 }
 
 // run executes the probes and renders the outcome.

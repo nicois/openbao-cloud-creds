@@ -32,9 +32,13 @@ RPC boundary, the mount table and the expiration manager were all absent.
 but stops at `bao secrets list | grep -q "^smoke-<name>/"`.
 
 **Closed for 7 of 10 clouds** by the `e2e/` module: config → minter set → role →
-`read creds/<role>` → lease lookup → renew → revoke → `plugin reload` → re-issue,
-against a plugin binary in a live dev server, with the cloud fake in the *test*
-process so upstream state can be asserted directly. AWS, GCP and OCI are declared
+`read creds/<role>` → lease lookup → renew → revoke → `plugin reload` → re-issue →
+`revoke-upstream` (dry run, then the purge, then progress), against a plugin binary in a
+live dev server, with the cloud fake in the *test* process so upstream state can be
+asserted directly. The purge is last because it needs live credentials issued through the
+RPC boundary to delete, and what this layer adds over conformance there is the wire: the
+report's numbers arrive as `json.Number`, and a refusal reaches a client wrapped in the API
+client's own request context rather than as a bare `<code>: <message>` string. AWS, GCP and OCI are declared
 gaps in the e2e table — see G8.
 
 ### G2 — background workers are never started by `Factory` — CLOSED (KI-007), one residual
@@ -319,7 +323,7 @@ What an external consumer needs:
 
 | Want | Import | Internal deps to `replace` |
 |---|---|---|
-| The eight conformance categories | `pkg/plugintest` | `pkg/credenvelope` |
+| The nine conformance categories | `pkg/plugintest` | `pkg/credenvelope` |
 | The ten cloud fakes | `pkg/credenvelope/fakes` | (part of the `credenvelope` module) |
 | A live OpenBao with plugin binaries | `pkg/baotest` | `pkg/credenvelope` |
 | The end-to-end **scenario** itself | `pkg/baotest` (`Case`, `RunScenario`) | `pkg/credenvelope` |

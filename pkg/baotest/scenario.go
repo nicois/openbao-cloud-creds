@@ -126,6 +126,16 @@ type Case struct {
 	// the fake's count must fall back.
 	HardRevoke bool
 
+	// DeletesIssuedCredentials is true when the cloud can destroy a credential this role
+	// has already issued, ahead of whatever expiry it carries — which is what makes
+	// roles/<name>/revoke-upstream a real lever rather than a refusal.
+	//
+	// A SEPARATE fact from HardRevoke, which says a LEASE ENDING deletes one. Every cloud
+	// that hard-revokes can also be purged, so the two agree on every row today and the
+	// scenario refuses a Case that claims otherwise. Reading the purge lever off HardRevoke
+	// would tie an operator's lever to the lease's, which is not what either is about.
+	DeletesIssuedCredentials bool
+
 	// Upstream reports how many credentials the fake currently holds. On clouds whose
 	// credentials cannot be revoked it is a monotonic count of mints instead;
 	// HardRevoke says which. Nil disables every upstream-count assertion, which is a
@@ -163,6 +173,20 @@ func (tc Case) withDefaults() Case {
 
 func (tc Case) rolePath() string  { return tc.Mount + "/roles/" + tc.RoleName }
 func (tc Case) issuePath() string { return tc.Mount + "/creds/" + tc.RoleName }
+func (tc Case) purgePath() string { return tc.rolePath() + "/revoke-upstream" }
+
+// The revoke-upstream report's keys and modes, spelled out rather than imported from the
+// package that produces them: what this layer checks is that a client receives them, and a
+// test that reads the keys from the code under test asserts nothing about that.
+const (
+	purgeKeyTracked  = "tracked"
+	purgeKeyDeleted  = "deleted"
+	purgeKeyComplete = "complete"
+	purgeKeyMode     = "mode"
+
+	purgeModeNormal = "normal"
+	purgeModeDryRun = "dry_run"
+)
 
 // RunScenario drives one cloud through the whole scenario. Each step is a named helper,
 // so a failure names the property that broke rather than a line number.
@@ -171,6 +195,11 @@ func (tc Case) issuePath() string { return tc.Mount + "/creds/" + tc.RoleName }
 func RunScenario(t *testing.T, c *Cluster, tc Case) {
 	t.Helper()
 	tc = tc.withDefaults()
+	if tc.HardRevoke && !tc.DeletesIssuedCredentials {
+		t.Fatalf("%s declares HardRevoke without DeletesIssuedCredentials: a lease ending cannot "+
+			"delete a credential the cloud will not delete. Declare both, so the purge lever is "+
+			"asserted rather than declared unsupported by omission", tc.Cloud)
+	}
 
 	c.Enable(tc.Binary, tc.Mount)
 	t.Cleanup(func() { c.Unmount(tc.Mount) })
@@ -206,6 +235,64 @@ func RunScenario(t *testing.T, c *Cluster, tc Case) {
 
 	want++
 	assertReloadThenIssue(t, c, tc, want)
+
+	assertPurgeUpstream(t, c, tc, want)
+}
+
+// assertPurgeUpstream drives containment's second lever through the real API: destroy what
+// the role has already issued, without touching a single lease.
+//
+// It runs last, deliberately, because it needs what the rest of the scenario has left behind —
+// credentials still live upstream, issued through the plugin RPC boundary and belonging to
+// leases core is still tracking. That is the situation the endpoint is for, and it is the
+// situation an in-process test cannot assemble.
+//
+// What this layer adds over conformance is the wire: the report is assembled by a process of
+// its own and reaches a client through OpenBao's JSON layer, so every count arrives as a
+// json.Number. A plugin whose report was correct in-process and unreadable to `bao write`
+// would pass every other test in the repository.
+func assertPurgeUpstream(t *testing.T, c *Cluster, tc Case, live int) {
+	t.Helper()
+	if !tc.DeletesIssuedCredentials {
+		// Nothing to delete, so the endpoint must refuse rather than report a purge of zero:
+		// the role's TTL ceiling is this cloud's whole blast radius, and a clean report would
+		// tell an operator the incident was contained.
+		// Matched inside the message rather than parsed off the front of it: the API client
+		// wraps a refusal in its own request context, so what a client actually receives is
+		// the code somewhere in a larger string.
+		err := c.WriteExpectingError(tc.purgePath(), map[string]interface{}{})
+		if !strings.Contains(err.Error(), string(credenvelope.ErrUnsupported)) {
+			t.Errorf("revoking upstream on %s was refused with %v, which does not carry %q — an "+
+				"operator cannot tell a cloud that will not do this from one that failed to",
+				tc.Cloud, err, credenvelope.ErrUnsupported)
+		}
+		return
+	}
+
+	dry := c.Write(tc.purgePath(), map[string]interface{}{purgeKeyMode: purgeModeDryRun})
+	if got := JSONInt(t, dry.Data[purgeKeyTracked]); got != live {
+		t.Errorf("the dry run reported %s=%d, want the %d credentials this role has issued",
+			purgeKeyTracked, got, live)
+	}
+	AssertUpstream(t, tc, live)
+
+	purged := c.Write(tc.purgePath(), map[string]interface{}{purgeKeyMode: purgeModeNormal})
+	if got := Str(t, purged.Data, purgeKeyMode); got != purgeModeNormal {
+		t.Errorf("the purge reported %s=%q, want %q", purgeKeyMode, got, purgeModeNormal)
+	}
+	if got := JSONInt(t, purged.Data[purgeKeyDeleted]); got != live {
+		t.Errorf("the purge reported %s=%d, want %d", purgeKeyDeleted, got, live)
+	}
+	if purged.Data[purgeKeyComplete] != true {
+		t.Errorf("the purge reported %s=%v, want it finished", purgeKeyComplete,
+			purged.Data[purgeKeyComplete])
+	}
+	AssertUpstream(t, tc, 0)
+
+	if progress := c.Read(tc.purgePath()); progress.Data[purgeKeyComplete] != true {
+		t.Errorf("reading the purge back reports %s=%v, want it finished", purgeKeyComplete,
+			progress.Data[purgeKeyComplete])
+	}
 }
 
 // AssertLease checks the lease OpenBao actually created. None of this is observable

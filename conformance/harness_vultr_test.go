@@ -57,9 +57,10 @@ func vultrHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, vultrOtherMintToken)))
 		},
-		ProvisionedCount:  srv.ProvisionedCount,
-		ExpectsHardRevoke: true,
-		TrackingPrefix:    "active-users/",
+		ProvisionedCount:         srv.ProvisionedCount,
+		ExpectsHardRevoke:        true,
+		DeletesIssuedCredentials: true,
+		TrackingPrefix:           "active-users/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
@@ -85,9 +86,8 @@ func vultrHarness(t *testing.T) plugintest.Harness {
 			}
 			return plugintest.TryWrite(t, b, storage, setPath, minterSet(minters...))
 		},
-		PlantDisabledProbeRole: plantDisabledRole,
-		DenyMint:               func() { srv.SetUngrantableACL(vultrUngrantableACL) },
-		AllowMint:              func() { srv.SetUngrantableACL("") },
+		DenyMint:  func() { srv.SetUngrantableACL(vultrUngrantableACL) },
+		AllowMint: func() { srv.SetUngrantableACL("") },
 		FailNextMintWithStatus: func(_ *testing.T, status int) string {
 			srv.SetNextStatus(status)
 			return ""

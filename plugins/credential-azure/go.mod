@@ -90,3 +90,7 @@ replace github.com/nicois/openbao-cloud-creds/pkg/minteraffinity => ../../pkg/mi
 replace github.com/nicois/openbao-cloud-creds/pkg/clusterrole => ../../pkg/clusterrole
 
 replace github.com/nicois/openbao-cloud-creds/pkg/mintercapacity => ../../pkg/mintercapacity
+
+require github.com/nicois/openbao-cloud-creds/pkg/upstreampurge v0.1.0
+
+replace github.com/nicois/openbao-cloud-creds/pkg/upstreampurge => ../../pkg/upstreampurge

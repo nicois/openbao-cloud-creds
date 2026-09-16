@@ -63,8 +63,9 @@ func ovhHarness(t *testing.T) plugintest.Harness {
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath, minterSet(ovhMinter(replacementMinterID)))
 		},
-		ProvisionedCount:  srv.ProvisionedCount,
-		ExpectsHardRevoke: false,
+		ProvisionedCount:         srv.ProvisionedCount,
+		ExpectsHardRevoke:        false,
+		DeletesIssuedCredentials: false,
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
@@ -80,9 +81,8 @@ func ovhHarness(t *testing.T) plugintest.Harness {
 		RewriteSet: func(t *testing.T, b logical.Backend, storage logical.Storage, minterID string) *logical.Response {
 			return plugintest.TryWrite(t, b, storage, setPath, minterSet(ovhMinter(minterID)))
 		},
-		PlantDisabledProbeRole: plantDisabledRole,
-		DenyMint:               func() { srv.SetForbidMint(true) },
-		AllowMint:              func() { srv.SetForbidMint(false) },
+		DenyMint:  func() { srv.SetForbidMint(true) },
+		AllowMint: func() { srv.SetForbidMint(false) },
 		FailNextMintWithStatus: func(_ *testing.T, status int) string {
 			srv.SetNextStatus(status)
 			return ""

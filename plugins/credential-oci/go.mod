@@ -84,3 +84,7 @@ replace github.com/nicois/openbao-cloud-creds/pkg/reconciler => ../../pkg/reconc
 replace github.com/nicois/openbao-cloud-creds/pkg/ownertag => ../../pkg/ownertag
 
 replace github.com/nicois/openbao-cloud-creds/pkg/clusterrole => ../../pkg/clusterrole
+
+require github.com/nicois/openbao-cloud-creds/pkg/upstreampurge v0.1.0
+
+replace github.com/nicois/openbao-cloud-creds/pkg/upstreampurge => ../../pkg/upstreampurge

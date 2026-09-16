@@ -278,11 +278,29 @@ func (c *Cluster) Reload(plugin string) {
 	}
 }
 
-func (c *Cluster) Write(path string, data map[string]interface{}) {
+// Write performs a write and returns whatever the endpoint answered, which for most of them
+// is nothing — a caller ignoring the result is the common case. The endpoints that DO answer
+// need it read back here rather than inferred: a report assembled by the plugin has crossed
+// the RPC boundary and OpenBao's JSON layer by the time a client sees it, and its numbers
+// arrive as json.Number.
+func (c *Cluster) Write(path string, data map[string]interface{}) *api.Secret {
 	c.t.Helper()
-	if _, err := c.client.Logical().Write(path, data); err != nil {
+	secret, err := c.client.Logical().Write(path, data)
+	if err != nil {
 		c.t.Fatalf("write %s failed: %v\nlog:\n%s", path, err, c.LogTail())
 	}
+	return secret
+}
+
+// WriteExpectingError is for the writes that MUST be refused. It returns the error so the
+// caller can assert on the code the client actually receives.
+func (c *Cluster) WriteExpectingError(path string, data map[string]interface{}) error {
+	c.t.Helper()
+	secret, err := c.client.Logical().Write(path, data)
+	if err == nil {
+		c.t.Fatalf("write %s was expected to fail; it returned %v", path, secret)
+	}
+	return err
 }
 
 func (c *Cluster) Read(path string) *api.Secret {

@@ -111,6 +111,15 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "Name of the minter set this role mints from (required)",
 				},
+				fieldDisabled: {
+					Type: framework.TypeBool,
+					Description: "When true the role issues nothing, answering role_disabled. This is " +
+						"the lever for a suspected credential leak: deleting the role stops nothing, " +
+						"because live leases stay renewable and issued credentials keep working. " +
+						"Writing it alone is enough — a write to an existing role changes only the " +
+						"fields it carries. Reversible; it destroys nothing already issued (see " +
+						"roles/<name>/revoke-upstream for that)",
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -129,6 +138,11 @@ func (b *backend) rolePaths() []*framework.Path {
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
+	// A write to an existing role changes the fields it carries and leaves the rest as
+	// they were, so `disabled=true` on its own is a complete request.
+	if err := cloudconfig.PrefillRoleWrite(ctx, req.Storage, "roles/"+name, d, storedRoleData); err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "reading from storage", err), nil
+	}
 	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
 	scopes := d.Get(fieldScopes).([]string)
@@ -169,6 +183,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MaxTTL:         maxTTL,
 		Scopes:         scopes,
 		MinterSet:      minterSet,
+		Disabled:       d.Get(fieldDisabled).(bool),
 		CredentialType: typed.credentialType,
 		Grants:         typed.grants,
 		Region:         typed.region,
@@ -296,11 +311,19 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 		return credenvelope.InternalResponse(b.Logger().Warn, "parsing a stored entry", err), nil
 	}
 
+	return &logical.Response{Data: roleData(&role)}, nil
+}
+
+// roleData renders a role for its read endpoint, in the same field names and units the
+// write schema accepts. That is what lets a write to an existing role prefill from it
+// (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
+func roleData(role *doRole) map[string]interface{} {
 	data := map[string]interface{}{
 		fieldName:           role.Name,
 		"default_ttl":       int(role.DefaultTTL.Seconds()),
 		"max_ttl":           int(role.MaxTTL.Seconds()),
 		fieldMinterSet:      role.MinterSet,
+		fieldDisabled:       role.Disabled,
 		fieldCredentialType: role.credentialType(),
 	}
 	// Only the fields belonging to this role's credential type are reported. Emitting the
@@ -313,7 +336,16 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 		data[fieldScopes] = role.Scopes
 	}
 
-	return &logical.Response{Data: data}, nil
+	return data
+}
+
+// storedRoleData renders a STORED role the same way, for a write that is patching one.
+func storedRoleData(raw []byte) (map[string]interface{}, error) {
+	var role doRole
+	if err := json.Unmarshal(raw, &role); err != nil {
+		return nil, err
+	}
+	return roleData(&role), nil
 }
 
 func (b *backend) pathRoleDelete(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {

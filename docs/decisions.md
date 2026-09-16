@@ -2,6 +2,107 @@
 
 Short notes on choices that aren't obvious from the [techrfc](techrfc.md) and would otherwise need to be re-derived from scratch.
 
+## Why containment is two levers, and why neither of them is deleting the role (2026-09-16)
+
+A credential this plugin issued is believed to have leaked. Until 2026-09-16 an operator's options
+were: revoke leases one at a time, or delete the role. **Deleting the role is worse than no action
+at all**, because it looks like containment and achieves nothing — the lease core keeps the live
+leases renewable, and on the four clouds whose credentials carry no upstream expiry (DO, Exoscale,
+Vultr, Akamai) a credential in a client's hands works until a lease revoke reaches the cloud, which
+now never comes. Revoking leases individually is only available for the leases someone can
+enumerate, and an incident does not hand you lease ids. It hands you a role name.
+
+So containment is expressed as two levers, both addressed by role name:
+
+- **`disabled=true` on the role** — stop issuing more. It was already honoured at issuance on all
+  ten plugins — the stored role carried it and issuance refused on it — and could not be *set* on
+  any of them, because no role write path accepted the field. Now every one does.
+  It needs nothing but the flag (no other role field, no healthy cloud), because an operator paged
+  at 3am has neither the role definition nor a working upstream.
+- **`roles/<name>/revoke-upstream`** — destroy what the role already issued, on the six clouds that
+  can delete an issued credential.
+
+**They are independent, and that is the requirement, not a convenience.** A responder must be able
+to stop the bleeding without destroying live credentials their own services are using, and to
+destroy what leaked without taking issuance down. The purge therefore leaves the role issuing, and
+`disabled` deletes nothing.
+
+**The scope of both is the role**, because the role is already the privilege boundary — it is what
+`minter_set` binds, what the capability probe verifies, and what the envelope records — so it is
+also the honest containment boundary. This is the answer to techrfc **QN-007** ("per-role switch or
+also a per-cloud kill switch?"): per-role, and the question's premise was wrong twice over. The
+switch it asked about (`disable_auto_delete`) would have halted the *reconciler's* deletes, i.e.
+disabled the one thing that reclaims a leaked credential nobody holds a lease for; and a per-mount
+kill switch is not a lever a responder wants, because it takes down every unaffected role in the
+mount. What was actually missing was the ability to delete credentials *faster*, not more slowly.
+
+**The lever an operator has is per-cloud, and on three clouds there is none.** Nothing deletes an
+STS session, a GCP impersonation token or an OVH OAuth2 token, so on AWS/GCP/OVH the role's
+`max_ttl` **is** the blast radius (≤12h, ≤12h, exactly 1h) and the only action available is having
+stopped the next one. OCI is different again: a phased-rotation credential belongs to a slot and is
+shared by every client that has read it, so the lever is `rotate-slot/<role>/<slot_index>`, which
+replaces it now for all of them. On all four the endpoint **refuses** with `unsupported`, naming the
+cloud's reason and that cloud's own remedy — the remedy is a parameter of
+`upstreampurge.UnsupportedPath` rather than a constant precisely because handing OCI the
+expiry answer would have an operator sit out a TTL they could have cut short.
+
+**Why refuse rather than report zero deletions.** A `200` carrying `deleted=0, complete=true` is the
+one genuinely dangerous answer: mid-incident it reads as "there was nothing out there", and the
+responder stops looking for a lever. A refusal also means the endpoint can exist on all ten clouds,
+which is what lets a runbook be written once — a 404 would send the reader to check whether they had
+the path wrong.
+
+## Why revoking upstream arms a durable intent instead of deleting synchronously (2026-09-16)
+
+The obvious implementation deletes every one of the role's credentials inside the request. A role
+with thousands of live credentials makes that one upstream API call each, against the same account
+quota the mount issues from — so it either exceeds the request deadline (leaving the operator with
+no idea what was destroyed) or spends the account's whole quota and takes issuance down. That turns
+a leak of *some* credentials into an outage for *all* of them, during an incident.
+
+So a write **arms a durable intent** (`purge/<role>`), runs one bounded pass inline, and returns
+progress; the `upstream-purge` worker on the active node continues in equally bounded passes. The
+operator's single call is what survives a restart and a failover, which is what makes it acceptable
+to answer them before the work is finished — and `GET` on the same path reports where it got to, in
+the same schema, including for a role nobody has ever purged.
+
+**The cutoff (the arm time) is load-bearing in two ways.** Without it a purge on a mount that keeps
+issuing never terminates; and it would delete the credentials issued *during* the response,
+including the ones the responder just minted to run the response with. It also makes the report
+answerable: `remaining` is "how much of what you named is left", not a moving target.
+
+**Pacing is deliberately NOT the reconciler's `max_deletes_per_pass` or cadence.** Those bound the
+*risk* of a pass that infers what is an orphan; this bounds the *pace* of deleting exactly what an
+operator named, which carries no such risk. Sharing them would mean an operator who tightened the
+reconciler for safety had unknowingly slowed their own incident response, so the purge has its own
+`DefaultMaxDeletes` (50 — an ordinary role finishes in the inline pass) and its own `SweepInterval`
+(1 minute, versus the reconciler's hours, because containment is urgent and a sweep with nothing
+armed costs one storage list).
+
+**The source of truth is the mount's own `active-*/` tracking records**, not a cloud listing. They
+already exist for the reconciler and the capacity counter, they name the role, and they are readable
+when the cloud is not. A record is deleted only *after* its credential is gone upstream — the record
+is the only thing that makes the credential addressable, so losing it first strands the credential
+as an orphan reclaimable by nothing but the owner-tag reconciler. A `404` from the cloud is success
+(the credential is gone, which is what was asked); a `429` ends the pass rather than counting as a
+failure, because the callers sharing that quota are waiting on it.
+
+**The purge does not go through the plugin's own role loader.** Every plugin's `loadRole` refuses a
+disabled role with `role_disabled`, and disable-then-purge is the sequence this pair of levers
+exists for: routed through it, the endpoint answers the operator's second call with "this role is
+disabled" and leaves them re-enabling the role — reopening issuance mid-incident — to destroy what
+leaked. `resolvePurgeTarget` reads `roles/<name>` directly, and the conformance case
+`RevokingUpstreamWorksOnADisabledRole` was proven to catch the defect by injecting exactly that
+refusal into one plugin.
+
+**Why the minter is chosen the way a lease revoke chooses one** (issuing minter if still in the set,
+else any healthy minter in it): a credential belongs to the account rather than to the key that
+created it, and the issuing minter is quite likely the one that has just been rotated out *because*
+it leaked. Azure is the exception where a record field is load-bearing — the delete addresses the
+application holding the password, so it comes from the tracking record and only falls back to the
+role, since a role re-pointed at another application would send the delete somewhere that never held
+that password, which Graph answers as success.
+
 ## Why a role picks the credential type, and why DO Spaces keys are that second type (2026-09-15)
 
 KI-009 left `credential-do` in a peculiar position: complete, correct, the origin of the shared

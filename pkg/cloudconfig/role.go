@@ -6,12 +6,11 @@ import (
 )
 
 type Role struct {
-	Name              string                 `json:"name"`
-	Cloud             string                 `json:"cloud"`
-	DefaultTTL        time.Duration          `json:"default_ttl"`
-	MaxTTL            time.Duration          `json:"max_ttl"`
-	DisableAutoDelete bool                   `json:"disable_auto_delete,omitempty"`
-	CloudConfig       map[string]interface{} `json:"cloud_config,omitempty"`
+	Name        string                 `json:"name"`
+	Cloud       string                 `json:"cloud"`
+	DefaultTTL  time.Duration          `json:"default_ttl"`
+	MaxTTL      time.Duration          `json:"max_ttl"`
+	CloudConfig map[string]interface{} `json:"cloud_config,omitempty"`
 }
 
 func ValidateRole(r *Role) error {

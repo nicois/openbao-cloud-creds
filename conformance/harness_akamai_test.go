@@ -65,9 +65,10 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, akamaiOtherToken)))
 		},
-		ProvisionedCount:  srv.ProvisionedCount,
-		ExpectsHardRevoke: true,
-		TrackingPrefix:    "active-clients/",
+		ProvisionedCount:         srv.ProvisionedCount,
+		ExpectsHardRevoke:        true,
+		DeletesIssuedCredentials: true,
+		TrackingPrefix:           "active-clients/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
@@ -94,9 +95,8 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 			}
 			return plugintest.TryWrite(t, b, storage, setPath, minterSet(minters...))
 		},
-		PlantDisabledProbeRole: plantDisabledRole,
-		DenyMint:               func() { srv.SetUngrantableAPIID(akamaiRoleAPIID) },
-		AllowMint:              func() { srv.SetUngrantableAPIID(akamaiAllowedAPIKey) },
+		DenyMint:  func() { srv.SetUngrantableAPIID(akamaiRoleAPIID) },
+		AllowMint: func() { srv.SetUngrantableAPIID(akamaiAllowedAPIKey) },
 		FailNextMintWithStatus: func(_ *testing.T, status int) string {
 			srv.SetNextStatus(status)
 			return ""

@@ -130,3 +130,26 @@ Two clouds differ, and both are forced rather than chosen:
 |---|---|---|---|
 | OVH | 3600s | 3600s | The token's lifetime is fixed at 1h by the cloud and there is no revoke API, so neither a shorter nor a longer TTL would be honest (see the OVH row above). |
 | OCI | rotation_period/2 | rotation_period | Phased rotation: a read returns the freshest pre-provisioned slot and the lease TTL is the time until that slot's next rotation, so the role's TTL fields are bounds on the rotation schedule rather than on a credential's own lifetime. |
+
+## A TTL is also a containment bound (2026-09-16)
+
+The matrix above answers "when does this credential stop working if nothing goes wrong". Read
+the same columns as an incident-response question — "how long does a *leaked* one keep working"
+— and one distinction becomes the important one:
+
+- **Where a credential can be deleted** (DO both types, UpCloud, Azure, Exoscale, Vultr,
+  Akamai), the TTL is not the bound: `roles/<name>/revoke-upstream` deletes every credential the
+  role has issued, so containment is minutes and independent of the TTL.
+- **Where it cannot** (AWS, GCP, OVH — the three rows whose "at lease end" cell is *nothing*),
+  the role's `max_ttl` **is** the blast radius. There is no lever during an incident, only the
+  one already bought at role write: 12h on AWS or GCP if the maximum was taken, 1h on OVH
+  because the cloud fixes it. A shorter `max_ttl` on those three is a containment decision, not
+  only a hygiene one, and it can only be made in advance.
+- **OCI** is bounded by the rotation period rather than by either: a slot's token is shared by
+  every holder, so containment is `rotate-slot/<role>/<slot_index>`, which replaces it now.
+
+Two rows deserve naming here because their honest TTL and their containment story diverge
+sharply. **Akamai** does not shorten the credential at all (the Identity API's own `expiresOn`
+is far beyond any lease), so revoke is the *only* bound — and therefore `revoke-upstream` is
+the only containment. **DigitalOcean Spaces keys** have no expiry field in the API at all, same
+conclusion. See KI-011 and [`decisions.md`](decisions.md).

@@ -31,10 +31,10 @@ func RunCapabilitySuite(t *testing.T, h Harness) {
 	t.Run("ProbeSucceedsAndRoleCommits", func(t *testing.T) {
 		capProbeSucceeds(t, h)
 	})
-	// A successful probe mints and then deletes. On the clouds that can revoke,
-	// nothing may be left upstream; the no-revoke clouds pin the probe's
-	// requested lifetime to the cloud minimum instead and are excluded here.
-	if h.ExpectsHardRevoke {
+	// A successful probe mints and then deletes. On the clouds that can delete an issued
+	// credential, nothing may be left upstream; the rest pin the probe's requested
+	// lifetime to the cloud minimum instead and are excluded here.
+	if h.DeletesIssuedCredentials {
 		t.Run("ProbeLeavesNoUpstreamResidue", func(t *testing.T) {
 			capProbeLeavesNoResidue(t, h)
 		})
@@ -143,7 +143,12 @@ func capSetRewriteRejected(t *testing.T, h Harness) {
 func capDisabledRoleNotProbed(t *testing.T, h Harness) {
 	b, storage := newBackend(t, h)
 	h.ConfigureProbe(t, b, storage, true)
-	h.PlantDisabledProbeRole(t, storage)
+	if resp := h.WriteProbeRole(t, b, storage); resp != nil && resp.IsError() {
+		t.Fatalf("writing the role that is about to be disabled was rejected: %v", resp.Error())
+	}
+	// Disabled through its own endpoint rather than planted in storage, so this case
+	// exercises the role a real operator would have: fully defined, then turned off.
+	disable(t, b, storage, h.ProbeRolePath, true)
 
 	denyMint(t, h)
 	if resp := h.RewriteSet(t, b, storage, h.LiveMinterID); resp != nil && resp.IsError() {

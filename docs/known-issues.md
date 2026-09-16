@@ -7,6 +7,12 @@ resilience assessment (against a live raft cluster, UpCloud) and are **RESOLVED*
 likewise, as is KI-010. KI-003, KI-004 and KI-006 are accepted, documented risks.
 Resolved entries are kept for the rationale and history.
 
+**KI-011 is the one to read for what to do when a credential leaks**, and it is
+resolved with a residual worth knowing in advance: the two levers are `disabled=true`
+on the role and `roles/<name>/revoke-upstream`, and on AWS, GCP and OVH there is no
+second lever at all — the role's `max_ttl` is the blast radius, so it is bought before
+the incident or not at all.
+
 KI-007 and KI-008 were both found by the new `e2e/` layer (plugin binaries driven
 through a live OpenBao — see [`openbao-integration-gaps.md`](openbao-integration-gaps.md)),
 which is the point of that layer: neither was visible to any in-process test, and
@@ -710,3 +716,77 @@ that needs the plugin to read the target role's `MaxSessionDuration` (`iam:GetRo
 role write, which costs another IAM grant on the minter and only works same-account.
 Tracked here rather than fixed; the real-cloud probe declares it and
 `CLOUDREAL_AWS_LOWCAP_ROLE_ARN` turns the declaration into a live assertion.
+
+---
+
+## KI-011 — a leaked credential could not be invalidated en masse, and deleting the role stopped nothing — [RESOLVED 2026-09-16, RESIDUAL on AWS/GCP/OVH/OCI]
+
+**Status:** RESOLVED 2026-09-16 (two operator levers, a ninth conformance category
+fencing them, and an e2e pass over the wire). The residual is a property of four
+clouds rather than of this code, and is stated below.
+
+**Severity:** High — the whole point of short-lived credentials is bounding the
+damage of one leaking, and the mount had no way to act on a leak faster than the
+credentials' own expiry. On DO, Exoscale, Vultr and Akamai, whose credentials have
+**no upstream expiry at all**, "faster than expiry" means "at all".
+
+**Symptom:** an operator believes credentials this mount issued are in the wrong
+hands, and knows the role they were issued from. Their available actions were:
+revoke leases one at a time (only for leases they can enumerate — an incident hands
+you a role name, not lease ids), or delete the role. Deleting the role **reads as
+containment and achieves nothing**: the lease core keeps every live lease renewable,
+and every credential already issued keeps working. On the four clouds above it keeps
+working indefinitely, because the lease revoke that would have deleted it upstream is
+now attached to a role that no longer exists.
+
+**Root cause:** two levers were missing, and one of them was missing invisibly.
+
+1. `disabled` was honoured at issuance on all ten plugins — the stored role carried
+   the field and `pathCredsRead` refused on it with `role_disabled` — but **no role
+   write path accepted it**, so the control an operator would reach for first was
+   unreachable through the API. A field that is read but not writable looks exactly
+   like a working switch in a code review.
+2. Nothing addressed "delete what this role has already issued". The mount had the
+   information all along: every hard-revoking plugin writes an `active-*/` tracking
+   record per issued credential, naming the role — the same records the reconciler
+   and the capacity counter read. They were simply not reachable by role name.
+
+**The fix.**
+
+- **`disabled` is settable on all ten role write paths.** It needs nothing but the
+  flag, and works while the cloud is refusing to mint, because that is the situation
+  it is for.
+- **`roles/<name>/revoke-upstream`** on all ten plugins (six acting, four refusing).
+  `mode=dry_run` first, reporting the count and arming nothing. A normal write arms a
+  durable `purge/<role>` intent whose cutoff is the arm time, runs one bounded pass
+  inline and returns progress; the `upstream-purge` worker on the active node
+  continues in bounded passes across a restart or failover. Both operations answer in
+  one schema on every cloud. It works on an already-disabled role, deliberately —
+  close the tap, then empty the bucket, without re-opening issuance in between.
+- **A ninth conformance category, `containment`**, over every subject: twelve cases,
+  including the disabled-role purge (proven to catch its defect by injecting the
+  refusal into one plugin) and the refusal on a cloud that cannot delete. `pkg/baotest`
+  drives the dry run, the purge and the progress read over real HTTP.
+
+Rationale for every part of that shape — the cutoff, the pacing that is deliberately
+not the reconciler's, why a purge bypasses `loadRole` — is in
+[`decisions.md`](decisions.md).
+
+**Residual, and it is the part to read before planning an incident response.**
+
+- **AWS, GCP and OVH have no lever.** Nothing deletes an STS session, a GCP
+  impersonation token or an OVH OAuth2 token: the credential expires and that is all.
+  So the role's `max_ttl` **is** the blast radius (AWS ≤12h, GCP ≤12h, OVH exactly
+  1h), and the only action available during an incident is having stopped the next
+  one. If a shorter blast radius is wanted on those clouds, it has to be bought in
+  advance by setting a shorter `max_ttl` — there is nothing to buy it with afterwards.
+- **OCI's lever is a different endpoint.** A phased-rotation credential belongs to a
+  slot and is shared by every client that has read it, so containment is
+  `rotate-slot/<role>/<slot_index>`, which replaces it now for all of them.
+- On all four, `revoke-upstream` **refuses** with `unsupported` and names that cloud's
+  own remedy. A success reporting zero deletions was the alternative and is the
+  dangerous one: mid-incident it reads as "nothing was out there".
+- **A purge sees only what this mount tracked.** A credential whose tracking record
+  was lost (the KI-002 path, a storage failure between mint and track) is invisible to
+  it, and remains the owner-tag reconciler's job. Credentials created in the account by
+  anything else were never in scope.

@@ -20,6 +20,10 @@ const (
 	fieldGroupID   = "group_id"
 	fieldAPIAccess = "api_access"
 	fieldMinterSet = "minter_set"
+	// fieldDisabled is the role field that stops a role issuing without deleting it.
+	// Deleting a role stops nothing: live leases stay renewable and every credential
+	// already issued keeps working, so this is the only lever that closes the tap.
+	fieldDisabled = "disabled"
 
 	// fieldRotationParams is the per-minter rotation metadata map key (carries
 	// the authorizing username and, after rotation, the upstream client_id used

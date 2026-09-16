@@ -213,3 +213,25 @@ func TestGate_RolesWithTheSameMintShapeProbeOnce(t *testing.T) {
 		t.Fatalf("expected one probe for two identically-shaped roles, got %v", probed)
 	}
 }
+
+// A role write that DISABLES a role must not depend on a probe succeeding. The write
+// is most likely to be made while the cloud is refusing us — a compromised minter, a
+// revoked key, an account locked out — and a role that cannot issue asks nothing of a
+// minter, so there is nothing to prove. A set write already excludes disabled roles
+// for the same reason (RolesBoundTo).
+func TestGate_VerifyRoleSkipsADisabledRole(t *testing.T) {
+	storage := &logical.InmemStorage{}
+	putMinterSet(t, storage, twoMinterSet())
+
+	var probed []string
+	gate := Gate{Cloud: "test", Enabled: true}
+	resp := gate.VerifyRole(t.Context(), storage, setAlpha,
+		[]byte(`{"name":"role-a","disabled":true}`),
+		probeRecorder(&probed, errors.New("403 the minter is exactly what we are containing")))
+	if resp != nil {
+		t.Fatalf("disabling a role was refused because a probe failed: %v", resp.Error())
+	}
+	if len(probed) != 0 {
+		t.Fatalf("a disabled role was probed: %v", probed)
+	}
+}

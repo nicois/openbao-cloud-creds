@@ -83,8 +83,9 @@ func gcpHarness(t *testing.T) plugintest.Harness {
 		RewriteDefaultSetWithout: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, setPath, minterSet(gcpMinter(replacementMinterID)))
 		},
-		ProvisionedCount:  func() int { return int(minted.Load()) },
-		ExpectsHardRevoke: false,
+		ProvisionedCount:         func() int { return int(minted.Load()) },
+		ExpectsHardRevoke:        false,
+		DeletesIssuedCredentials: false,
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
@@ -99,11 +100,10 @@ func gcpHarness(t *testing.T) plugintest.Harness {
 		RewriteSet: func(t *testing.T, b logical.Backend, storage logical.Storage, minterID string) *logical.Response {
 			return plugintest.TryWrite(t, b, storage, setPath, minterSet(gcpMinter(minterID)))
 		},
-		PlantDisabledProbeRole: plantDisabledRole,
-		DenyMint:               func() { denied.Store(true) },
-		AllowMint:              func() { denied.Store(false) },
-		LiveMinterID:           liveMinterID,
-		ReplacementMinterID:    replacementMinterID,
+		DenyMint:            func() { denied.Store(true) },
+		AllowMint:           func() { denied.Store(false) },
+		LiveMinterID:        liveMinterID,
+		ReplacementMinterID: replacementMinterID,
 
 		Skips: map[plugintest.Category]string{
 			plugintest.CategoryReconcilerSafety: "GCP reconcile prunes local tracking entries only " +

@@ -93,7 +93,6 @@ var suites = []suite{
 				field{"ProbeRolePath", h.ProbeRolePath != ""},
 				field{"WriteProbeRole", h.WriteProbeRole != nil},
 				field{"RewriteSet", h.RewriteSet != nil},
-				field{"PlantDisabledProbeRole", h.PlantDisabledProbeRole != nil},
 				field{"DenyMint", h.DenyMint != nil},
 				field{"AllowMint", h.AllowMint != nil},
 				field{"LiveMinterID", h.LiveMinterID != ""},
@@ -117,6 +116,13 @@ var suites = []suite{
 		// skip themselves with a printed reason, so a cloud missing a knob still
 		// gets the cases that do not need one.
 		requires: func(_ Harness) []string { return nil },
+	},
+	{
+		name: CategoryContainment,
+		run:  RunContainmentSuite,
+		requires: func(h Harness) []string {
+			return missing(field{"RolePath", h.RolePath != ""})
+		},
 	},
 	{
 		name: CategoryReconcilerSafety,

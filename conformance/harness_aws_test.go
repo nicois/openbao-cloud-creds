@@ -77,8 +77,9 @@ func awsHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(awsMinter(replacementMinterID, awsOtherKeyID, awsOtherSecret)))
 		},
-		ProvisionedCount:  func() int { return int(minted.Load()) },
-		ExpectsHardRevoke: false,
+		ProvisionedCount:         func() int { return int(minted.Load()) },
+		ExpectsHardRevoke:        false,
+		DeletesIssuedCredentials: false,
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
@@ -95,11 +96,10 @@ func awsHarness(t *testing.T) plugintest.Harness {
 			return plugintest.TryWrite(t, b, storage, setPath,
 				minterSet(awsMinter(minterID, awsLiveKeyID, awsLiveSecret)))
 		},
-		PlantDisabledProbeRole: plantDisabledRole,
-		DenyMint:               func() { denied.Store(true) },
-		AllowMint:              func() { denied.Store(false) },
-		LiveMinterID:           liveMinterID,
-		ReplacementMinterID:    replacementMinterID,
+		DenyMint:            func() { denied.Store(true) },
+		AllowMint:           func() { denied.Store(false) },
+		LiveMinterID:        liveMinterID,
+		ReplacementMinterID: replacementMinterID,
 
 		Skips: map[plugintest.Category]string{
 			plugintest.CategoryReconcilerSafety: "AWS reconcile prunes local tracking entries only " +

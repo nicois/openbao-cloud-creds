@@ -48,6 +48,10 @@ func ovhCase(t *testing.T) e2eCase {
 		TTLSeconds: hourTTL,
 		Renewable:  false,
 		HardRevoke: false,
-		Upstream:   nil,
+		// Nothing deletes an OVH OAuth2 token, so the purge lever must refuse rather than
+		// report a contained incident. Stated, not left to the zero value, so the row says
+		// which of the two facts about deletion it is claiming.
+		DeletesIssuedCredentials: false,
+		Upstream:                 nil,
 	}
 }

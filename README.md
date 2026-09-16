@@ -117,6 +117,47 @@ credential role(s) purge-only require: probe api-client creation returned 403 �
 
 Verifying at role write is deliberate in both directions: it stops an operator defining a role whose minting key is unsuitable, and it means a minter set must exist and demonstrably work before roles can bind to it. On the three clouds that cannot revoke what the probe mints (AWS, GCP, OVH), the probe asks for the shortest lifetime the cloud accepts — a 900s STS session, a 60s GCP token, OVH's fixed 1h — and the credential is never returned to anyone. OCI is deliberately not probed: its two-auth-tokens-per-user cap means a probe would consume one of the rotation slots it exists to protect. Full per-cloud table, costs, and the escape hatch: [`docs/minter-capability-verification.md`](docs/minter-capability-verification.md).
 
+## Containing a leak: two levers
+
+A credential this plugin issued is believed to be in the wrong hands. There are two things to
+do, and **deleting the role is neither of them** — it stops nothing, because live leases stay
+renewable and every credential already issued keeps working.
+
+```bash
+bao write cloud-creds/<cloud>/roles/<role> disabled=true                  # stop issuing more
+bao write cloud-creds/<cloud>/roles/<role>/revoke-upstream mode=dry_run   # how many are out?
+bao write cloud-creds/<cloud>/roles/<role>/revoke-upstream                # delete them upstream
+bao read  cloud-creds/<cloud>/roles/<role>/revoke-upstream                # progress
+```
+
+The levers are independent on purpose. `disabled=true` needs nothing but the flag — not the
+role's other fields, and not a healthy cloud — so an operator who does not have the role
+definition to hand can still close the tap. `revoke-upstream` works on a role that is already
+disabled, so the natural order (close the tap, then empty the bucket) never requires briefly
+re-enabling issuance. And it deliberately leaves the role issuing, so a responder can destroy
+what leaked without also taking the consumers down.
+
+Scope is **what the role had issued when the call was made**: credentials issued afterwards are
+untouched, including the ones the responder mints to run the response with. A purge of a role
+holding thousands of credentials is thousands of upstream API calls against the same quota the
+mount issues from, so the call arms a durable intent, runs one bounded pass inline and returns
+progress; a background worker on the active node continues in equally bounded passes, across a
+restart or a failover. Both operations answer in one schema on every cloud — `role`, `armed`,
+`cutoff`, `tracked`, `deleted`, `remaining`, `failed`, `complete`, plus the `mode` a write ran
+in — so a runbook is written once and automation can watch for `complete`.
+
+**What lever you have depends on the cloud, and on three of them there is none:**
+
+| Cloud | Lever for a credential already issued |
+|---|---|
+| DigitalOcean (tokens and Spaces keys), UpCloud, Azure, Exoscale, Vultr, Akamai | `revoke-upstream` deletes it |
+| AWS, GCP, OVH | **none.** The credential cannot be deleted — an STS session, an impersonation token and an OVH OAuth2 token only expire — so the role's `max_ttl` is the blast radius (AWS/GCP ≤12h, OVH exactly 1h). Disabling the role stops the next one; the ones out have to run down |
+| OCI | `rotate-slot/<role>/<slot_index>` replaces that slot's credential now, which invalidates it for every holder |
+
+On AWS, GCP, OVH and OCI the endpoint exists and **refuses** with `unsupported`, naming the
+reason and the lever above. That is deliberate: a success response listing zero deletions would
+tell a responder mid-incident that they had contained something they had not.
+
 ## Minter lifecycle
 
 The long-lived minter credentials are the highest-value secrets at rest, so the plugins make them observable and, where the cloud API allows, rotatable.
@@ -170,7 +211,7 @@ make lint                                              # golangci-lint v2 across
 
 `make test-cloud-real-do` calls DigitalOcean with a PAT you supply (`CLOUDREAL_DO_TOKEN`, or `.env.cloud-real`) and **creates and deletes real personal access tokens**, so use a dedicated, disposable account. It existed to probe the one assumption no fake can test — that the undocumented `POST /v2/tokens` works headlessly — and the answer is **no**: with a full-access PAT, token management is refused at DigitalOcean's edge gateway while eleven other endpoints on the same token succeed, so **no PAT can mint and `credential-do` cannot issue against real DigitalOcean** ([KI-009](docs/known-issues.md)). The plugin remains this repo's code-shape reference and the origin of the DO fake, and is not presented as production-viable; the test's job is now to pin that finding and fail loudly if DigitalOcean ever changes it. The other eight clouds have no real-cloud test; see [`docs/free-account-viability.md`](docs/free-account-viability.md) for the plan and what each would cost.
 
-**Testing is conformance-first.** With ten near-identical plugins, a missing test looks exactly like a passing one, so every invariant that is about a plugin's own behaviour rather than a cloud's wire format is written once in `pkg/plugintest` and applied to all ten from a single table in the test-only [`conformance/`](conformance/) module: `reload`, `lease`, `perturbation`, `revoke`, `capability`, `reconciler-safety`. A plugin missing from that table fails the build; a category that genuinely does not apply to a cloud must be *declared* with a reason (`Harness.Skips`) and is printed by `make test-conformance` as one reviewable line, rather than hidden in a `t.Skip`. Per-cloud vocabulary — mint shapes, deny knobs, unexported internals — stays in each plugin's own tests.
+**Testing is conformance-first.** With ten near-identical plugins, a missing test looks exactly like a passing one, so every invariant that is about a plugin's own behaviour rather than a cloud's wire format is written once in `pkg/plugintest` and applied to every plugin from a single table in the test-only [`conformance/`](conformance/) module: `reload`, `lease`, `perturbation`, `revoke`, `capability`, `minter-visibility`, `reconciler-safety`, `error-taxonomy`, `containment`. A table entry is a **subject** rather than a cloud — `credential-do` registers two, one per credential type — because a harness declares one credential shape, one secret type and one tracking prefix, which is exactly what a client and the lease core see. A plugin missing from that table fails the build; a category that genuinely does not apply to a cloud must be *declared* with a reason (`Harness.Skips`) and is printed by `make test-conformance` as one reviewable line, rather than hidden in a `t.Skip`. Per-cloud vocabulary — mint shapes, deny knobs, unexported internals — stays in each plugin's own tests.
 
 Above that sits [`e2e/`](e2e/): each plugin built as a binary, registered in a live `bao server -dev` and driven over HTTP through config → minter set → role → issue → lease lookup → renew → revoke → `plugin reload` → re-issue. It exists for what an in-process test cannot see — the plugin's JSON-serialized RPC boundary and OpenBao core's own expiration manager — and it earned its place immediately, finding two live defects (background workers never starting on a reloaded backend, and six plugins advertising renewable leases whose renewal failure made core *revoke* the credential). Rationale in [`docs/decisions.md`](docs/decisions.md); what each layer does and does not prove in [`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md); the rules for contributors and agents in [`AGENTS.md`](AGENTS.md).
 
@@ -182,9 +223,9 @@ Above that sits [`e2e/`](e2e/): each plugin built as a binary, registered in a l
 - [`docs/techrfc.md`](docs/techrfc.md) — original RFC; authoritative for the response-envelope and error-code contract (its implementation-status notes are superseded — see the banner in that file)
 - [`docs/design.md`](docs/design.md) — companion design doc (same caveat)
 - [`docs/decisions.md`](docs/decisions.md) — non-obvious design choices and why
-- [`docs/ttl-semantics.md`](docs/ttl-semantics.md) — what a lease TTL means per cloud; enforced role-TTL bounds
+- [`docs/ttl-semantics.md`](docs/ttl-semantics.md) — what a lease TTL means per cloud; enforced role-TTL bounds; and where the TTL is also the containment bound
 - [`docs/minter-capability-verification.md`](docs/minter-capability-verification.md) — why health ≠ capability, what each cloud's probe mints and costs, and what it deliberately doesn't cover
-- [`docs/known-issues.md`](docs/known-issues.md) — known issues and operational caveats (KI-001…)
+- [`docs/known-issues.md`](docs/known-issues.md) — known issues and operational caveats (KI-001…); **KI-011 is the incident-response entry**, including which clouds have no lever beyond the role's `max_ttl`
 - [`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md) — what each test layer proves, and what testing the plugins in isolation from OpenBao does not cover
 - [`docs/free-account-viability.md`](docs/free-account-viability.md) — whether each cloud can be exercised for real on a free account, and the CI design for validating the fakes against recordings
 - [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md) — object-storage viability analysis (out of scope)

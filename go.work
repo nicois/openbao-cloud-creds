@@ -20,6 +20,7 @@ use (
 	./pkg/recovery
 	./pkg/telemetry
 	./pkg/totp
+	./pkg/upstreampurge
 	./pkg/upstreamquota
 	./pkg/worker
 	./plugins/credential-akamai

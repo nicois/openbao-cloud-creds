@@ -17,6 +17,10 @@ const (
 	fieldRole      = "role"
 	fieldCloud     = "cloud"
 	fieldMinterSet = "minter_set"
+	// fieldDisabled is the role field that stops a role issuing without deleting it.
+	// Deleting a role stops nothing: live leases stay renewable and every credential
+	// already issued keeps working, so this is the only lever that closes the tap.
+	fieldDisabled  = "disabled"
 	fieldSlotIndex = "slot_index"
 	fieldSlotCount = "slot_count"
 	fieldUserOCID  = "user_ocid"

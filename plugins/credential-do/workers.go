@@ -8,6 +8,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/clusterrole"
 	"github.com/nicois/openbao-cloud-creds/pkg/reconciler"
+	"github.com/nicois/openbao-cloud-creds/pkg/upstreampurge"
 	"github.com/nicois/openbao-cloud-creds/pkg/worker"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -66,6 +67,13 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 		InitialDelay: b.remainingBootstrapDelay(cfg.BootstrapDelay),
 	}, func(ctx context.Context) error {
 		return b.reconcileWorker(ctx, storage)
+	})
+
+	// An armed purge advances here rather than only in the request that armed it, so an
+	// operator's single call finishes a purge too big for one request — across a restart and a
+	// failover, since the intent is durable and this worker runs wherever the active node is.
+	wm.Register("upstream-purge", upstreampurge.SweepInterval, worker.Opts{}, func(ctx context.Context) error {
+		return b.purgeEndpoint().Sweep(ctx, storage)
 	})
 
 	workerCtx, cancel := context.WithCancel(ctx)

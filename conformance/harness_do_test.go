@@ -54,9 +54,10 @@ func doHarness(t *testing.T) plugintest.Harness {
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(tokenMinter(replacementMinterID, "dop_v1_reseeded")))
 		},
-		ProvisionedCount:  srv.ProvisionedCount,
-		ExpectsHardRevoke: true,
-		TrackingPrefix:    "active-tokens/",
+		ProvisionedCount:         srv.ProvisionedCount,
+		ExpectsHardRevoke:        true,
+		DeletesIssuedCredentials: true,
+		TrackingPrefix:           "active-tokens/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, config(verify))
@@ -80,9 +81,8 @@ func doHarness(t *testing.T) plugintest.Harness {
 			}
 			return plugintest.TryWrite(t, b, storage, setPath, minterSet(minters...))
 		},
-		PlantDisabledProbeRole: plantDisabledRole,
-		DenyMint:               func() { srv.SetForbidCreate(true) },
-		AllowMint:              func() { srv.SetForbidCreate(false) },
+		DenyMint:  func() { srv.SetForbidCreate(true) },
+		AllowMint: func() { srv.SetForbidCreate(false) },
 		FailNextMintWithStatus: func(_ *testing.T, status int) string {
 			srv.SetNextStatus(status)
 			return ""
