@@ -2,7 +2,7 @@ module github.com/nicois/openbao-cloud-creds/pkg/recovery
 
 go 1.27.0
 
-require github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.1.0
+require github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.2.0
 
 require (
 	github.com/armon/go-metrics v0.4.1 // indirect
