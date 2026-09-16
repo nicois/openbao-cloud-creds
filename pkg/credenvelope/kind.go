@@ -96,6 +96,22 @@ const (
 	// long-lived object-storage key with no session token and its own endpoint. They are
 	// not substitutable in either direction, so a client must be able to refuse the one
 	// it cannot use.
+	//
+	// Why the keys are `access_key_id` and `secret_access_key` rather than the `aws_`-prefixed
+	// spellings much S3 tooling uses: this shape is named for a protocol that is not AWS's, and
+	// most vendors serving it are not AWS. A client wanting the prefixed names renames two
+	// strings; the alternative is every non-AWS plugin emitting AWS-flavoured field names
+	// permanently. Same reasoning for one `endpoint` URL rather than a host/port pair — a URL is
+	// what an S3 client takes, and splitting it makes every plugin reassemble a vendor's address.
+	//
+	// Why `bucket_name` and `prefix` are absent, though config formats built on this shape often
+	// carry them: they are the caller's configuration, not credential material. One key may be
+	// used against several buckets, nothing here knows which the caller will reach for, and a
+	// credential block carrying them would describe intent rather than what was issued.
+	//
+	// These names are load-bearing once a SECOND plugin declares this kind, because
+	// TestOneCredentialKindMeansOneKeySet then holds both to the same set and renaming a key
+	// becomes an api_version change. Recorded here rather than left to the first adopter.
 	KindS3Credentials CredentialKind = "s3_credentials"
 )
 
