@@ -54,12 +54,26 @@ type listTokensResponse struct {
 	Tokens []tokenInfo `json:"tokens"`
 }
 
+// httpTransport is the transport every DO client uses. Package-level so a test can replace it,
+// matching jitterFraction's reason for being a var rather than a constant.
+//
+// It exists for testing/synctest. This type's lifecycle is measured in DAYS, and a bubble's clock
+// only advances when every goroutine in it is durably blocked — which a pooled idle connection
+// prevents, because its readLoop sits blocked on a real socket and a goroutine blocked on I/O is
+// never durably blocked. A test that wants ninety days to pass in a millisecond substitutes a
+// transport with keep-alives disabled, so those goroutines exit and the bubble can idle.
+//
+// The default stays pooled: these drivers make infrequent calls to one host, so a fresh handshake
+// per call would be latency on a credential read for no gain.
+var httpTransport http.RoundTripper = http.DefaultTransport
+
 func newDOClient(baseURL, token string) *doClient {
 	return &doClient{
 		baseURL: baseURL,
 		token:   token,
 		httpClient: &http.Client{
-			Timeout: httpTimeout,
+			Timeout:   httpTimeout,
+			Transport: httpTransport,
 		},
 	}
 }
