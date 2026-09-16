@@ -1635,3 +1635,82 @@ because reported as a generic failure it sends an operator to rotate a credentia
 is not enumerated in Exoscale's public documentation, so the operator pre-provisions a
 key-management role and the successor reuses that same `role_id`. It is fake-tested like the rest,
 but it is the one to confirm against a live account before relying on it.
+
+## What the rotated key type still needs at fleet scale (2026-09-16)
+
+`credential_type=spaces_key_rotated` works, and two of the things a large fleet needs from it have
+landed: the shared-key record carries a schema version, and a rotation locks only its own role while
+a re-serve locks nothing. The four below are known, measured where measurement was possible, and
+**not** implemented. Recorded because the reasoning took longer than the code will.
+
+The shape being designed for is one role per reader — one credential each, not one shared across a
+group — at an order of 10^5 roles on one mount. That is what makes each item below a question about
+scale rather than about correctness in the small.
+
+**Measured first, because three of the four are prioritisation questions.** From
+`BenchmarkRotatedRead`, `BenchmarkRotatedSweep` and the `scale`-tagged tick measurement:
+
+- A re-serve is O(1) in role count — 1759 / 1567 / 1594 ns/op at 1k / 10k / 100k roles — and costs
+  the upstream nothing, because it selects no minter and makes no API call. That is what makes a
+  fleet of this size possible at all; a per-lease type would mint on every read.
+- One lifecycle tick walks every role: ~7.4 to 8.7 microseconds per role, rising slightly with N
+  (cache and GC, not algorithm). At 500k roles that is 4.3 s per tick and, across a day of
+  five-minute ticks, **1.44% of one core** — so by duty cycle it is not a burden. What it is, is a
+  multi-second burst of two storage reads per role every five minutes, allocating ~683 bytes per
+  role each pass.
+- A role costs **895 bytes** persisted (560 for the key record, 335 for the role), and nothing
+  per-role is held in the plugin's heap.
+
+**1. A soft rotation deadline, and serving the current key when a rotation attempt fails.** This is
+the only one of the four that is a correctness fix rather than an optimisation. Today a read that
+finds the key due either rotates or returns an error — and on error it returns *no credential*, while
+a valid, non-expiring key sits in the record unreturned. A transient upstream fault at the moment a
+key comes due therefore denies a client that had a working credential a moment earlier. Attempting
+from a soft mark, serving the existing key when the attempt fails, and refusing only past a hard
+deadline turns that into a retry window whose length an operator chooses.
+
+**2. An explicit acknowledgement before a superseded key becomes deletable.** `DeleteAt` is set to
+`now + overlap_ttl` at rotation, in the same request that hands the replacement over — so the clock
+starts before anyone knows the handover landed. Two failures follow: a client that receives the new
+credential but cannot persist it, and a response lost in flight, where the client does not know a
+rotation happened at all. Both keep working until the overlap elapses and then stop.
+
+An acknowledgement fixes it, and it has to be **explicit** rather than inferred from the next read.
+A subsequent read proves only that the client asked again; a client that renews or re-reads on a
+timer would acknowledge without its consumers having ingested anything, which is precisely the
+failure being guarded against.
+
+Three constraints that shape it, all found by reading the code rather than by design:
+
+- The acknowledgement must NAME the credential in use, and should mark everything **older** than it
+  deletable. That makes a race harmless — an acknowledgement of a key that has itself since been
+  superseded is monotonic rather than an error — and needs no new error code, which a code only earns
+  by changing what a client does.
+- "Not yet acknowledged" must not be encoded as a zero `DeleteAt`. The sweep keeps a record when
+  `r.DeleteAt.After(now)`, and a zero time never is, so the sentinel would delete on the next pass.
+  Setting `DeleteAt` to the ceiling at retirement and *lowering* it on acknowledgement gives one
+  field that is always meaningful and monotonically decreasing.
+- A ceiling is not optional. A reader that never returns would otherwise keep its superseded key
+  alive forever, and the reconciler will not reclaim it — that deletes *untracked* credentials, and
+  this one is tracked.
+
+**3. An index of the two deadlines, so a tick touches only what is due.** A pass walks every role to
+service the fraction that has anything retiring — `overlap_ttl / rotation_period`, one role in 45 at
+a 48-hour overlap against 90 days. Day-granularity buckets keyed by deadline would cut it by two
+orders of magnitude, and day granularity is sound for the reason the sweep interval already gives:
+running late can only make a retiring key live longer, never make a served one die early. It needs a
+backfill for records written before the index existed, which the schema version now makes safe.
+
+**4. A listing bound that admits the estate.** `spacesListMaxPages` (50 × 200) caps a complete
+listing at **10,000 keys**, and the listing refuses to return a partial result rather than let the
+reconciler read an omitted key as deleted. Both are right, and together they mean an account holding
+more than 10,000 keys has no working reconciler at all — on the one credential type with no upstream
+expiry, where the reconciler is the only thing that ever reclaims a leak. Raising it is arithmetic:
+at 4 passes a day, a 200k-key account costs about 127 requests an hour against a per-token budget of
+5000.
+
+**Two things deliberately not claimed.** The lease population a large fleet creates — one lease per
+read, and revoking a shared credential's lease deletes nothing — is unmeasured; no in-process test
+reaches OpenBao's expiration manager. And minting a Spaces key has never been exercised against the
+real API: `plugins/credential-do/testdata/cloud-real/` holds recordings for `/v2/account` and
+`/v2/tokens` only, so this type rests on the published specification and the fake.
