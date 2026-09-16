@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
@@ -100,6 +101,12 @@ type retiringSpacesKey struct {
 // both at once — is a single storage write, and a reader can never observe a state where the
 // replacement exists and the retirement has not been recorded.
 type sharedSpacesState struct {
+	// Versioned because this record has lifecycle fields and is mutated by read-struct →
+	// change → write-the-whole-struct-back. encoding/json drops what it does not know, so a
+	// binary predating a field ERASES it: dropping `retiring` un-retires a rotated-out key and
+	// cancels the sweep that was going to delete it. That is worse here than on a minter set,
+	// because a Spaces key has no upstream expiry — nothing else ever reclaims the orphan.
+	cloudconfig.Versioned
 	Current  *sharedSpacesKey    `json:"current,omitempty"`
 	Retiring []retiringSpacesKey `json:"retiring,omitempty"`
 }
@@ -171,6 +178,12 @@ func loadSharedSpacesState(ctx context.Context, storage logical.Storage, roleNam
 	if err := json.Unmarshal(entry.Value, &state); err != nil {
 		return nil, err
 	}
+	// Refused rather than downgraded: rewriting an entry written by a newer binary would drop
+	// the fields this one cannot see, and every one of them governs when a live upstream key is
+	// deleted.
+	if err := state.CheckSchema("shared Spaces key record for role " + roleName); err != nil {
+		return nil, err
+	}
 	return &state, nil
 }
 
@@ -178,6 +191,7 @@ func saveSharedSpacesState(ctx context.Context, storage logical.Storage, roleNam
 	if state.empty() {
 		return storage.Delete(ctx, sharedSpacesStateKey(roleName))
 	}
+	state.Stamp()
 	entry, err := logical.StorageEntryJSON(sharedSpacesStateKey(roleName), state)
 	if err != nil {
 		return err
