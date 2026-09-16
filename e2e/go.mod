@@ -3,8 +3,8 @@ module github.com/nicois/openbao-cloud-creds/e2e
 go 1.27.0
 
 require (
-	github.com/nicois/openbao-cloud-creds/pkg/baotest v0.2.0
-	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.2.0
+	github.com/nicois/openbao-cloud-creds/pkg/baotest v0.2.1
+	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.2.1
 )
 
 require (
