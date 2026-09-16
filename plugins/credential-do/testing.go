@@ -54,8 +54,8 @@ func ForceRotationDue(ctx context.Context, b logical.Backend, storage logical.St
 	if !ok {
 		return errNotThisBackend
 	}
-	backend.sharedSpacesMu.Lock()
-	defer backend.sharedSpacesMu.Unlock()
+	release := backend.lockSharedRole(roleName)
+	defer release()
 
 	state, err := loadSharedSpacesState(ctx, storage, roleName)
 	if err != nil {
@@ -77,8 +77,8 @@ func ForceOverlapExpired(ctx context.Context, b logical.Backend, storage logical
 	if !ok {
 		return errNotThisBackend
 	}
-	backend.sharedSpacesMu.Lock()
-	defer backend.sharedSpacesMu.Unlock()
+	release := backend.lockSharedRole(roleName)
+	defer release()
 
 	state, err := loadSharedSpacesState(ctx, storage, roleName)
 	if err != nil {

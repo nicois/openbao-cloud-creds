@@ -74,8 +74,8 @@ func (b *backend) pathSharedSpacesRotate(ctx context.Context, req *logical.Reque
 			roleName, role.credentialType(), roleName), nil
 	}
 
-	b.sharedSpacesMu.Lock()
-	defer b.sharedSpacesMu.Unlock()
+	release := b.lockSharedRole(roleName)
+	defer release()
 
 	now := time.Now()
 	state, err := loadSharedSpacesState(ctx, req.Storage, roleName)

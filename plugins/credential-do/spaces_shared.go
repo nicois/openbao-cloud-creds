@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math/rand/v2"
 	"net/http"
 	"slices"
@@ -35,6 +36,31 @@ const sharedSpacesPrefix = "shared-spaces-keys/"
 // only ever makes a retiring key live a little longer — never a served one die early. Matches
 // the health check's cadence, so a quiet mount has one wake-up rather than two.
 const sharedSpacesSweepInterval = healthCheckInterval
+
+// sharedSpacesLockStripes is how many mutexes guard the decide-then-mint, striped by role name.
+//
+// A power of two large enough that collisions are rare at the rotation rates this type is built
+// for: one mount can hold hundreds of thousands of rotated roles, each rotating a few times a
+// year, so simultaneous rotations of two roles are already unlikely and a collision merely
+// serializes them.
+const sharedSpacesLockStripes = 1024
+
+// lockSharedRole takes the stripe guarding one role's shared-key record and returns its release.
+//
+// Correctness needs only that the SAME role serializes: two goroutines that both decide to
+// rotate would mint twice, and the loser's key would be recorded nowhere while still existing
+// upstream — an orphan, on a credential type with no upstream expiry.
+func (b *backend) lockSharedRole(roleName string) func() {
+	m := &b.sharedSpacesLocks[sharedSpacesStripe(roleName)]
+	m.Lock()
+	return m.Unlock
+}
+
+func sharedSpacesStripe(roleName string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(roleName))
+	return h.Sum32() % sharedSpacesLockStripes
+}
 
 // sharedSpacesKey is the key a rotated role is currently serving.
 //
@@ -111,8 +137,8 @@ func (s *sharedSpacesState) forget(accessKey string) bool {
 // Spaces key never expires on its own. Under the read path's lock, because that path decides
 // whether to rotate from this record and then writes it back.
 func (b *backend) forgetSharedSpacesKey(ctx context.Context, storage logical.Storage, roleName, accessKey string) error {
-	b.sharedSpacesMu.Lock()
-	defer b.sharedSpacesMu.Unlock()
+	release := b.lockSharedRole(roleName)
+	defer release()
 
 	state, err := loadSharedSpacesState(ctx, storage, roleName)
 	if err != nil {
@@ -396,12 +422,10 @@ func (b *backend) trackSpacesKey(ctx context.Context, storage logical.Storage, r
 // walk the ROLES, because rotating needs the period, the grants and the minter set.
 func (b *backend) sweepSharedSpacesKeys(ctx context.Context, storage logical.Storage) error {
 	now := time.Now()
-	// One lock for the pass, and the same lock the read path takes: a rotation the worker
-	// starts and a rotation a reader starts would otherwise both mint, and the loser's key
-	// would be recorded nowhere.
-	b.sharedSpacesMu.Lock()
-	defer b.sharedSpacesMu.Unlock()
-
+	// No lock for the pass. A pass walks EVERY role, and holding one lock across it would block
+	// every client's read for the length of a full scan plus each upstream mint the rotation half
+	// performs. Both halves take the per-role stripe around their own role's work instead, which
+	// is where the race with a reader actually is.
 	return errors.Join(
 		b.sweepRetiredSpacesKeys(ctx, storage, now),
 		b.rotateOverdueSpacesRoles(ctx, storage, now),
@@ -415,30 +439,43 @@ func (b *backend) sweepRetiredSpacesKeys(ctx context.Context, storage logical.St
 	}
 	var errs []error
 	for _, roleName := range roles {
-		state, err := loadSharedSpacesState(ctx, storage, roleName)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("loading the shared key record for role %q: %w", roleName, err))
-			continue
-		}
-		changed := false
-		state.Retiring = slices.DeleteFunc(state.Retiring, func(r retiringSpacesKey) bool {
-			if r.DeleteAt.After(now) {
-				return false
-			}
-			if err := b.deleteRetiredSpacesKey(ctx, storage, roleName, r); err != nil {
-				errs = append(errs, err)
-				return false
-			}
-			changed = true
-			return true
-		})
-		if changed {
-			if err := saveSharedSpacesState(ctx, storage, roleName, state); err != nil {
-				errs = append(errs, fmt.Errorf("saving the shared key record for role %q: %w", roleName, err))
-			}
-		}
+		errs = append(errs, b.sweepOneRoleRetiredKeys(ctx, storage, roleName, now)...)
 	}
 	return errors.Join(errs...)
+}
+
+// sweepOneRoleRetiredKeys holds one role's stripe for the length of its own deletions, so a
+// reader of a DIFFERENT role never waits on this, and a reader of THIS role cannot rotate
+// underneath a half-applied prune.
+func (b *backend) sweepOneRoleRetiredKeys(ctx context.Context, storage logical.Storage,
+	roleName string, now time.Time,
+) []error {
+	release := b.lockSharedRole(roleName)
+	defer release()
+
+	var errs []error
+	state, err := loadSharedSpacesState(ctx, storage, roleName)
+	if err != nil {
+		return []error{fmt.Errorf("loading the shared key record for role %q: %w", roleName, err)}
+	}
+	changed := false
+	state.Retiring = slices.DeleteFunc(state.Retiring, func(r retiringSpacesKey) bool {
+		if r.DeleteAt.After(now) {
+			return false
+		}
+		if err := b.deleteRetiredSpacesKey(ctx, storage, roleName, r); err != nil {
+			errs = append(errs, err)
+			return false
+		}
+		changed = true
+		return true
+	})
+	if changed {
+		if err := saveSharedSpacesState(ctx, storage, roleName, state); err != nil {
+			errs = append(errs, fmt.Errorf("saving the shared key record for role %q: %w", roleName, err))
+		}
+	}
+	return errs
 }
 
 // deleteRetiredSpacesKey removes one key whose overlap has elapsed, upstream first and then
@@ -503,6 +540,11 @@ func (b *backend) rotateOverdueSpacesRoles(ctx context.Context, storage logical.
 func (b *backend) rotateRoleIfOverdue(ctx context.Context, storage logical.Storage,
 	roleName string, now time.Time,
 ) error {
+	// This role's stripe only, and taken before the role is read so the decide-then-mint below
+	// cannot interleave with a reader's. A reader of any OTHER role is unaffected.
+	release := b.lockSharedRole(roleName)
+	defer release()
+
 	entry, err := storage.Get(ctx, "roles/"+roleName)
 	if err != nil {
 		return fmt.Errorf("loading role %q: %w", roleName, err)

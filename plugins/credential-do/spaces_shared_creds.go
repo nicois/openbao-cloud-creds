@@ -31,23 +31,36 @@ func (b *backend) secretDOSpacesKeyRotated() *framework.Secret {
 // serveSharedSpacesKey answers a credential read on a rotated role: re-serve the key the role
 // already has, or replace it first if it is due.
 //
-// One lock for the whole decide-and-mint, per backend rather than per role, because a
-// rotation is rare and a shared key's entire point is that concurrent readers converge on one
-// credential. Requests all land on the active node (standbys forward), so an in-process mutex
-// is the whole guard; a failover mid-rotation can at worst leave one extra tracked key, which
-// the sweep and the reconciler both cover.
+// Two paths, and the split is the point. A re-serve reads the record, mutates nothing and calls
+// no API — and rotationReason is pure — so it takes NO lock at all. That is the path every client
+// takes on almost every read.
+//
+// Only a rotation is exclusive, and only for its own role. Requests all land on the active node
+// (standbys forward), so an in-process lock is the whole guard; a failover mid-rotation can at
+// worst leave one extra tracked key, which the sweep and the reconciler both cover.
 func (b *backend) serveSharedSpacesKey(ctx context.Context, req *logical.Request,
 	role *doRole, roleName string,
 ) (*logical.Response, error) {
-	b.sharedSpacesMu.Lock()
-	defer b.sharedSpacesMu.Unlock()
-
 	now := time.Now()
 	state, err := loadSharedSpacesState(ctx, req.Storage, roleName)
 	if err != nil {
 		return credenvelope.InternalResponse(b.Logger().Warn, "loading the role's shared credential", err), nil
 	}
+	if rotationReason(state, role, now) == "" {
+		return b.buildSharedSpacesResponse(role, roleName, state.Current, now), nil
+	}
 
+	release := b.lockSharedRole(roleName)
+	defer release()
+
+	// Decide AGAIN, from a fresh read. Another reader — or the sweeper — may have rotated
+	// between the check above and this lock, and minting a second time would leave one key
+	// recorded nowhere while it still exists upstream, where nothing expires it.
+	now = time.Now()
+	state, err = loadSharedSpacesState(ctx, req.Storage, roleName)
+	if err != nil {
+		return credenvelope.InternalResponse(b.Logger().Warn, "loading the role's shared credential", err), nil
+	}
 	if reason := rotationReason(state, role, now); reason != "" {
 		rotated, errResp := b.rotateSharedSpacesKey(ctx, req.Storage, rotationRequest{
 			role: role, roleName: roleName, state: state, now: now, reason: reason,

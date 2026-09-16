@@ -28,14 +28,19 @@ type backend struct {
 	// by one goroutine while another is still Start()ing it. Multiple writes
 	// (config + each minter set) each fire startWorkers, so overlap is common.
 	workerLifecycleMu sync.Mutex
-	// sharedSpacesMu serializes the rotated Spaces type's decide-then-mint, so
-	// concurrent readers of a role whose key is missing or overdue converge on ONE
-	// credential rather than minting one each against a 200-per-account cap. Held by
-	// the read path and by the sweeper, which is the other thing that can rotate.
-	sharedSpacesMu sync.Mutex
-	config         *cloudconfig.PluginConfig
-	minterSets     map[string]map[string]*minterState // setName -> minterID -> state
-	apiURL         string
+	// sharedSpacesLocks serialize the rotated Spaces type's decide-then-mint, so concurrent
+	// readers of a role whose key is missing or overdue converge on ONE credential rather than
+	// minting one each. Striped BY ROLE, not one lock for the mount: two rotated roles share no
+	// state — different buckets, different keys, different minters — while one mount can hold
+	// hundreds of thousands of them.
+	//
+	// Fixed size rather than a map of per-role mutexes, which would need reference counting to
+	// avoid growing without bound. The only cost of a collision is that two roles rotating in
+	// the same instant serialize: correct, merely unnecessary.
+	sharedSpacesLocks [sharedSpacesLockStripes]sync.Mutex
+	config            *cloudconfig.PluginConfig
+	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
+	apiURL            string
 	// bootstrapAt is when this process first started workers, so the reconciler's
 	// hold-off is measured from a restart rather than re-armed by every write.
 	bootstrapAt time.Time
