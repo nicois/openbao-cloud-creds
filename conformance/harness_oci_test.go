@@ -88,6 +88,12 @@ func ociHarness(t *testing.T) plugintest.Harness {
 			plugintest.CategoryReconcilerSafety: "the in-process OCI fake exposes no way to plant an " +
 				"upstream token the plugin did not create, so a foreign-entity assertion cannot be " +
 				"expressed against it",
+			plugintest.CategoryRotation: "OCI does share a credential and does replace it on a " +
+				"schedule, but it has no overlap to assert: two auth tokens per user is the whole " +
+				"budget, so rotating a slot deletes that slot's credential at the moment it is " +
+				"replaced, and a holder's lease is sized to end first instead. The half of this " +
+				"category about a replaced credential outliving its replacement's arrival is " +
+				"therefore not a property OCI has",
 		},
 	}
 }

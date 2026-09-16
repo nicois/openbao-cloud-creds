@@ -76,6 +76,14 @@ func (b *backend) startWorkers(ctx context.Context, storage logical.Storage) {
 		return b.purgeEndpoint().Sweep(ctx, storage)
 	})
 
+	// The rotated Spaces type's lifecycle, and the only thing that enforces either half of
+	// it: DigitalOcean cannot be told a key expires, and the orphan reconciler cannot reap a
+	// retiring key because that key is still tracked and so is not an orphan. It also rotates
+	// roles nobody is reading, since a rotation period cannot depend on a client's timing.
+	wm.Register("shared-spaces-keys", sharedSpacesSweepInterval, worker.Opts{}, func(ctx context.Context) error {
+		return b.sweepSharedSpacesKeys(ctx, storage)
+	})
+
 	workerCtx, cancel := context.WithCancel(ctx)
 
 	b.mu.Lock()

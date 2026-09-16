@@ -131,10 +131,21 @@ type Case struct {
 	// roles/<name>/revoke-upstream a real lever rather than a refusal.
 	//
 	// A SEPARATE fact from HardRevoke, which says a LEASE ENDING deletes one. Every cloud
-	// that hard-revokes can also be purged, so the two agree on every row today and the
-	// scenario refuses a Case that claims otherwise. Reading the purge lever off HardRevoke
-	// would tie an operator's lever to the lease's, which is not what either is about.
+	// that hard-revokes can also be purged, so the two agree on eight of nine rows and the
+	// scenario refuses a Case that claims otherwise. They come apart on a credential SHARED
+	// by its readers: one reader's lease must not destroy it, yet an operator containing an
+	// incident must still be able to. Reading the purge lever off HardRevoke would have
+	// asserted a refusal on exactly the role where the lever works.
 	DeletesIssuedCredentials bool
+
+	// SharesOneCredential is true where every reader of the role holds ONE credential that
+	// the plugin replaces on its own schedule, rather than one minted per read.
+	//
+	// It inverts what the scenario expects of a second read — the same credential, and
+	// nothing new upstream — so it is stated by the Case rather than measured. A role that
+	// regressed from sharing to minting per read, or the other way, then fails here instead
+	// of quietly agreeing with whatever it now does.
+	SharesOneCredential bool
 
 	// Upstream reports how many credentials the fake currently holds. On clouds whose
 	// credentials cannot be revoked it is a monotonic count of mints instead;
@@ -169,6 +180,16 @@ func (tc Case) withDefaults() Case {
 		tc.GrantedTTLSeconds = tc.TTLSeconds
 	}
 	return tc
+}
+
+// mintsPerRead is how far the upstream count moves on a credential read after the first
+// one. Zero where the credential is shared: the first read provisions it and every read
+// after that re-serves it, which is the whole reason a fleet can share one.
+func (tc Case) mintsPerRead() int {
+	if tc.SharesOneCredential {
+		return 0
+	}
+	return 1
 }
 
 func (tc Case) rolePath() string  { return tc.Mount + "/roles/" + tc.RoleName }
@@ -219,8 +240,8 @@ func RunScenario(t *testing.T, c *Cluster, tc Case) {
 	AssertUpstream(t, tc, want)
 
 	second := c.Read(tc.issuePath())
-	assertDistinctIssuance(t, first, second)
-	want++
+	assertSecondRead(t, tc, first, second)
+	want += tc.mintsPerRead()
 	AssertUpstream(t, tc, want)
 
 	want = assertCredentialKindPin(t, c, tc, first, want)
@@ -233,7 +254,7 @@ func RunScenario(t *testing.T, c *Cluster, tc Case) {
 	}
 	assertRevoke(t, c, tc, first.LeaseID, want)
 
-	want++
+	want += tc.mintsPerRead()
 	assertReloadThenIssue(t, c, tc, want)
 
 	assertPurgeUpstream(t, c, tc, want)
@@ -386,12 +407,30 @@ func assertEnvelopeMetadata(t *testing.T, tc Case, metadata map[string]interface
 // assertDistinctIssuance proves two reads produce two credentials. The upstream name is
 // built from req.ID, which ONLY core populates — in-process tests either leave it empty
 // or invent it (docs/openbao-integration-gaps.md G4).
-func assertDistinctIssuance(t *testing.T, first, second *api.Secret) {
+// assertSecondRead checks what a re-read gives a client, which is the one thing the two
+// lifecycles disagree about outright.
+//
+// The lease is always new — core registers one per read whoever owns the credential — so
+// only the credential's identity distinguishes them, and each direction has its own way of
+// being wrong: a per-lease role that re-served one credential would hand every reader a key
+// somebody else's revoke can delete, and a shared role that minted per read would spend the
+// account's cap per reader and give none of them the replacement.
+func assertSecondRead(t *testing.T, tc Case, first, second *api.Secret) {
 	t.Helper()
 	if first.LeaseID == second.LeaseID {
 		t.Errorf("two reads produced one lease id %q", first.LeaseID)
 	}
-	if first.Data["credential_id"] == second.Data["credential_id"] {
+	same := first.Data["credential_id"] == second.Data["credential_id"]
+	if tc.SharesOneCredential {
+		if !same {
+			t.Errorf("two reads of a shared credential returned %v then %v: every reader of this "+
+				"role holds the same credential until the role's schedule replaces it, so a client "+
+				"re-reading has been handed something new that nothing but its own lease bounds",
+				first.Data["credential_id"], second.Data["credential_id"])
+		}
+		return
+	}
+	if same {
 		t.Errorf("two reads produced the same upstream credential id %v: the name is derived "+
 			"from req.ID, so this is core's request id not varying — or not reaching the plugin",
 			first.Data["credential_id"])
@@ -498,15 +537,15 @@ func AssertUpstream(t *testing.T, tc Case, want int) {
 // becomes framework.FieldData. An in-process test calls the handler with a Data map and
 // would pass whether or not that plumbing works.
 //
-// Returns the updated upstream count, since a served read mints and a refused one must
-// not.
+// Returns the updated upstream count, since a served read costs whatever a read costs on
+// this role, and a refused one must cost nothing whoever owns the credential.
 func assertCredentialKindPin(t *testing.T, c *Cluster, tc Case, issued *api.Secret, want int) int {
 	t.Helper()
 	kind := Str(t, Nested(t, issued.Data, "metadata"), "credential_kind")
 
 	// Pinning what this role serves must be served — and must be the same shape.
 	pinned := c.ReadWithData(tc.issuePath(), map[string][]string{"credential_kind": {kind}})
-	want++
+	want += tc.mintsPerRead()
 	if got := Str(t, Nested(t, pinned.Data, "metadata"), "credential_kind"); got != kind {
 		t.Errorf("a read pinned to %q returned credential_kind %q", kind, got)
 	}

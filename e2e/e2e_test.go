@@ -25,6 +25,11 @@ type e2ePlugin struct {
 	Skip    string
 }
 
+// subjectColumn is wide enough for the longest SUBJECT name: a variant prints as
+// cloud-variant, which is longer than any cloud name, and a matrix whose rows do not line up is
+// misread by the person scanning it for a gap.
+const subjectColumn = 18
+
 // Subject names a row for subtest names and the coverage matrix.
 func (p e2ePlugin) Subject() string {
 	if p.Variant == "" {
@@ -42,6 +47,10 @@ var registry = []e2ePlugin{
 	// A second SUBJECT from the same plugin binary, not a second plugin: credential-do serves two
 	// credential types selected per role, and each has its own secret type and revoke path.
 	{Cloud: "do", Variant: "spaces", New: doSpacesCase},
+	// A third subject on that binary: same payload as the row above, different owner. A shared
+	// credential is non-renewable, survives its readers' leases, and is re-served across a plugin
+	// reload — none of which the row above can assert, since it asserts the opposite.
+	{Cloud: "do", Variant: "spaces-rotated", New: doSpacesRotatedCase},
 	{Cloud: "upcloud", New: upcloudCase},
 	{Cloud: "azure", New: azureCase},
 	{Cloud: "exoscale", New: exoscaleCase},
@@ -135,7 +144,7 @@ func TestEveryPluginIsRegistered(t *testing.T) {
 // TestE2EMatrix prints what this layer covers and what it declares, so the gaps
 // are reviewable in one place rather than inferred from which subtests ran.
 func TestE2EMatrix(t *testing.T) {
-	t.Logf("%-10s %-8s %s", "CLOUD", "E2E", "DECLARED GAP")
+	t.Logf("%-*s %-8s %s", subjectColumn, "CLOUD", "E2E", "DECLARED GAP")
 	for _, p := range registry {
 		switch {
 		case p.New != nil && p.Skip != "":
@@ -144,9 +153,9 @@ func TestE2EMatrix(t *testing.T) {
 			t.Errorf("%s has neither a case nor a skip reason: wire it, or declare why the "+
 				"cloud cannot be driven end-to-end", p.Subject())
 		case p.New != nil:
-			t.Logf("%-10s %-8s %s", p.Subject(), "driven", "-")
+			t.Logf("%-*s %-8s %s", subjectColumn, p.Subject(), "driven", "-")
 		default:
-			t.Logf("%-10s %-8s %s", p.Subject(), "GAP", p.Skip)
+			t.Logf("%-*s %-8s %s", subjectColumn, p.Subject(), "GAP", p.Skip)
 		}
 	}
 }

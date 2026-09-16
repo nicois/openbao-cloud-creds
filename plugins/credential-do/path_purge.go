@@ -59,7 +59,7 @@ func (b *backend) resolvePurgeTarget(ctx context.Context, storage logical.Storag
 	if role.issuesSpacesKey() {
 		prefix = spacesTrackingPrefix
 	}
-	return &upstreampurge.Target{Prefix: prefix, Delete: b.purgeDeleter(&role)}, nil
+	return &upstreampurge.Target{Prefix: prefix, Delete: b.purgeDeleter(&role, storage)}, nil
 }
 
 // purgeDeleter deletes one of a role's issued credentials upstream.
@@ -68,7 +68,10 @@ func (b *backend) resolvePurgeTarget(ctx context.Context, storage logical.Storag
 // in the set, else any healthy minter in it. Either can delete the credential — it belongs to
 // the account, not to the key that created it — and the issuing minter may well be the one
 // that has just been rotated out because it leaked.
-func (b *backend) purgeDeleter(role *doRole) upstreampurge.Deleter {
+// It takes the storage of the pass that resolved the role because a rotated role has a second
+// record — the one naming the key it currently serves — which the purge would otherwise leave
+// pointing at a credential it has just deleted.
+func (b *backend) purgeDeleter(role *doRole, storage logical.Storage) upstreampurge.Deleter {
 	return func(ctx context.Context, rec upstreampurge.Record) error {
 		client, err := b.getMinter(role.MinterSet, rec.Minter)
 		if err != nil {
@@ -94,6 +97,14 @@ func (b *backend) purgeDeleter(role *doRole) upstreampurge.Deleter {
 		}
 		b.recordMinterSuccess(role.MinterSet, rec.Minter, now)
 
+		// Reported as a failure if it does not stick, even though the credential is already
+		// gone: a later pass then retries this record, the repeat delete answers 404 (which is
+		// success), and the prune is attempted again. Answering "deleted" while the role's own
+		// record still names the key would hand the next reader a credential the operator just
+		// destroyed, for the rest of the rotation period.
+		if role.rotatesSharedKey() {
+			return b.forgetSharedSpacesKey(ctx, storage, rec.Role, rec.ID)
+		}
 		return nil
 	}
 }

@@ -94,6 +94,7 @@ func ovhHarness(t *testing.T) plugintest.Harness {
 			plugintest.CategoryReconcilerSafety: "OVH reconcile prunes local tracking entries only " +
 				"(pkg/localexpiry): an OAuth2 token is not a listable upstream entity, so there is " +
 				"nothing the reconciler could delete",
+			plugintest.CategoryRotation: noSharedCredential,
 		},
 	}
 }

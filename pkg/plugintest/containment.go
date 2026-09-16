@@ -182,7 +182,7 @@ func containPurgeDeletesIssued(t *testing.T, h Harness) {
 
 	before := h.ProvisionedCount()
 	const reads = 3
-	const live = reads
+	live := credentialsFrom(h, reads)
 	for i := range reads {
 		if resp := readOrFail(t, b, storage, h.IssuePath); resp == nil || resp.IsError() {
 			t.Fatalf("issuing credential %d of %d failed, so there would be nothing to revoke: %v",
@@ -225,7 +225,7 @@ func containPurgeDryRunDeletesNothing(t *testing.T, h Harness) {
 
 	before := h.ProvisionedCount()
 	const reads = 2
-	const live = reads
+	live := credentialsFrom(h, reads)
 	for range reads {
 		readOrFail(t, b, storage, h.IssuePath)
 	}
@@ -394,6 +394,17 @@ func requirePurgeable(t *testing.T, h Harness) {
 		t.Skipf("%s declares ProvisionedCount=%v TrackingPrefix=%q, so a purge cannot be observed",
 			h.Cloud, h.ProvisionedCount != nil, h.TrackingPrefix)
 	}
+}
+
+// credentialsFrom says how many upstream credentials `reads` credential reads leave behind.
+// One per read on nine subjects; exactly one where the role serves a credential SHARED by
+// every reader, however many read it. Stated rather than measured, so a subject that
+// regressed from one to the other fails here instead of quietly agreeing with itself.
+func credentialsFrom(h Harness, reads int) int {
+	if h.SharesOneCredential {
+		return 1
+	}
+	return reads
 }
 
 // purgePath is where a role's issued credentials are deleted from the cloud.

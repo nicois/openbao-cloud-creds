@@ -113,5 +113,9 @@ func azureHarness(t *testing.T) plugintest.Harness {
 			return agedForeignID, agedOwnedID
 		},
 		HasEntity: srv.HasPassword,
+
+		Skips: map[plugintest.Category]string{
+			plugintest.CategoryRotation: noSharedCredential,
+		},
 	}
 }

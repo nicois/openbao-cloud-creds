@@ -28,9 +28,14 @@ type backend struct {
 	// by one goroutine while another is still Start()ing it. Multiple writes
 	// (config + each minter set) each fire startWorkers, so overlap is common.
 	workerLifecycleMu sync.Mutex
-	config            *cloudconfig.PluginConfig
-	minterSets        map[string]map[string]*minterState // setName -> minterID -> state
-	apiURL            string
+	// sharedSpacesMu serializes the rotated Spaces type's decide-then-mint, so
+	// concurrent readers of a role whose key is missing or overdue converge on ONE
+	// credential rather than minting one each against a 200-per-account cap. Held by
+	// the read path and by the sweeper, which is the other thing that can rotate.
+	sharedSpacesMu sync.Mutex
+	config         *cloudconfig.PluginConfig
+	minterSets     map[string]map[string]*minterState // setName -> minterID -> state
+	apiURL         string
 	// bootstrapAt is when this process first started workers, so the reconciler's
 	// hold-off is measured from a restart rather than re-armed by every write.
 	bootstrapAt time.Time
@@ -80,12 +85,14 @@ func Factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 			b.minterSetPaths(),
 			b.rolePaths(),
 			b.purgePaths(),
+			b.sharedRotatePaths(),
 			b.credsPaths(),
 			b.reconcilePaths(),
 		),
 		Secrets: []*framework.Secret{
 			b.secretDO(),
 			b.secretDOSpacesKey(),
+			b.secretDOSpacesKeyRotated(),
 		},
 	}
 

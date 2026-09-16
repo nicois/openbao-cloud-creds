@@ -108,5 +108,9 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 			return agedForeignID, agedOwnedID
 		},
 		HasEntity: srv.HasAPIKey,
+
+		Skips: map[plugintest.Category]string{
+			plugintest.CategoryRotation: noSharedCredential,
+		},
 	}
 }

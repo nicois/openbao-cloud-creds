@@ -20,8 +20,17 @@ A lease and the credential it names have two independent failure modes:
    the credential still works upstream. This is the *security*-relevant
    direction: it is a credential nobody is accounting for. It is closed by one of
    three mechanisms depending on the cloud: a mint-time lifetime equal to the
-   lease, a hard revoke at lease end, or (OCI only) an accepted, documented
-   window bounded by the rotation period.
+   lease, a hard revoke at lease end, or — on the two credentials a *role* owns
+   rather than a lease (OCI's rotation slots, DO's rotated Spaces key) — an
+   accepted, documented window bounded by the rotation schedule.
+
+A shared credential makes that second direction unavoidable rather than merely
+accepted. The credential belongs to the role and is held by every reader, so one
+reader's lease ending cannot delete it without breaking the others; what bounds
+it is the next rotation plus the overlap, and an operator who needs it gone
+sooner has `roles/<name>/revoke-upstream`. The bound is still enforced in the
+direction the techrfc forbids: no lease may be longer than the overlap, so no
+client can hold a lease past the deletion of the credential it names.
 
 Where neither a mint-time lifetime nor a revoke can close it — OVH, whose token
 lifetime is fixed at 1h and which has no revoke API — the plugin now **rejects
@@ -33,6 +42,7 @@ the role** rather than issue a lease it cannot honour.
 |---|---|---|---|---|---|
 | DigitalOcean (`credential_type=token`) | none (request carries only `name` + `scopes`) | no | hard revoke `DELETE /v2/tokens/{id}` | only if revoke fails (reconciler is the backstop) | none needed — any TTL is enforceable by revoke |
 | DigitalOcean (`credential_type=spaces_key`) | **none, and none exists** — the Spaces API has no TTL, expiry or rotation field | no | hard revoke `DELETE /v2/spaces/keys/{access_key}` | only if revoke fails (reconciler is the backstop) | none needed — any TTL is enforceable by revoke |
+| DigitalOcean (`credential_type=spaces_key_rotated`) | **none, and none exists** — same API, same absent TTL field | no | **soft**: the lease is forgotten, the key stays live because every other reader is holding it | **yes, by design** — the key is the role's, and lives until `rotation_period` later plus `overlap_ttl` | `overlap_ttl` and `rotation_period` are required, `rotation_period ≥ 1h`, `overlap_ttl ≤ rotation_period`, and **`max_ttl ≤ overlap_ttl`** — the worst case is a read answered the instant before a rotation, so a lease no longer than the overlap can never outlive the key it names |
 | AWS | yes — `DurationSeconds` = role TTL | yes, exactly at lease end | nothing (STS cannot be revoked) | no | **900s ≤ TTL ≤ 43200s** (STS `DurationSeconds` range), both bounds on `default_ttl` and `max_ttl` |
 | GCP | yes — `lifetime` = role TTL | yes, exactly at lease end | nothing (token cannot be revoked) | no | **TTL ≤ 43200s** (and ≤3600s in practice without the credential-lifetime-extension org policy). GCP documents **no minimum**, so no floor |
 | Azure | yes — `endDateTime` = mint + role TTL | yes, exactly at lease end | hard revoke `removePassword` | no | none documented by Microsoft; renewal refused (below) |
@@ -131,13 +141,19 @@ Two clouds differ, and both are forced rather than chosen:
 | OVH | 3600s | 3600s | The token's lifetime is fixed at 1h by the cloud and there is no revoke API, so neither a shorter nor a longer TTL would be honest (see the OVH row above). |
 | OCI | rotation_period/2 | rotation_period | Phased rotation: a read returns the freshest pre-provisioned slot and the lease TTL is the time until that slot's next rotation, so the role's TTL fields are bounds on the rotation schedule rather than on a credential's own lifetime. |
 
+A `spaces_key_rotated` role keeps the uniform 15m/1h defaults, but they are now *bounded by
+another of its own fields*: `max_ttl ≤ overlap_ttl`, so a role written with an overlap shorter
+than an hour must lower `max_ttl` as well. The write is refused rather than clamped — a silently
+shortened lease would look like the cloud misbehaving, and the operator who chose a 30-minute
+overlap is the one who knows what the leases against it should be.
+
 ## A TTL is also a containment bound (2026-09-16)
 
 The matrix above answers "when does this credential stop working if nothing goes wrong". Read
 the same columns as an incident-response question — "how long does a *leaked* one keep working"
 — and one distinction becomes the important one:
 
-- **Where a credential can be deleted** (DO both types, UpCloud, Azure, Exoscale, Vultr,
+- **Where a credential can be deleted** (all three DO types, UpCloud, Azure, Exoscale, Vultr,
   Akamai), the TTL is not the bound: `roles/<name>/revoke-upstream` deletes every credential the
   role has issued, so containment is minutes and independent of the TTL.
 - **Where it cannot** (AWS, GCP, OVH — the three rows whose "at lease end" cell is *nothing*),
@@ -147,6 +163,13 @@ the same columns as an incident-response question — "how long does a *leaked* 
   only a hygiene one, and it can only be made in advance.
 - **OCI** is bounded by the rotation period rather than by either: a slot's token is shared by
   every holder, so containment is `rotate-slot/<role>/<slot_index>`, which replaces it now.
+- **A rotated Spaces key** is the two answers at once, which is why it needs saying separately.
+  Left alone it is bounded by the schedule, like OCI — the key a leak copied stops working at the
+  next rotation plus the overlap, and 90 days is not containment. But the key *is* deletable, so
+  both levers work: `roles/<name>/rotate` replaces it now and lets the overlap run, which is the
+  right move when the credential is merely stale and clients must not break; `revoke-upstream`
+  deletes it now and breaks every holder, which is the right move when it has leaked. The choice
+  between them is the whole reason both exist.
 
 Two rows deserve naming here because their honest TTL and their containment story diverge
 sharply. **Akamai** does not shorten the credential at all (the Identity API's own `expiresOn`

@@ -114,5 +114,9 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 			return agedForeignID, agedOwnedID
 		},
 		HasEntity: srv.HasClient,
+
+		Skips: map[plugintest.Category]string{
+			plugintest.CategoryRotation: noSharedCredential,
+		},
 	}
 }

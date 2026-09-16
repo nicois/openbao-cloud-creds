@@ -84,6 +84,11 @@ func mintShapeOf(role *doRole) string {
 		// Grants are part of the shape: two Spaces roles with different grants ask the
 		// cloud different questions, since a grant names a bucket the minter may not be
 		// entitled to.
+		//
+		// Both Spaces types render as credentialTypeSpacesKey, on purpose: they issue the
+		// same POST with the same grants and differ only in when the plugin deletes the
+		// result, which the cloud is never asked about. Keying them apart would re-mint a
+		// probe key to answer a question already answered.
 		return credentialTypeSpacesKey + "|" + strings.Join(renderGrants(role.Grants), ",")
 	}
 	return credentialTypeToken + "|" + strings.Join(role.Scopes, ",")

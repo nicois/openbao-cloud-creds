@@ -19,6 +19,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -59,6 +60,11 @@ const (
 	// destroy what is already out there. Both must work from one call, without the
 	// role's definition to hand.
 	CategoryContainment Category = "containment"
+	// CategoryRotation covers a credential SHARED by every reader and replaced on a
+	// schedule: it is re-served rather than re-minted, a lease ending must not delete
+	// it, and the credential it replaces has to stay live for the overlap and be gone
+	// after it.
+	CategoryRotation Category = "rotation"
 )
 
 // Harness is supplied by the conformance table, one per plugin. Fields are
@@ -105,11 +111,18 @@ type Harness struct {
 	// subject has already issued, ahead of whatever expiry it carries.
 	//
 	// A SEPARATE fact from ExpectsHardRevoke, which says that a LEASE ENDING deletes
-	// one. They coincide on every subject today, and keeping them one field would make
-	// the two unaskable apart: it is this fact, not the lease's, that decides whether
-	// revoke-upstream acts or refuses, and whether a capability probe is expected to
-	// leave nothing behind.
+	// one. They coincide on most subjects, and keeping them one field made the two
+	// unaskable apart: a credential shared by every reader must NOT be deleted when one
+	// reader's lease ends, and must be deletable by an operator containing a leak. It is
+	// this fact, not the lease's, that decides whether revoke-upstream acts or refuses,
+	// and whether a capability probe is expected to leave nothing behind.
 	DeletesIssuedCredentials bool
+	// SharesOneCredential is true where a credential read serves ONE credential held by
+	// every reader of the role, rather than minting one per lease. It changes what a
+	// count of upstream credentials means — n reads leave one credential, not n — and it
+	// is why minter affinity is unobservable on such a subject: the shared credential was
+	// minted once, by one minter, and every later read re-serves it.
+	SharesOneCredential bool
 	// TrackingPrefix is the storage prefix a plugin writes its active-credential
 	// record under, e.g. "active-tokens/". Set it and the revoke category asserts
 	// the durability rule that record exists for: a credential whose tracking
@@ -180,6 +193,32 @@ type Harness struct {
 	// that can do neither leaves the field nil and the suite prints why.
 	SeedAgedOrphans func(t *testing.T, storage logical.Storage) (foreignID, ownedOrphanID string)
 
+	// --- Rotation ---
+
+	// The three seams below move stored DEADLINES into the past and then let the suite
+	// make the ordinary call. They exist because a shared credential's contract is about
+	// the passage of days — served for ninety, replaced, the replacement's predecessor
+	// deleted forty-eight hours later — which cannot be waited for, and which a fake
+	// clock would turn into a test of the suite's own arithmetic. Backdating storage is
+	// the same state a restart rehydrates, so what runs afterwards is the production
+	// path.
+
+	// ForceRotationDue backdates the role's shared credential so it is overdue for
+	// replacement.
+	ForceRotationDue func(t *testing.T, b logical.Backend, storage logical.Storage) error
+	// ForceOverlapExpired brings forward the deletion deadline of every credential the
+	// role has retired, so a sweep is entitled to delete them.
+	ForceOverlapExpired func(t *testing.T, b logical.Backend, storage logical.Storage) error
+	// SweepRetiredCredentials runs one pass of the plugin's own retirement sweep inline —
+	// the same function its worker calls on a timer, so the suite exercises the pass
+	// rather than a test-only reimplementation of it.
+	SweepRetiredCredentials func(t *testing.T, b logical.Backend, storage logical.Storage) error
+	// RotationOverlapTTL is the overlap the harness's role declares: how long a replaced
+	// credential keeps working. It is the ceiling every lease on the shared credential
+	// has to fit inside, because a read answered an instant before a rotation leaves the
+	// client holding a credential with exactly this much life left.
+	RotationOverlapTTL time.Duration
+
 	// --- Error taxonomy ---
 
 	// FailNextMintWithStatus makes the upstream answer the NEXT mint with the
@@ -198,7 +237,6 @@ type Harness struct {
 	// HasEntity reports whether the fake still holds the entity with that id.
 	HasEntity func(id string) bool
 
-	// Skips declares categories this plugin cannot exercise, mapped to the
 	// CredentialKeys are the keys the `credential` block of this cloud's envelope
 	// must contain, and OptionalCredentialKeys the ones it may. Declared rather than
 	// inferred because the credential block is the part of the payload a client
@@ -238,8 +276,8 @@ type Harness struct {
 	// to break: the next rotation, not the next read.
 	IssuesFromPreprovisionedSlots bool
 
-	// reason. An empty reason, or a key that is not a known category, fails the
-	// conformance run.
+	// Skips declares categories this plugin cannot exercise, mapped to the reason. An
+	// empty reason, or a key that is not a known category, fails the conformance run.
 	Skips map[Category]string
 }
 

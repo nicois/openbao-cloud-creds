@@ -64,7 +64,7 @@ func (b *backend) issueSpacesKey(ctx context.Context, req *logical.Request, d *f
 	}
 	setName, minterID, client := sel.setID, sel.minterID, sel.client
 
-	keyName, errResp := b.credentialName(ctx, req, roleName, req.ID)
+	keyName, errResp := b.credentialName(ctx, req.Storage, roleName, req.ID)
 	if errResp != nil {
 		return errResp, nil
 	}
@@ -127,22 +127,17 @@ func (b *backend) buildSpacesResponse(ctx context.Context, req *logical.Request,
 		MinterID:       minterID,
 	})
 
-	trackingEntry, _ := logical.StorageEntryJSON(spacesTrackingPrefix+key.AccessKey, map[string]interface{}{
-		fieldRole: roleName,
-		"minter":  minterID,
-		"created": now.UTC().Format(time.RFC3339),
-	})
-	if trackingEntry != nil {
-		if err := req.Storage.Put(ctx, trackingEntry); err != nil {
-			// Same bargain as the token path (audit F6): never hand out a credential we
-			// cannot later track or reconcile. It matters more here — a Spaces key has no
-			// upstream expiry, so an untracked one is permanent.
-			_, _ = client.DeleteSpacesKey(ctx, key.AccessKey)
-			b.Logger().Error("failed to persist active Spaces key record; revoked upstream credential",
-				"access_key", key.AccessKey, "error", err)
-			return credenvelope.ErrorResponse(credenvelope.ErrInternal,
-				"failed to persist credential tracking record")
-		}
+	if err := b.trackSpacesKey(ctx, req.Storage, spacesKeyRecord{
+		roleName: roleName, minterID: minterID, accessKey: key.AccessKey, createdAt: now,
+	}); err != nil {
+		// Same bargain as the token path (audit F6): never hand out a credential we
+		// cannot later track or reconcile. It matters more here — a Spaces key has no
+		// upstream expiry, so an untracked one is permanent.
+		_, _ = client.DeleteSpacesKey(ctx, key.AccessKey)
+		b.Logger().Error("failed to persist active Spaces key record; revoked upstream credential",
+			"access_key", key.AccessKey, "error", err)
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal,
+			"failed to persist credential tracking record")
 	}
 
 	resp := b.Secret(secretTypeSpacesKey).Response(env.ToMap(), map[string]interface{}{

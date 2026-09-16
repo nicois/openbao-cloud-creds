@@ -20,7 +20,7 @@ plugins/<x>/*_test  only what is true of <x> alone.
 
 `pkg/plugintest` must never import a plugin (that would be an import cycle, since every plugin imports `pkg/plugintest`). The `conformance/` module is where the two meet; it is test-only, so plugin-module isolation still holds.
 
-## The nine categories
+## The ten categories
 
 `plugintest.AllCategories()` is the list. Each is one shared suite over one `Harness`:
 
@@ -35,6 +35,7 @@ plugins/<x>/*_test  only what is true of <x> alone.
 | `reconciler-safety` | the reconciler never touches an entity outside the owner-tag scheme, `dry_run` deletes nothing, two mounts sharing one cloud account never reclaim each other's live credentials (A19), and `/reconcile` answers in the one uniform schema (A28) |
 | `error-taxonomy` | every error a client can receive carries a code from `credenvelope.AllCodes()`, and the code says what the client should *do* |
 | `containment` | the two levers an operator has when issued credentials have leaked: `disabled=true` is settable through the role's own write path and stops issuance at once (with nothing but the flag, and while the cloud refuses to mint), and `roles/<name>/revoke-upstream` deletes what the role already issued — on an already-disabled role, dry-running without deleting, idempotently, leaving the role issuing, in one uniform report — and *refuses* with `unsupported` where the cloud cannot delete an issued credential |
+| `rotation` | a credential SHARED by every reader and replaced on the plugin's own schedule: a read re-serves rather than mints, the lease is non-renewable and cannot outlast the overlap, one lease ending deletes nothing, an overdue credential is replaced on the next read, and the replaced one keeps working through the overlap and is gone afterwards |
 
 `error-taxonomy` is the second category **no cloud may opt out of** (its `requires`
 returns nothing, like `lease`). Individual cases that need a knob — a mint refusal, a
@@ -62,9 +63,9 @@ renewable" is to register no callback. Never "fix" a renewability failure by
 assigning `resp.Secret.Renewable = false`; remove the callback.
 
 `containment` requires only `RolePath`, so effectively no cloud opts out; the cases that
-need an issued credential to delete gate themselves on `DeletesIssuedCredentials` and print
-why. Two of its assertions exist because the *natural* implementation breaks them. A purge
-built on the plugin's own role loader answers an operator's second call with `role_disabled`,
+need an issued credential to delete gate themselves on `ExpectsHardRevoke` and print why.
+Two of its assertions exist because the *natural* implementation breaks them. A purge built
+on the plugin's own role loader answers an operator's second call with `role_disabled`,
 leaving them to re-enable the role — reopening issuance mid-incident — to destroy what
 leaked; hence `RevokingUpstreamWorksOnADisabledRole`, which was proven to catch exactly that
 by injecting the refusal into one plugin and watching the case fail. And on a cloud that
@@ -72,6 +73,22 @@ cannot delete an issued credential, the endpoint must **refuse** rather than rep
 deletions: a clean report is what a responder reads as containment. When adding a cloud, the
 question to answer is which lever it has — deletion, a rotation slot, or nothing but the
 role's `max_ttl` — because the refusal has to name it.
+
+`rotation` is the opposite shape: **one subject runs it and eleven declare it a gap**, and that
+is the correct distribution rather than an under-wired category. Where every read mints, the
+lease that read a credential owns it outright, so there is nothing held in common to replace on
+a schedule and no window in which a replaced credential must keep working — the skip reason is
+one fact about the lifecycle, shared by ten of the eleven rather than paraphrased ten times.
+(OCI declares its own: it *does* share a credential and *does* replace it on a schedule, but two
+auth tokens per user is the whole budget, so a rotation deletes the slot's credential as it
+replaces it and there is no overlap to assert.) Its three `Harness` seams —
+`ForceRotationDue`, `ForceOverlapExpired`, `SweepRetiredCredentials` — **backdate the stored
+deadlines and then make the ordinary call**, deliberately: the periods are days, and a fake
+clock would prove the suite's own arithmetic instead of the plugin's, while the stored deadline
+is the same durable state a restart rehydrates. The category also carries two facts the
+per-lease categories conflate — see the `ExpectsHardRevoke`/`DeletesIssuedCredentials` note in
+[`docs/decisions.md`](docs/decisions.md); a lease ending and an operator purging are different
+questions the moment a credential is shared.
 
 **Durability of an issued credential is settled and documented** — see
 [`docs/decisions.md`](docs/decisions.md) ("Durability of an issued credential, and where orphans
@@ -81,7 +98,7 @@ IS responsible for is the `active-*/` tracking record — and revoking immediate
 fails, which the `revoke` category now asserts via `Harness.TrackingPrefix`. Note the prefixes are
 not uniform across clouds; declaring the wrong one yields a green test that asserts nothing.
 
-Adding a category means: a `Run<X>Suite` in `pkg/plugintest`, an entry in the `suites` registry in `conformance.go` naming the `Harness` fields it needs, and then every harness in the table — eleven subjects across ten clouds — either wiring those fields or declaring the gap. That last step is the point — a new category cannot land half-applied.
+Adding a category means: a `Run<X>Suite` in `pkg/plugintest`, an entry in the `suites` registry in `conformance.go` naming the `Harness` fields it needs, and then every harness in the table — twelve subjects across ten clouds — either wiring those fields or declaring the gap. That last step is the point — a new category cannot land half-applied.
 
 ## The layer above: `e2e/`
 
@@ -100,7 +117,8 @@ The scenario itself is **`baotest.RunScenario`** in
 [`pkg/baotest/scenario.go`](pkg/baotest/scenario.go), not in this module. `e2e/` is a
 registry plus one vocabulary file per driven subject, each returning a `baotest.Case`: the
 three write bodies, the TTL and renewability contract, what a lease ending and an operator's
-purge each do to the credential, and a `func() int` reading the fake's count. `Case` is to this layer exactly what `plugintest.Harness` is to conformance.
+purge each do to the credential, whether the credential is shared, and a `func() int` reading
+the fake's count. `Case` is to this layer exactly what `plugintest.Harness` is to conformance.
 
 Adding a cloud therefore means writing a `Case`, never writing assertions. If you find
 yourself adding an assertion to a case file, it belongs in `pkg/baotest/scenario.go`

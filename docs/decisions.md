@@ -2,6 +2,114 @@
 
 Short notes on choices that aren't obvious from the [techrfc](techrfc.md) and would otherwise need to be re-derived from scratch.
 
+## Why a shared Spaces key is a third credential type, and what sharing costs (2026-09-16)
+
+The requirement was a client that periodically re-fetches a Spaces credential: normally it must be
+handed the one that already exists, and when that one is old enough a replacement is minted while
+the old one keeps working for a stated window. The lifecycle is therefore OpenBao's, and the
+client's only obligation is to keep re-reading. That is `credential_type=spaces_key_rotated`.
+
+The per-lease type cannot answer it, for two reasons that both come from the same place. A fleet of
+N clients on a cron spends N keys against DigitalOcean's **per-account** cap of 200, so the cap
+starts bounding the fleet; and every read hands out a different credential, so a consumer that
+caches one is holding a key that will be deleted when the lease it came from ends. Sharing inverts
+both: one key per role however large the fleet, and a credential whose replacement is scheduled
+rather than tied to whoever happened to read it.
+
+**What sharing costs, in three parts, all of them accepted rather than overlooked:**
+
+- **The credential outlives the lease that read it** — the direction this repo closes on every JIT
+  cloud. It cannot be closed here: one reader's lease ending must not delete a key every other
+  reader is holding. It is *bounded* instead, by the next rotation plus `overlap_ttl`, and the
+  direction the techrfc actually forbids (a lease outliving its credential, OBC-002) is still
+  enforced by `max_ttl ≤ overlap_ttl`.
+- **A lease is no longer a disposal mechanism.** The revoke callback is registered and deliberately
+  does nothing upstream, exactly as OCI's rotation slots do. An operator who needs the credential
+  gone has the two levers below; a client who wants to stop using it stops reading.
+- **The mount stores the secret.** DO returns a Spaces secret exactly once, and the contract is to
+  hand the same credential back to a reader who asks again, so either it is in storage or the
+  contract is unimplementable. This one is *not* bounded by anything — it is a real widening of what
+  a compromise of the mount's storage yields, from a handle for deleting a credential to a live
+  credential. OCI's slots already made the same trade, which is what makes it a known price rather
+  than a new one.
+
+**A third `framework.Secret`, not the second one with a flag,** because the flag could not work.
+`framework.Secret.Renewable()` is `(Renew != nil)`, so a type that registers a renew callback
+advertises `renewable=true` no matter what any field says — and OpenBao **revokes a lease whose
+renewal fails**, which here would destroy a credential every other reader is using. The revoke
+callback differs too. Registering the lifecycle as its own secret type makes both dispatches
+structural rather than conditional on a field read at revoke time.
+
+**`spaces_key` stays exactly as it was, beside it.** Where the reader owns what it holds and a lease
+revoke should delete it, a per-lease key is the right answer and the shared one would be wrong — and
+both lifecycles are wanted on one mount, which is why all three DO roles are exercised together.
+
+## Why rotation jitter is subtracted from the period, never added (2026-09-16)
+
+`rotation_period` reads as a promise: this credential will not be in service for longer than that.
+An operator writing 90 days is answering a policy question about how long one key may be used, so
+jitter that could push a rotation *later* would make the real ceiling `period + jitter` — and the
+number that satisfied the policy would be one nobody wrote down. Subtracting keeps the field the
+operator set as the field the operator gets.
+
+Jitter exists at all to break synchronisation, not to add randomness for its own sake: every role
+first read in the same deploy would otherwise come due in the same minute, each minting a second key
+against the shared 200-key cap and each adding to a mint burst against a shared rate limit. It
+defaults to a tenth of the period rather than to zero because that is a failure an operator would
+not think to ask to be protected from; `0` is available for whoever wants a predictable date.
+
+It is rolled **once, when the key is minted**, and stored on the record. Recomputed per read it
+would move the rotation date under a client watching its TTL, and "is this key due?" would stop
+being a question two nodes answer the same way. A jitter at or above the period is refused, because
+subtracting one would schedule the rotation at or before the mint.
+
+## Why `roles/<name>/rotate` keeps the overlap and `revoke-upstream` does not (2026-09-16)
+
+Both replace a shared credential; they exist separately because they answer different incidents.
+
+A credential that is merely *stale* — a compliance date, a departing engineer, an operator who wants
+the next 90 days to start now — needs the rotation brought forward without cutting anyone off, so
+the replaced key keeps its full `overlap_ttl` and clients pick the new one up on their next read.
+A credential that has *leaked* needs to stop working, and breaking every holder is the accepted cost
+of that. The report `roles/<name>/rotate` returns names `replaced_deleted_at`, which is the one date
+the operator has to pass on to whoever is still holding the old key; the secret is deliberately
+absent from it, because a credential read is the only place a Spaces secret is handed out.
+
+Not one endpoint with a flag, for the reason the containment note below gives about zero-deletion
+successes: a lever that half-does containment is worse than one that refuses, because a responder
+mid-incident reads success as contained. Two names make the choice explicit, and `rotate`'s help
+text points at the other one.
+
+The two also disagree about `disabled`, in opposite directions and both deliberately. `rotate`
+loads the role through `loadRole` and is therefore refused on a disabled role, because rotating
+**mints**, and stopping this mount from acting upstream on that role's behalf is the whole job of
+the flag. A purge reads storage directly and works on a disabled role, because disable-then-purge is
+the sequence the levers exist for.
+
+## Why deletion is two declared facts in the test harnesses, not one (2026-09-16)
+
+Until a role owned its credential, two different statements agreed on every row: *a lease ending
+deletes the credential*, and *the cloud can destroy a credential this role already issued*. So one
+flag carried both, and the purge suite read the containment lever off the hard-revoke flag.
+
+A shared credential separates them in the one direction that matters. A lease ending must **not**
+delete it, while an operator containing an incident must still be able to — DigitalOcean will delete
+a Spaces key on demand whoever is holding it. Reading the lever off hard revoke would have asserted
+that `revoke-upstream` *refuses* on exactly the role where it works: the harness agreeing with the
+bug instead of catching it.
+
+So `plugintest.Harness` and `baotest.Case` each declare both facts, and the combination that cannot
+be true — hard revoke on a cloud that cannot delete an issued credential — fails loudly rather than
+being quietly permitted. That check earns its place because `pkg/baotest` is imported by another
+repository: a purge assertion skipped by an unset field is invisible there, while a `t.Fatalf`
+naming the missing field is not.
+
+`SharesOneCredential` is declared for the same reason rather than measured. The scenario could
+compare two reads' `credential_id`s and adapt to what it found, but then a plugin that stopped
+sharing would produce a suite that agreed with it. Stated, a regression in either direction fails.
+It also fixes how far the upstream credential count may move per read — zero after the first — which
+is what catches a read that mints when it should have re-served.
+
 ## Why containment is two levers, and why neither of them is deleting the role (2026-09-16)
 
 A credential this plugin issued is believed to have leaked. Until 2026-09-16 an operator's options
@@ -283,6 +391,11 @@ contract, the owner-tag invariant and the error taxonomy for the type that **can
 against real DigitalOcean and not for the type that can. `do-spaces` is therefore a second
 subject drawn from the same `Factory`, and the same reasoning applies to `e2e/`. Nothing about the
 categories changed; what changed is what counts as a subject.
+
+The third credential type, a day later, needed no new argument: `do-spaces-rotated` registered by
+the same rule, and it is the one that would have been hidden worst — its lease is non-renewable, its
+revoke deletes nothing, and a read re-serves rather than mints, so a single `do` entry would have
+asserted the opposite of all three about it and passed.
 
 ## Why a real-cloud recording is withheld until its secret is known (2026-09-15)
 

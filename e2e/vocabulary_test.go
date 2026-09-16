@@ -34,12 +34,16 @@ const (
 )
 
 // Field names belonging to one cloud's role schema. DigitalOcean's are here rather than in its
-// case file because two cases share them.
+// case file because three cases share them.
 const (
-	doSpacesCredentialType = "spaces_key"
-	fieldCredentialType    = "credential_type"
-	fieldGrants            = "grants"
-	fieldRegion            = "region"
+	doSpacesCredentialType        = "spaces_key"
+	doSpacesRotatedCredentialType = "spaces_key_rotated"
+	fieldCredentialType           = "credential_type"
+	fieldGrants                   = "grants"
+	fieldRegion                   = "region"
+	fieldRotationPeriod           = "rotation_period"
+	fieldRotationJitter           = "rotation_jitter"
+	fieldOverlapTTL               = "overlap_ttl"
 )
 
 // TTLs the cases request. Each is inside its cloud's enforceable range

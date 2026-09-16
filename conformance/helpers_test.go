@@ -53,6 +53,9 @@ const (
 	fieldCredentialType   = "credential_type"
 	fieldGrants           = "grants"
 	fieldRegion           = "region"
+	fieldRotationPeriod   = "rotation_period"
+	fieldRotationJitter   = "rotation_jitter"
+	fieldOverlapTTL       = "overlap_ttl"
 )
 
 // TTLs used by the harness roles. Each is inside the cloud's enforceable range
@@ -62,6 +65,17 @@ const (
 	hourTTL  = 3600
 	dayTTL   = 86400
 )
+
+// noSharedCredential is why every subject but one declares no rotation category.
+//
+// One reason shared by ten of them rather than ten paraphrases of it, because the fact is a
+// property of the LIFECYCLE and not of any cloud: where each read mints, the lease that read
+// it owns it outright, so there is no credential held in common to replace on a schedule and no
+// window in which a replaced one has to keep working. OCI shares a credential and still cannot
+// exercise the category, for a reason of its own, and says so itself.
+const noSharedCredential = "every credential read mints one credential for the lease that read " +
+	"it, so nothing is shared between readers: there is no credential to replace on a schedule, " +
+	"and a lease's own end is what bounds what it holds"
 
 // minterSet wraps minter maps in the "minters" field every minter-set write takes.
 func minterSet(m ...map[string]interface{}) map[string]interface{} {

@@ -118,5 +118,9 @@ func doSpacesHarness(t *testing.T) plugintest.Harness {
 			return agedForeignID, agedOwnedID
 		},
 		HasEntity: srv.HasSpacesKey,
+
+		Skips: map[plugintest.Category]string{
+			plugintest.CategoryRotation: noSharedCredential,
+		},
 	}
 }

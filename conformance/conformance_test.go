@@ -16,6 +16,11 @@ const pluginsDir = "../plugins"
 // pluginPrefix is the directory-name prefix every credential plugin uses.
 const pluginPrefix = "credential-"
 
+// subjectColumn is wide enough for the longest SUBJECT name, which is longer than the longest
+// cloud name: a variant is printed as cloud-variant, and a matrix whose rows do not line up is
+// read wrongly by exactly the person scanning it for a gap.
+const subjectColumn = 18
+
 // registry is THE table: one entry per credential plugin. Adding a plugin without
 // adding it here fails TestEveryPluginIsRegistered.
 var registry = []plugintest.Plugin{
@@ -26,6 +31,10 @@ var registry = []plugintest.Plugin{
 	// A second SUBJECT from the same plugin directory, not a second plugin: credential-do serves
 	// two credential types selected per role, so one harness cannot declare both.
 	{Cloud: "do", Variant: "spaces", New: doSpacesHarness},
+	// A third, for the same reason again: this one shares the Spaces payload with the subject
+	// above and differs in who owns the credential, which is the dimension every shared suite
+	// reads as "one credential per read".
+	{Cloud: "do", Variant: "spaces-rotated", New: doSpacesRotatedHarness},
 	{Cloud: "exoscale", New: exoscaleHarness},
 	{Cloud: "gcp", New: gcpHarness},
 	{Cloud: "oci", New: ociHarness},
@@ -89,7 +98,7 @@ func TestConformanceMatrix(t *testing.T) {
 	for _, c := range categories {
 		header = append(header, shortName(string(c)))
 	}
-	t.Logf("%-10s %s", "cloud", strings.Join(header, " "))
+	t.Logf("%-*s %s", subjectColumn, "cloud", strings.Join(header, " "))
 
 	var gaps []string
 	for _, p := range registry {
@@ -108,7 +117,7 @@ func TestConformanceMatrix(t *testing.T) {
 			}
 			cells = append(cells, pad("run", shortName(string(c))))
 		}
-		t.Logf("%-10s %s", p.Subject(), strings.Join(cells, " "))
+		t.Logf("%-*s %s", subjectColumn, p.Subject(), strings.Join(cells, " "))
 	}
 
 	sort.Strings(gaps)

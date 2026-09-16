@@ -105,6 +105,7 @@ func awsHarness(t *testing.T) plugintest.Harness {
 			plugintest.CategoryReconcilerSafety: "AWS reconcile prunes local tracking entries only " +
 				"(pkg/localexpiry on active-tokens/): STS sessions are not upstream entities, so there " +
 				"is nothing to list and nothing the reconciler could delete",
+			plugintest.CategoryRotation: noSharedCredential,
 		},
 	}
 }

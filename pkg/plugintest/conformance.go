@@ -125,6 +125,18 @@ var suites = []suite{
 		},
 	},
 	{
+		name: CategoryRotation,
+		run:  RunRotationSuite,
+		requires: func(h Harness) []string {
+			return missing(
+				field{"ForceRotationDue", h.ForceRotationDue != nil},
+				field{"ForceOverlapExpired", h.ForceOverlapExpired != nil},
+				field{"SweepRetiredCredentials", h.SweepRetiredCredentials != nil},
+				field{"RotationOverlapTTL", h.RotationOverlapTTL > 0},
+			)
+		},
+	},
+	{
 		name: CategoryReconcilerSafety,
 		run:  RunReconcilerSafetySuite,
 		requires: func(h Harness) []string {

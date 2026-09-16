@@ -72,8 +72,10 @@ func assertRevokeWithoutInternalDataReleases(t *testing.T, h Harness) {
 func assertRevokeDeletesUpstream(t *testing.T, h Harness) {
 	t.Helper()
 	if !h.ExpectsHardRevoke {
-		t.Skipf("%s: credentials expire upstream rather than being deleted, so ProvisionedCount is a "+
-			"cumulative mint count and cannot return to zero", h.Cloud)
+		t.Skipf("%s: a lease ending does not delete this credential — it either expires upstream on "+
+			"its own, or it is shared by readers whose leases must not destroy it — so the count "+
+			"cannot be expected to fall. The rotation category asserts the shared case positively",
+			h.Cloud)
 	}
 	b, storage := newConfiguredBackend(t, h)
 	before := h.ProvisionedCount()

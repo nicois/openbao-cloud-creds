@@ -3,7 +3,7 @@
 **Date:** 2026-05-29 (research) — all clouds below were subsequently **built** (see Status column, updated 2026-05-30)
 **Purpose:** Determine JIT feasibility, scoping model, and strategy per cloud for the OpenBao credential plugin.
 
-This was the pre-build investigation. Every cloud below is now implemented as a working plugin, and DigitalOcean serves two credential types rather than one; the Status column reflects build state, the rest of the table reflects the API findings that drove each design. **DO findings were re-verified 2026-08-21** — see the note under the table and [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md) — and the Spaces-key findings again on 2026-09-15.
+This was the pre-build investigation. Every cloud below is now implemented as a working plugin, and DigitalOcean serves three credential types rather than one; the Status column reflects build state, the rest of the table reflects the API findings that drove each design. **DO findings were re-verified 2026-08-21** — see the note under the table and [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md) — and the Spaces-key findings again on 2026-09-15.
 
 ## Summary Table
 
@@ -20,6 +20,7 @@ This was the pre-build investigation. Every cloud below is now implemented as a 
 | Azure | JIT (direct) | Graph `addPassword` on app registration | Graph `removePassword` | SP secrets have configurable expiry | RBAC | Tags + name prefix on app registration | **Built** (no OpenBao Azure engine exists) |
 | Oracle (OCI) | **Phased rotation** | `POST /users/{id}/authTokens` | `DELETE .../{id}` | No | IAM policies on groups/compartments | User/credential ID | **Built** (max 2 tokens/user → N=2 slots) |
 | DigitalOcean (Spaces keys) | JIT | `POST /v2/spaces/keys` (in the public spec, `bearer_auth`) | `DELETE /v2/spaces/keys/{access_key}` | No | Per-bucket `grants` (read/readwrite/fullaccess) | Name prefix + `created_at` | **Built** as `credential_type=spaces_key` on `credential-do` — the type that cloud can actually mint (was "deferred, no API"; see the DO Spaces findings below) |
+| DigitalOcean (Spaces keys, shared) | **Rotation with overlap** | same two endpoints as the row above | same | No | same `grants` | same | **Built** as `credential_type=spaces_key_rotated` on `credential-do` — one key per *role*, replaced every `rotation_period`, the replaced one deleted `overlap_ttl` later |
 
 > **Note (2026-08-21, DO re-verification):** Two DO rows above were corrected against DigitalOcean's current public OpenAPI spec — full findings in [`docs/do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md). (1) `POST /v2/tokens` is **not** a public documented endpoint: the spec has no `/v2/tokens` path and DO documents PAT creation as control-panel-only, so the reference plugin rides a control-panel-internal endpoint. (2) DO scopes are fine-grained `<resource>:<verb>` (e.g. `droplet:create`), not the coarse `read`/`write` originally recorded. (3) DO Spaces keys **are** now API-issuable (`/v2/spaces/keys`, full CRUD, per-bucket grants) — the deferral's "no API" premise is void; the 200-keys/account cap is the remaining blocker for the long-lived per-customer use case.
 
@@ -69,7 +70,7 @@ probe must pin the requested lifetime to the cloud's documented minimum.
 - **Safety boundary:** Name prefix `cloud-creds-<role>-<lease_id>`
 - **Minter:** Long-lived PAT with token-creation privileges (an account-level capability, NOT a settable token scope).
 - **Minter self-rotation:** **Not feasible** (verified 2026-06-01, re-confirmed 2026-08-21 — the only token-management scopes in the spec are `dedicated_inference_tokens:*`, a different resource; and per the bullet above the endpoint isn't public at all). DO's scope catalog has no `token:*` / token-management scope, so a token created via `POST /v2/tokens` cannot be granted the privilege to create further tokens — self-rotation would break after one cycle. The `minter-sets/<set>/rotate` endpoint therefore rejects on DO ("rotate out-of-band"). Operators rotate the DO minter PAT manually; the `cloud_creds_minter_age_seconds` gauge + near-expiry warn-log surface staleness.
-- **DO Spaces keys are the other credential type this plugin serves**, and the one it can mint against the real cloud. Full findings in the next section (this bullet previously read "No public API for create/delete. Only via web UI.", which was wrong).
+- **DO Spaces keys are the other two credential types this plugin serves** (`spaces_key` per lease, `spaces_key_rotated` per role), and the ones it can mint against the real cloud. Full findings in the next two sections (this bullet previously read "No public API for create/delete. Only via web UI.", which was wrong).
 
 ### DigitalOcean Spaces access keys (`credential_type=spaces_key`, 2026-09-15)
 
@@ -104,13 +105,23 @@ the opposite answer (`docs/object-storage-credential-audit.md`).
   issuance; under the second it silently hands out an account-wide key. That is why the
   plugin **parses** grants and refuses the mix at role write rather than passing the
   string through — right under both readings (`plugins/credential-do/spaces_grants.go`).
-- **There is no expiry field of any kind** — no TTL, no rotation endpoint. A key lives
-  until deleted, which makes revoke the entire lifecycle rather than an optimisation, and
-  makes the owner-tag reconciler the only backstop ([`ttl-semantics.md`](ttl-semantics.md)).
-  Two consequences the implementation depends on: the `access_key` must be in the lease's
-  `internal_data` and in the tracking record, because the `secret_key` is unrecoverable
-  after create and revoke needs the access key; and an unreclaimed key consumes account
-  capacity indefinitely, since Spaces keys count against a per-account cap of 200.
+- **There is no expiry field of any kind, and it cannot be retro-fitted** (re-read against
+  DO's published spec 2026-09-16). The `key` schema has exactly four properties — `name`,
+  `grants`, and read-only `access_key` and `created_at` — so there is no TTL to send at
+  create, and no rotation endpoint. Nor can a key acquire one later: `PUT`/`PATCH` say in
+  the spec's own words that *"you cannot convert a fullaccess key to a scoped key or vice
+  versa. You can only update the name of the key"*, so the modify path changes a label and
+  nothing else. Grants are immutable too, which is why **rotation can only be
+  create-new-then-delete-old** rather than re-granting in place — and therefore why an
+  overlap window (two live keys) is unavoidable rather than a choice. The whole REST API
+  has only these two Spaces paths, so nothing at the bucket or account level bounds a key's
+  life either. A key lives until deleted, which makes revoke the entire lifecycle rather
+  than an optimisation, and makes the owner-tag reconciler the only backstop
+  ([`ttl-semantics.md`](ttl-semantics.md)). Two consequences the implementation depends on:
+  the `access_key` must be in the lease's `internal_data` and in the tracking record,
+  because the `secret_key` is unrecoverable after create and revoke needs the access key;
+  and an unreclaimed key consumes account capacity indefinitely, since Spaces keys count
+  against a per-account cap of 200.
 - **The listing pages, and a client that ignores that sees a fraction of the account.**
   DO defaults `per_page` to **20** and caps it at **200**, and answers `keys` alongside
   `links.pages.next`/`.last` and a required `meta.total`. On the one credential type with
@@ -146,6 +157,50 @@ Design rationale for the type — why a new `s3_credentials` credential kind rat
 reusing an existing one, why AWS-style key names, why `endpoint` and `region` ride inside
 the credential block, and why reconciler ids carry their credential class — is in the
 2026-09-15 entries of [`decisions.md`](decisions.md).
+
+### DigitalOcean Spaces access keys, shared and rotated (`credential_type=spaces_key_rotated`, 2026-09-16)
+
+A third credential type on `credential-do`, on the same two paths as the section above and
+needing **no API surface that section does not already describe**. What differs is who the
+key belongs to: the role, rather than the lease that read it. Every reader of the role is
+handed the same key, and the plugin replaces it on a schedule of its own.
+
+- **The absent expiry field is what makes the type necessary rather than merely possible.**
+  Because a key has no TTL and its grants cannot be changed after create (the expiry bullet
+  above), the only way to replace one is to create its successor and then delete it — so two
+  keys are live for however long the old one is kept. A per-lease key hides that window
+  inside one lease (create at read, delete at lease end); a shared key cannot, because the
+  key being replaced is in the hands of clients that have not asked again yet. So the window
+  is named and bounded instead: `rotation_period` (a **ceiling** — the jitter is subtracted
+  from it and never added, so a key is never served for longer than the operator asked),
+  `rotation_jitter` (default a tenth of the period, rolled once when the key is minted so the
+  date does not move under a client watching its TTL) and `overlap_ttl` (how long the
+  replaced key keeps working). Enforced at role write: `rotation_period ≥ 1h`,
+  `overlap_ttl ≤ rotation_period`, `max_ttl ≤ overlap_ttl`.
+- **The 200-key cap binds the opposite thing.** Per-lease keys spend the cap on *concurrent
+  leases* — 200 live at once across the account, however few roles there are. A shared key
+  costs **one** per role, two during an overlap, however large the fleet reading it. The cap
+  therefore bounds roles (100 rotated roles in the worst case) and stops bounding clients
+  altogether, which is the reason to reach for the type: a fleet re-fetching its credential
+  on a cron no longer counts against the account at all.
+- **It stores the secret, and nothing else in this repo does.** DO returns a Spaces secret
+  exactly once, at create, and this type's contract is to hand the *same* credential back to
+  a reader who asks again — so either the mount's storage holds the secret or the contract
+  cannot be implemented. The per-lease type keeps only the `access_key`, which is all a
+  revoke needs. That is a genuine difference in what a compromise of the mount's storage
+  exposes: a live credential, not just a handle for deleting one. OCI's rotation slots
+  already make the same trade, for the same reason.
+- **`DELETE` still exists, which is what separates this from OCI's slots.** The credential
+  outliving its reader's lease is a property of sharing, but it is not a property of the
+  cloud: DO will delete a Spaces key on demand at any time. So both containment levers are
+  real here — replace the key now and let the overlap run, or delete it now and break every
+  holder — where OCI's two-token budget leaves only the first
+  ([`ttl-semantics.md`](ttl-semantics.md)).
+- **Unverified the same way, and one step further.** Everything in the previous section's
+  final bullet applies unchanged. Beyond it, rotation issues a create *and* a delete against
+  the account in one operation and re-reads a key it minted earlier, and no recording in
+  `plugins/credential-do/testdata/cloud-real/` covers any of that — the four that exist are
+  from the 2026-08-21 token run.
 
 ### UpCloud
 
@@ -256,8 +311,16 @@ All clouds need full JIT implementations calling cloud APIs directly, except OCI
 
 | Strategy | Clouds |
 |----------|--------|
-| JIT (create/delete) | DO (PATs, and Spaces keys), UpCloud, OVH, Exoscale, Vultr, Akamai, GCP (impersonation), Azure (SP secret), AWS (STS direct) |
+| JIT (create/delete) | DO (PATs, and per-lease Spaces keys), UpCloud, OVH, Exoscale, Vultr, Akamai, GCP (impersonation), Azure (SP secret), AWS (STS direct) |
 | Phased rotation | Oracle (OCI) |
+| Rotation with overlap | DO (shared Spaces keys) |
+
+The third row is not phased rotation with N=1. OCI pre-provisions its slots and a rotation
+deletes the slot's credential as it replaces it, sizing each lease to end first; a shared
+Spaces key is minted on first demand and the key it replaces is deliberately kept alive for
+`overlap_ttl`, because a client that already holds it may not ask again for hours. The
+difference exists because the caps differ: OCI's two-tokens-per-user budget has no room for a
+grace period, and DO's 200-keys-per-account has plenty.
 
 ### Shared infrastructure (all built)
 

@@ -145,7 +145,8 @@ The lever available is per-cloud:
 
 | Cloud | Containment for an already-issued credential |
 | :---- | :---- |
-| DO (tokens and Spaces keys), UpCloud, Azure, Exoscale, Vultr, Akamai | `revoke-upstream` deletes it |
+| DO (tokens and per-lease Spaces keys), UpCloud, Azure, Exoscale, Vultr, Akamai | `revoke-upstream` deletes it |
+| DO (`credential_type=spaces_key_rotated`) | **two remedies, and they are not interchangeable**: `roles/<name>/rotate` replaces the shared key and lets the replaced one live out its `overlap_ttl` (stale credential, clients must not break), `revoke-upstream` deletes it now (leak, breaking every holder is the point) |
 | AWS, GCP, OVH | **none** — the credential only expires, so the role's `max_ttl` IS the blast radius (≤12h, ≤12h, exactly 1h) |
 | OCI | `rotate-slot/<role>/<slot_index>` — a slot's credential is shared by every holder, so replacing it invalidates it for all of them |
 

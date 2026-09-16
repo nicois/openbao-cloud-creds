@@ -68,6 +68,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return errResp, nil
 	}
 
+	// The rotated type first: it shares the credential SHAPE with the per-lease Spaces type
+	// (so it is inside issuesSpacesKey) but nothing about the lifecycle, and it must not mint
+	// per read.
+	if role.rotatesSharedKey() {
+		return b.serveSharedSpacesKey(ctx, req, role, roleName)
+	}
 	if role.issuesSpacesKey() {
 		return b.issueSpacesKey(ctx, req, d, role, roleName)
 	}
@@ -95,7 +101,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	// Mint token via DO API
 	scopes := role.Scopes
-	tokenName, errResp := b.credentialName(ctx, req, roleName, req.ID)
+	tokenName, errResp := b.credentialName(ctx, req.Storage, roleName, req.ID)
 	if errResp != nil {
 		return errResp, nil
 	}
@@ -157,9 +163,9 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 
 	// Track active token for reconciler
 	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+tokenResp.Token.ID, map[string]interface{}{
-		fieldRole: roleName,
-		"minter":  minterID,
-		"created": now.UTC().Format(time.RFC3339),
+		fieldRole:         roleName,
+		trackFieldMinter:  minterID,
+		trackFieldCreated: now.UTC().Format(time.RFC3339),
 	})
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
@@ -415,9 +421,12 @@ func (b *backend) issuanceError(httpStatus int, err error, attempt telemetry.Iss
 // credentialName resolves this mount's owner instance and builds the upstream name for
 // one issued credential. The name IS the owner tag: it is what the reconciler matches on
 // and what distinguishes this mount's credentials from another mount's (A19).
-func (b *backend) credentialName(ctx context.Context, req *logical.Request, roleName, suffix string,
+// Takes a storage view rather than the request, because a rotation driven by the worker has
+// no request and still has to name its key the same way — the owner prefix is what makes the
+// reconciler treat the key as this mount's.
+func (b *backend) credentialName(ctx context.Context, storage logical.Storage, roleName, suffix string,
 ) (string, *logical.Response) {
-	instanceID, err := b.ownerInstanceID(ctx, req.Storage)
+	instanceID, err := b.ownerInstanceID(ctx, storage)
 	if err != nil {
 		return "", credenvelope.InternalResponse(b.Logger().Warn, "resolving the owner instance id", err)
 	}

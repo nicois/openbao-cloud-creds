@@ -486,6 +486,10 @@ func str(t *testing.T, data map[string]interface{}, key string) string {
 // failure mode of getting it wrong is silence.
 func assertMinterAffinity(t *testing.T, h Harness) {
 	t.Helper()
+	if h.SharesOneCredential {
+		t.Skipf("%s serves one credential to every reader, minted once by one minter, so a shard "+
+			"key cannot spread anything: there is nothing per-read for affinity to place", h.Cloud)
+	}
 	if h.WriteSetWithMinters == nil {
 		t.Skip("harness declares no WriteSetWithMinters, so affinity cannot be observed: a " +
 			"one-minter set serves every key from the same minter whether or not affinity works")

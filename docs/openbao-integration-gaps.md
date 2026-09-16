@@ -41,6 +41,20 @@ report's numbers arrive as `json.Number`, and a refusal reaches a client wrapped
 client's own request context rather than as a bare `<code>: <message>` string. AWS, GCP and OCI are declared
 gaps in the e2e table — see G8.
 
+A cloud contributes a **subject** rather than a row, so the nine driven subjects come from
+seven clouds: `credential-do` appears three times, once per credential type. The third of
+those — `spaces_key_rotated`, a credential the role owns and every reader shares — is what
+the layer exists for, because three of its properties cannot be produced in process. A
+`framework.Secret` registering no `Renew` has to reach **core's expiration manager** as a
+genuinely non-renewable lease, so `bao lease renew` is refused rather than extending a lease
+past the moment the shared key is deleted. A **third serialized secret type** has to dispatch
+its own revoke, where the per-lease Spaces callback beside it would delete the key every
+other reader is holding. And **re-serving has to survive `plugin reload`**, which is where
+the role's stored record stops being a struct in memory. It is also the row where the two
+facts about deletion come apart — a lease ending deletes nothing, while `revoke-upstream`
+still deletes what the role issued — so the scenario asserts them separately rather than
+inferring one from the other.
+
 ### G2 — background workers are never started by `Factory` — CLOSED (KI-007), one residual
 
 `startWorkers` was called from `pathConfigWrite` and `pathMinterSetWrite` only;
@@ -323,7 +337,7 @@ What an external consumer needs:
 
 | Want | Import | Internal deps to `replace` |
 |---|---|---|
-| The nine conformance categories | `pkg/plugintest` | `pkg/credenvelope` |
+| The ten conformance categories | `pkg/plugintest` | `pkg/credenvelope` |
 | The ten cloud fakes | `pkg/credenvelope/fakes` | (part of the `credenvelope` module) |
 | A live OpenBao with plugin binaries | `pkg/baotest` | `pkg/credenvelope` |
 | The end-to-end **scenario** itself | `pkg/baotest` (`Case`, `RunScenario`) | `pkg/credenvelope` |
@@ -332,8 +346,9 @@ What an external consumer needs:
 
 The harness (start a server, register a plugin, enable a mount) moved first; the
 **scenario** — the order of the writes and every assertion over the result — followed,
-as `baotest.Case` + `baotest.RunScenario`. `e2e/` is now nine per-cloud vocabulary files
-plus a registry, and `e2e/suite_test.go` is gone.
+as `baotest.Case` + `baotest.RunScenario`. `e2e/` is now one vocabulary file per driven
+subject — nine of them, since `credential-do` contributes three — plus a registry, and
+`e2e/suite_test.go` is gone.
 
 The reason is the one the first move predicted, observed rather than reasoned about. A
 separate repository wired its own end-to-end test against the same contract and asserted

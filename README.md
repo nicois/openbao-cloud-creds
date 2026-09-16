@@ -2,14 +2,15 @@
 
 Short-lived, role-based cloud credentials for [OpenBao](https://openbao.org/), with a uniform API across cloud providers.
 
-**Status:** Implemented. Ten credential plugins, all tested and lint-clean, each building as a deployable OpenBao secrets-engine binary. Two have been probed against a real account, with opposite results: **AWS works** — the mint shape, session tags, credential usability and exact TTL honouring all confirmed against live STS — while **DigitalOcean refuses the mint call for every API token**, so `credential-do` cannot issue against the real cloud ([KI-009](docs/known-issues.md)) and is kept as the reference for the other nine plugins' structure. The remaining eight are unexercised against their live cloud (see Testing).
+**Status:** Implemented. Ten credential plugins, all tested and lint-clean, each building as a deployable OpenBao secrets-engine binary. Two have been probed against a real account, with opposite results: **AWS works** — the mint shape, session tags, credential usability and exact TTL honouring all confirmed against live STS — while **DigitalOcean refuses the mint call for every API token**, so `credential-do`'s token type cannot issue against the real cloud ([KI-009](docs/known-issues.md)) and is kept as the reference for the other nine plugins' structure. That is why the plugin also issues DO **Spaces access keys**, which are in DO's published spec and are the thing it can mint — in two lifecycles, one credential per lease or one shared by a whole role and rotated on a schedule. The remaining eight clouds are unexercised against their live cloud, and so is the Spaces probe itself (see Testing).
 
 ## What this is
 
-Control-plane services and CI jobs need short-lived, role-scoped credentials for the cloud APIs they call. This project is a set of OpenBao plugins that present a single uniform `bao read cloud-creds/<cloud>/creds/<role>` API regardless of cloud, hiding per-cloud divergence behind one of two strategies:
+Control-plane services and CI jobs need short-lived, role-scoped credentials for the cloud APIs they call. This project is a set of OpenBao plugins that present a single uniform `bao read cloud-creds/<cloud>/creds/<role>` API regardless of cloud, hiding per-cloud divergence behind one of three strategies:
 
 - **JIT** (mint on read, revoke on lease end) — the strategy for nine of ten clouds. The plugin holds a long-lived "minter" credential and calls the cloud API per request to mint a short-lived credential. Clouds whose tokens expire naturally (AWS STS, GCP impersonation, OVH OAuth2 tokens) need no revoke call; the rest (DO, UpCloud, Azure, Exoscale, Vultr, Akamai) hard-revoke the upstream credential on lease end.
 - **Phased rotation** — N pre-provisioned credential slots rotated on schedule with phase offsets, so the freshest slot's TTL is always honest. Used only by Oracle (OCI), whose 2-token-per-user quota rules out per-request minting.
+- **Rotation with overlap** — one credential per *role*, shared by every reader, replaced when it reaches its `rotation_period` and the replaced one deleted `overlap_ttl` later. Chosen per role on DigitalOcean Spaces keys, whose API has no expiry field at all and whose grants cannot be edited, so replace-then-delete is the only rotation there is — see [below](#one-credential-a-whole-fleet-shares-replaced-on-a-schedule).
 
 Every issued lease's `expires_at` reflects actual remaining validity — never more
 than the credential really has. Where a cloud can't be made to honour a requested
@@ -27,7 +28,7 @@ The long-lived **minter** credentials themselves are observable (an age gauge pl
 
 | Plugin | Strategy | Upstream mechanism | Minter self-rotation |
 |--------|----------|--------------------|----------------------|
-| `credential-do` | JIT | DigitalOcean API tokens (`POST /v2/tokens`) — code-shape reference; **cannot issue against real DO**¹ | — |
+| `credential-do` | JIT, plus rotation-with-overlap on one type | **Three credential types, chosen per role.** DigitalOcean API tokens (`POST /v2/tokens`) — code-shape reference; **cannot issue against real DO**¹. Spaces access keys (`POST /v2/spaces/keys`), one per lease. The same Spaces keys shared by a whole fleet and rotated on a schedule — `credential_type=spaces_key_rotated`, below | — |
 | `credential-aws` | JIT | STS AssumeRole (called directly) | ✅ `CreateAccessKey` |
 | `credential-gcp` | JIT | Service-account impersonation (`generateAccessToken`) | ✅ `keys.create` (org-policy permitting) |
 | `credential-azure` | JIT | Graph API client secrets on app registrations | ✅ `addPassword` (rotation reference) |
@@ -42,11 +43,22 @@ The `minter-sets/<set>/rotate` endpoint exists on all ten plugins for a uniform 
 
 ² **`credential-oci` cannot talk to real OCI.** Its production client is four `NotImplemented` stubs — OCI request signing is unimplemented in this open-source extraction — so a role write fails with `unsupported`, and everything that passes for it exercises the in-process fake. Phased rotation, one of the two headline strategies, therefore has no working cloud. Tracked as A15 in [`docs/audit-2026-08-22.md`](docs/audit-2026-08-22.md).
 
-¹ **`POST /v2/tokens` is neither public nor usable.** DO's public OpenAPI spec has no `/v2/tokens` path, and DO documents personal-access-token creation as a control-panel flow only. Worse, a real-account probe on 2026-08-21 found the endpoint **refused for every personal access token**: `GET`/`POST /v2/tokens` return 403 with `X-Response-From: Edge-Gateway` while eleven other endpoints on the *same* full-access token return 200 from `X-Response-From: service`. Token management is fenced off at DigitalOcean's edge as a matter of routing, not privilege — so `credential-do` cannot mint against real DigitalOcean, and there is no headless alternative (the OAuth flow needs interactive authorization; Spaces keys are a different credential type, out of scope). It is retained as the structure the other nine plugins follow and as the origin of the DO cloud fake, both of which the test layers depend on. Findings: [KI-009](docs/known-issues.md), [`docs/do-api-verification-2026-08-21.md`](docs/do-api-verification-2026-08-21.md), rationale in [`docs/decisions.md`](docs/decisions.md).
+¹ **`POST /v2/tokens` is neither public nor usable.** DO's public OpenAPI spec has no `/v2/tokens` path, and DO documents personal-access-token creation as a control-panel flow only. Worse, a real-account probe on 2026-08-21 found the endpoint **refused for every personal access token**: `GET`/`POST /v2/tokens` return 403 with `X-Response-From: Edge-Gateway` while eleven other endpoints on the *same* full-access token return 200 from `X-Response-From: service`. Token management is fenced off at DigitalOcean's edge as a matter of routing, not privilege — so `credential-do` cannot mint against real DigitalOcean, and there is no headless alternative (the OAuth flow needs interactive authorization; Spaces keys are a different credential type on this same plugin — and the one it *can* mint, which is why it has two of them). It is retained as the structure the other nine plugins follow and as the origin of the DO cloud fake, both of which the test layers depend on. Findings: [KI-009](docs/known-issues.md), [`docs/do-api-verification-2026-08-21.md`](docs/do-api-verification-2026-08-21.md), rationale in [`docs/decisions.md`](docs/decisions.md).
 
 DO roles take DigitalOcean's fine-grained scopes (`<resource>:<verb>`) verbatim, so a role can be narrowed to exactly the operations it needs — e.g. `scopes=droplet:create,droplet:read` for a role that may only launch and list Droplets. Scope strings are passed through unvalidated, and the minter must itself hold every scope it grants. (Academic against real DO, per the footnote above — but this is the scope-pass-through pattern the other plugins' role fields follow.)
 
-Object-storage credentials (S3-style backup keys) are **out of scope** — see [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md). (DigitalOcean Spaces keys appear in DO's public spec at `/v2/spaces/keys`, but DO's product docs say they are control-panel-only and a real-account probe returned 404, so API issuance is **unconfirmed** — see the audit's Revision 2. Object storage as a whole is simply not built here; DO's caps bind at 100 buckets per account; and the long-lived per-customer use case that motivated the audit needs credentials that survive an OpenBao outage, which short-lived issuance cannot provide on any cloud.)
+Two questions about object storage have opposite answers, so they are kept apart.
+**Can S3-style keys be issued through an API? On DigitalOcean, yes** — `POST /v2/spaces/keys` is in
+DO's published spec, takes a plain bearer token, and is what `credential-do`'s two Spaces types are
+built on (`credential_kind=s3_credentials`, per-bucket `grants`). DO's product docs claim the keys
+are control-panel-only and a 2026-08-21 probe answered 404; both are wrong, and the evidence is in
+[`docs/cloud-credential-research.md`](docs/cloud-credential-research.md). Note what is *not* proven:
+this repo's own real-cloud probe has never been run, so treat the plugin's behaviour against real DO
+as unverified. **Is object storage a viable per-customer product substrate? No, and that is
+unchanged** — see [`docs/object-storage-credential-audit.md`](docs/object-storage-credential-audit.md).
+DO's caps are per account and bind at 100 buckets, and the use case that motivated the audit needs
+credentials that survive an OpenBao outage. A Spaces key issued here is an operational credential for
+a management plane, not a per-customer backup grant.
 
 ## Configuration flow
 
@@ -64,7 +76,7 @@ The `config` endpoint's operational fields include `reconcile_cadence`, `max_del
 
 ### The credential shape is named, and a client can pin it
 
-The `credential` block is cloud-specific by nature — an AWS session is three fields, Akamai's EdgeGrid credential is four, a GCP token is two — so every response names its shape in `metadata.credential_kind` (`sigv4_session`, `oauth2_bearer`, `basic_auth`, `bearer_token`, `scoped_token`, `key_secret`, `azure_client_secret`, `edgegrid`, `oci_auth_token`). A client may **pin** the shape it is able to parse:
+The `credential` block is cloud-specific by nature — an AWS session is three fields, Akamai's EdgeGrid credential is four, a GCP token is two — so every response names its shape in `metadata.credential_kind` (`sigv4_session`, `oauth2_bearer`, `basic_auth`, `bearer_token`, `scoped_token`, `key_secret`, `s3_credentials`, `azure_client_secret`, `edgegrid`, `oci_auth_token`). A client may **pin** the shape it is able to parse:
 
 ```bash
 bao read cloud-creds/aws/creds/deploy credential_kind=sigv4_session
@@ -72,6 +84,43 @@ bao read cloud-creds/aws/creds/deploy credential_kind=sigv4_session
 
 If the role serves a different shape the read is refused with `credential_kind_unsupported`, naming both shapes, **before anything is loaded or minted** — so a caller that could not have used the credential never causes one to be created. Omitting the pin still works and still tells you the shape in the response.
 
+
+### One credential a whole fleet shares, replaced on a schedule
+
+Every other credential type here mints per read: the lease that read it owns it, and the lease's own
+end is what bounds it. DigitalOcean Spaces keys also support the opposite arrangement, because they
+have to — a Spaces key has **no expiry field** and none can be retrofitted, and `PUT`/`PATCH` change
+only its name, so grants are immutable and the only way to replace one is to create the next and
+delete the old. That leaves a window in which both work, and `credential_type=spaces_key_rotated`
+makes the window a declared, bounded part of the role:
+
+```bash
+bao write cloud-creds/do/roles/backup-reader \
+  minter_set=default credential_type=spaces_key_rotated \
+  grants=backups:read region=nyc3 \
+  rotation_period=2160h overlap_ttl=48h max_ttl=48h
+```
+
+One key exists per **role**, not per read. A read re-serves the key the role already holds, so a
+client that re-reads on a timer keeps getting the same `access_key`/`secret_access_key` until the key
+reaches its rotation age; the next read after that mints the replacement, serves it, and schedules the
+replaced key's deletion for `overlap_ttl` later. Clients that have not re-read yet keep working
+throughout that window and pick the new key up whenever they next ask. Nothing has to be coordinated
+outside the mount: `rotation_period` is a **ceiling** (`rotation_jitter`, default a tenth of the
+period, is subtracted from it — never added — and is rolled once when the key is minted, so the date
+does not move under a client), and a background sweep deletes retired keys and rotates an overdue role
+even if nobody reads it.
+
+Two consequences are worth stating plainly. **The lease is not the disposal mechanism** — a lease
+ending deletes nothing, since the credential belongs to the role — so leases are non-renewable and
+`max_ttl` must be no greater than `overlap_ttl`, which is what keeps a lease from outliving the
+credential in it even when it is issued the instant before a rotation. And **the mount stores the
+secret**, which nothing else here does; it is the price of re-serving the same credential, and it is
+in [`docs/decisions.md`](docs/decisions.md) with the rest of the trade.
+
+`bao write cloud-creds/do/roles/backup-reader/rotate` does the same replacement on demand, keeping the
+overlap — the right lever when a credential is merely stale. When it has *leaked*, the lever is
+`revoke-upstream` below, which deletes it now and breaks every holder.
 
 ### Spreading a fleet across minters (`shard_key`)
 
@@ -150,7 +199,8 @@ in — so a runbook is written once and automation can watch for `complete`.
 
 | Cloud | Lever for a credential already issued |
 |---|---|
-| DigitalOcean (tokens and Spaces keys), UpCloud, Azure, Exoscale, Vultr, Akamai | `revoke-upstream` deletes it |
+| DigitalOcean (tokens and per-lease Spaces keys), UpCloud, Azure, Exoscale, Vultr, Akamai | `revoke-upstream` deletes it |
+| DigitalOcean (`credential_type=spaces_key_rotated`) | **two, and they are not interchangeable.** `roles/<role>/rotate` replaces the shared key now and lets the replaced one live out its `overlap_ttl`, so clients pick the new one up on their next read — right when the credential is merely stale. `revoke-upstream` deletes it now and breaks every holder — right when it has leaked |
 | AWS, GCP, OVH | **none.** The credential cannot be deleted — an STS session, an impersonation token and an OVH OAuth2 token only expire — so the role's `max_ttl` is the blast radius (AWS/GCP ≤12h, OVH exactly 1h). Disabling the role stops the next one; the ones out have to run down |
 | OCI | `rotate-slot/<role>/<slot_index>` replaces that slot's credential now, which invalidates it for every holder |
 
@@ -198,7 +248,8 @@ go test github.com/nicois/openbao-cloud-creds/...     # unit + fake-backed integ
 make test-conformance                                  # every shared test category × every plugin, plus the coverage matrix
 make test-e2e                                          # plugin binaries in a live OpenBao, driven over HTTP through the lease lifecycle
 make smoke-test                                        # register every plugin in a live OpenBao dev server
-make test-cloud-real-do                                # REAL DigitalOcean API: creates and deletes real PATs (opt-in)
+make test-cloud-real-do                                # REAL DigitalOcean API: real PATs and one real Spaces key (opt-in)
+make test-cloud-real-do-spaces                         # REAL DO Spaces-key API only: creates and deletes a real access key (opt-in, never run)
 make test-cloud-real-aws                               # REAL AWS STS: assume-role mints against a real account (opt-in, $0)
 make build-standalone                                  # every module builds without the workspace
 make dist                                              # release artifacts + SHA256SUMS
@@ -209,9 +260,9 @@ make lint                                              # golangci-lint v2 across
 
 `make test-cloud-real-aws` calls real AWS STS with an IAM user's access key you supply (`CLOUDREAL_AWS_KEY=access_key_id:secret_access_key` plus `CLOUDREAL_AWS_ROLE_ARN`). It costs nothing (IAM and STS are unmetered) and creates nothing that needs deleting — STS sessions cannot be revoked, so every duration it asks for is the shortest the assertion allows and they expire on their own. The minter needs only `sts:AssumeRole` on the target role; the target role's trust policy must name that user and allow **both** `sts:AssumeRole` and `sts:TagSession`, and needs no permissions of its own. It confirmed what a fake cannot: the credential AWS returns actually authenticates, and STS grants exactly the duration asked for. It also found [KI-010](docs/known-issues.md).
 
-`make test-cloud-real-do` calls DigitalOcean with a PAT you supply (`CLOUDREAL_DO_TOKEN`, or `.env.cloud-real`) and **creates and deletes real personal access tokens**, so use a dedicated, disposable account. It existed to probe the one assumption no fake can test — that the undocumented `POST /v2/tokens` works headlessly — and the answer is **no**: with a full-access PAT, token management is refused at DigitalOcean's edge gateway while eleven other endpoints on the same token succeed, so **no PAT can mint and `credential-do` cannot issue against real DigitalOcean** ([KI-009](docs/known-issues.md)). The plugin remains this repo's code-shape reference and the origin of the DO fake, and is not presented as production-viable; the test's job is now to pin that finding and fail loudly if DigitalOcean ever changes it. The other eight clouds have no real-cloud test; see [`docs/free-account-viability.md`](docs/free-account-viability.md) for the plan and what each would cost.
+`make test-cloud-real-do` calls DigitalOcean with a PAT you supply (`CLOUDREAL_DO_TOKEN`, or `.env.cloud-real`) and **creates and deletes real credentials**, so use a dedicated, disposable account: its `-run TestRealDO` matches both DO probes, so it exercises personal access tokens *and* mints one real Spaces key. It existed to probe the one assumption no fake can test — that the undocumented `POST /v2/tokens` works headlessly — and the answer is **no**: with a full-access PAT, token management is refused at DigitalOcean's edge gateway while eleven other endpoints on the same token succeed, so **no PAT can mint and the `token` credential type cannot issue against real DigitalOcean** ([KI-009](docs/known-issues.md)). That type remains this repo's code-shape reference and the origin of the DO fake, and is not presented as production-viable; the test's job is now to pin that finding and fail loudly if DigitalOcean ever changes it. **The Spaces probe (`make test-cloud-real-do-spaces`) has never been run**, because no DO token has been reachable from the development environment — so both Spaces credential types are green at every layer below the real cloud and unverified against it, which is a weaker claim than the token type's and should not be read as a stronger one. The other eight clouds have no real-cloud test; see [`docs/free-account-viability.md`](docs/free-account-viability.md) for the plan and what each would cost.
 
-**Testing is conformance-first.** With ten near-identical plugins, a missing test looks exactly like a passing one, so every invariant that is about a plugin's own behaviour rather than a cloud's wire format is written once in `pkg/plugintest` and applied to every plugin from a single table in the test-only [`conformance/`](conformance/) module: `reload`, `lease`, `perturbation`, `revoke`, `capability`, `minter-visibility`, `reconciler-safety`, `error-taxonomy`, `containment`. A table entry is a **subject** rather than a cloud — `credential-do` registers two, one per credential type — because a harness declares one credential shape, one secret type and one tracking prefix, which is exactly what a client and the lease core see. A plugin missing from that table fails the build; a category that genuinely does not apply to a cloud must be *declared* with a reason (`Harness.Skips`) and is printed by `make test-conformance` as one reviewable line, rather than hidden in a `t.Skip`. Per-cloud vocabulary — mint shapes, deny knobs, unexported internals — stays in each plugin's own tests.
+**Testing is conformance-first.** With ten near-identical plugins, a missing test looks exactly like a passing one, so every invariant that is about a plugin's own behaviour rather than a cloud's wire format is written once in `pkg/plugintest` and applied to every plugin from a single table in the test-only [`conformance/`](conformance/) module: `reload`, `lease`, `perturbation`, `revoke`, `capability`, `minter-visibility`, `reconciler-safety`, `error-taxonomy`, `containment`, `rotation`. A table entry is a **subject** rather than a cloud — `credential-do` registers three, one per credential type — because a harness declares one credential shape, one secret type and one tracking prefix, which is exactly what a client and the lease core see. A plugin missing from that table fails the build; a category that genuinely does not apply to a cloud must be *declared* with a reason (`Harness.Skips`) and is printed by `make test-conformance` as one reviewable line, rather than hidden in a `t.Skip`. Per-cloud vocabulary — mint shapes, deny knobs, unexported internals — stays in each plugin's own tests.
 
 Above that sits [`e2e/`](e2e/): each plugin built as a binary, registered in a live `bao server -dev` and driven over HTTP through config → minter set → role → issue → lease lookup → renew → revoke → `plugin reload` → re-issue. It exists for what an in-process test cannot see — the plugin's JSON-serialized RPC boundary and OpenBao core's own expiration manager — and it earned its place immediately, finding two live defects (background workers never starting on a reloaded backend, and six plugins advertising renewable leases whose renewal failure made core *revoke* the credential). Rationale in [`docs/decisions.md`](docs/decisions.md); what each layer does and does not prove in [`docs/openbao-integration-gaps.md`](docs/openbao-integration-gaps.md); the rules for contributors and agents in [`AGENTS.md`](AGENTS.md).
 

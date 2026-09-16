@@ -109,6 +109,7 @@ func gcpHarness(t *testing.T) plugintest.Harness {
 			plugintest.CategoryReconcilerSafety: "GCP reconcile prunes local tracking entries only " +
 				"(pkg/localexpiry): impersonation access tokens are not upstream entities, so there is " +
 				"nothing to list and nothing the reconciler could delete",
+			plugintest.CategoryRotation: noSharedCredential,
 		},
 	}
 }

@@ -71,7 +71,7 @@ const (
 	neverExpiresKey = "never_expires"
 )
 
-// The two credential types this plugin issues, selected per ROLE by `credential_type`.
+// The three credential types this plugin issues, selected per ROLE by `credential_type`.
 //
 //   - credentialTypeToken is a personal access token: the original shape, and the one
 //     that CANNOT be minted against real DigitalOcean, because /v2/tokens is refused at
@@ -79,12 +79,32 @@ const (
 //     reference the conformance and e2e layers are built on.
 //   - credentialTypeSpacesKey is an S3-compatible Spaces access key: /v2/spaces/keys IS
 //     reachable with a bearer PAT, so this is what the plugin can actually issue.
+//   - credentialTypeSpacesKeyRotated is the SAME upstream credential on a different
+//     lifecycle: one key per role, re-served to every reader, replaced when it reaches
+//     its rotation age and deleted `overlap_ttl` after that. See spaces_shared.go.
 //
 // Token is the DEFAULT, because every role written before this field existed omits it
 // and must keep issuing exactly what it issued before.
 const (
-	credentialTypeToken     = "token"
-	credentialTypeSpacesKey = "spaces_key"
+	credentialTypeToken            = "token"
+	credentialTypeSpacesKey        = "spaces_key"
+	credentialTypeSpacesKeyRotated = "spaces_key_rotated"
+)
+
+// spacesKeyAccountCap is how many Spaces access keys DigitalOcean allows one ACCOUNT —
+// not one minter — to hold. Named here because it is what several refusals have to explain:
+// the cap is the reason a rotation period has a floor and an overlap has a ceiling, since
+// both decide how many keys are live at once.
+const spacesKeyAccountCap = 200
+
+// Role fields belonging to the rotated Spaces credential type. All three are per-role
+// rather than per-mount because they describe one credential's lifecycle, and two roles
+// on one account routinely want different ones (a 90-day key for a fleet of readers, a
+// weekly key for something more exposed).
+const (
+	fieldRotationPeriod = "rotation_period"
+	fieldRotationJitter = "rotation_jitter"
+	fieldOverlapTTL     = "overlap_ttl"
 )
 
 // Role fields belonging to the Spaces credential type. Region and endpoint are role
@@ -104,18 +124,27 @@ const (
 // type stops having "which cloud" determine "which shape", and the pin check in
 // pathCredsRead is where that is enforced.
 func credentialKindFor(credentialType string) credenvelope.CredentialKind {
-	if credentialType == credentialTypeSpacesKey {
+	switch credentialType {
+	// Both Spaces types emit the same block: a client cannot tell from the credential
+	// whether it is shared, and must not have to. The difference is entirely in the
+	// lifecycle, and the client's side of it is the same either way — re-read before the
+	// lease expires, and use whatever comes back.
+	case credentialTypeSpacesKey, credentialTypeSpacesKeyRotated:
 		return credenvelope.KindS3Credentials
+	default:
+		return credenvelope.KindScopedToken
 	}
-	return credenvelope.KindScopedToken
 }
 
-// The two lease secret types. They are distinct because their revokes are distinct — one
-// deletes a token by id, the other a Spaces key by access key — and OpenBao dispatches
-// revoke on the secret type, so collapsing them would send every revoke down one path.
+// The three lease secret types. They are distinct because their lease ENDINGS are distinct —
+// one deletes a token by id, one a Spaces key by access key, and one deletes nothing at all —
+// and OpenBao dispatches both revoke and renewal on the secret type. Collapsing any two would
+// send every revoke down one path; collapsing the rotated one with either would also make its
+// lease renewable, since framework.Secret.Renewable() is (Renew != nil).
 const (
-	secretTypeToken     = "do_token"
-	secretTypeSpacesKey = "do_spaces_key"
+	secretTypeToken            = "do_token"
+	secretTypeSpacesKey        = "do_spaces_key"
+	secretTypeSpacesKeyRotated = "do_spaces_key_rotated"
 )
 
 // Keys of the S3 credential block. Named by the credential KIND rather than by this
@@ -127,6 +156,14 @@ const (
 	credKeySecretAccessKey = "secret_access_key"
 	credKeyEndpoint        = "endpoint"
 	credKeyRegion          = "region"
+)
+
+// Fields of a tracking record — the per-credential entry under an active-*/ prefix that the
+// capacity counter, the orphan reconciler and the purge lever all read. Named because all three
+// credential types write the same two beside the role.
+const (
+	trackFieldMinter  = "minter"
+	trackFieldCreated = "created"
 )
 
 // internalKeyAccessKey is the lease internal_data key holding the issued Spaces key's

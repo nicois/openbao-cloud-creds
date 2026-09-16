@@ -452,8 +452,9 @@ type is not presented as production-viable. See
 implementation even though it cannot mint").
 
 **Scope narrowed 2026-09-15: this is about one credential TYPE, not the plugin.** A
-`credential-do` role now selects `credential_type=token` (the fenced one) or
-`credential_type=spaces_key`, an S3-compatible Spaces access key minted through
+`credential-do` role now selects `credential_type=token` (the fenced one) or a Spaces
+access key — `credential_type=spaces_key` per lease, or `spaces_key_rotated` shared by a
+role since 2026-09-16 — an S3-compatible credential minted through
 `POST /v2/spaces/keys` — a path that is in DigitalOcean's published spec, declared
 `bearer_auth`, and reported to work in production with a plain bearer PAT
 ([`cloud-credential-research.md`](cloud-credential-research.md)). So "credential-do cannot
