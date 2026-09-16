@@ -66,10 +66,14 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/capability v0.1.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.1.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.1.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.1.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.1.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/mintercapacity v0.1.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.1.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.1.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.1.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/upstreampurge v0.1.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/worker v0.1.0 // indirect
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/openbao/go-kms-wrapping/v2 v2.8.0 // indirect
@@ -129,3 +133,11 @@ replace github.com/nicois/openbao-cloud-creds/pkg/telemetry => ../pkg/telemetry
 replace github.com/nicois/openbao-cloud-creds/pkg/worker => ../pkg/worker
 
 replace github.com/nicois/openbao-cloud-creds/pkg/ownertag => ../pkg/ownertag
+
+replace github.com/nicois/openbao-cloud-creds/pkg/clusterrole => ../pkg/clusterrole
+
+replace github.com/nicois/openbao-cloud-creds/pkg/minteraffinity => ../pkg/minteraffinity
+
+replace github.com/nicois/openbao-cloud-creds/pkg/mintercapacity => ../pkg/mintercapacity
+
+replace github.com/nicois/openbao-cloud-creds/pkg/upstreampurge => ../pkg/upstreampurge
