@@ -14,11 +14,13 @@ LINT_DIRS := $(filter-out e2e,$(shell sed -n 's|^[[:space:]]*\./||p' go.work))
 # Code behind a build tag is invisible to a lint run that does not pass the tag, so
 # each tagged surface gets its own pass rather than being left unlinted. Format is
 # <dir>:<tag>.
-TAGGED_LINT_TARGETS := e2e:e2e plugins/credential-do:cloud_real plugins/credential-aws:cloud_real
+TAGGED_LINT_TARGETS := e2e:e2e plugins/credential-do:cloud_real plugins/credential-aws:cloud_real \
+	plugins/credential-do:scale
 E2E_BUILD_TAG := e2e
 CLOUD_REAL_BUILD_TAG := cloud_real
+SCALE_BUILD_TAG := scale
 
-.PHONY: build build-standalone dist test test-conformance test-e2e test-cloud-real-do test-cloud-real-do-spaces test-cloud-real-aws lint fmt clean smoke-test
+.PHONY: build build-standalone dist test test-conformance test-e2e test-cloud-real-do test-cloud-real-do-spaces test-cloud-real-aws test-scale lint fmt clean smoke-test
 
 build:
 	go build $(MODULE_PREFIX)/...
@@ -54,6 +56,18 @@ test:
 test-conformance:
 	go test $(MODULE_PREFIX)/conformance/... -v -run TestConformanceMatrix
 	go test -race $(MODULE_PREFIX)/conformance/...
+
+# Measures what the shared-key lifecycle tick COSTS at fleet scale, with the real
+# worker running, inside a testing/synctest bubble so a day of five-minute ticks
+# takes seconds of real time instead of a day. Minutes rather than milliseconds, so
+# it is tagged out of the default suite — but it is a measurement to run
+# periodically and TRACK, not a test to skip: whether the sweeper needs an index is
+# a question about these numbers.
+#
+#   SCALE_ROLES=500000 SCALE_TICKS=24 make test-scale
+test-scale:
+	cd plugins/credential-do && go test -tags=$(SCALE_BUILD_TAG) -count=1 -v \
+		-timeout 3600s -run TestScale ./...
 
 # Drives the plugins through a REAL OpenBao dev server as registered plugin
 # processes: HTTP API in, plugin binary out, real leases, real revocation on lease
