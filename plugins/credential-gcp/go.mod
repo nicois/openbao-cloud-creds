@@ -2,16 +2,40 @@ module github.com/nicois/openbao-cloud-creds/plugins/credential-gcp
 
 go 1.27.0
 
+replace (
+	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../../pkg/cloudconfig
+	github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../../pkg/credenvelope
+	github.com/nicois/openbao-cloud-creds/pkg/localexpiry => ../../pkg/localexpiry
+	github.com/nicois/openbao-cloud-creds/pkg/recovery => ../../pkg/recovery
+	github.com/nicois/openbao-cloud-creds/pkg/worker => ../../pkg/worker
+)
+
+replace github.com/nicois/openbao-cloud-creds/pkg/capability => ../../pkg/capability
+
+replace github.com/nicois/openbao-cloud-creds/pkg/telemetry => ../../pkg/telemetry
+
+replace github.com/nicois/openbao-cloud-creds/pkg/reconciler => ../../pkg/reconciler
+
+replace github.com/nicois/openbao-cloud-creds/pkg/minteraffinity => ../../pkg/minteraffinity
+
+replace github.com/nicois/openbao-cloud-creds/pkg/clusterrole => ../../pkg/clusterrole
+
+replace github.com/nicois/openbao-cloud-creds/pkg/mintercapacity => ../../pkg/mintercapacity
+
 require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-metrics v0.5.4
 	github.com/nicois/openbao-cloud-creds/pkg/capability v0.1.0
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.1.0
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.1.0
 	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/mintercapacity v0.1.0
 	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.1.0
 	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.1.0
 	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.1.0
+	github.com/nicois/openbao-cloud-creds/pkg/upstreampurge v0.1.0
 	github.com/nicois/openbao-cloud-creds/pkg/worker v0.1.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
@@ -49,46 +73,21 @@ require (
 	github.com/mitchellh/go-testing-interface v1.14.2-0.20210821155943-2d9075ca8770 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.1.0
-	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.1.0
-	github.com/nicois/openbao-cloud-creds/pkg/mintercapacity v0.1.0
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/openbao/go-kms-wrapping/v2 v2.8.0 // indirect
 	github.com/openbao/openbao/api/v2 v2.6.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260523011958-0a33c5d7ca68 // indirect
-	google.golang.org/grpc v1.82.1 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace (
-	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig => ../../pkg/cloudconfig
-	github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../../pkg/credenvelope
-	github.com/nicois/openbao-cloud-creds/pkg/localexpiry => ../../pkg/localexpiry
-	github.com/nicois/openbao-cloud-creds/pkg/recovery => ../../pkg/recovery
-	github.com/nicois/openbao-cloud-creds/pkg/worker => ../../pkg/worker
-)
-
-replace github.com/nicois/openbao-cloud-creds/pkg/capability => ../../pkg/capability
-
-replace github.com/nicois/openbao-cloud-creds/pkg/telemetry => ../../pkg/telemetry
-
-replace github.com/nicois/openbao-cloud-creds/pkg/reconciler => ../../pkg/reconciler
-
-replace github.com/nicois/openbao-cloud-creds/pkg/minteraffinity => ../../pkg/minteraffinity
-
-replace github.com/nicois/openbao-cloud-creds/pkg/clusterrole => ../../pkg/clusterrole
-
-replace github.com/nicois/openbao-cloud-creds/pkg/mintercapacity => ../../pkg/mintercapacity
-
-require github.com/nicois/openbao-cloud-creds/pkg/upstreampurge v0.1.0
 
 replace github.com/nicois/openbao-cloud-creds/pkg/upstreampurge => ../../pkg/upstreampurge
