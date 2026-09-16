@@ -468,11 +468,14 @@ func str(t *testing.T, data map[string]interface{}, key string) string {
 // reach more than one.
 //
 // This is what makes a minter set a way to multiply an upstream rate limit rather than only to
-// survive a failure. Where a cloud meters per account — DigitalOcean does — credentials minted by
-// different accounts draw on separate budgets, so a set spanning accounts multiplies the throughput
-// available to a fleet. That only works if a worker's requests land consistently on one account:
-// random selection sprays every client across every budget, so one heavy client degrades all of
-// them and exhausting any single account affects everybody.
+// survive a failure. The upstream meters per CREDENTIAL, not per account — measured on
+// DigitalOcean 2026-09-03: per token, 5000/hour each, and two credentials from ONE account do not
+// share a budget. So each minter carries its own budget for the mint, list and revoke calls a
+// plugin makes, and a set multiplies ISSUANCE throughput within a single account; it does not
+// multiply a client's own throughput, since an issued credential is metered on itself whichever
+// minter made it. That only works if a worker's requests land consistently on one minter: random
+// selection sprays every client across every budget, so one heavy client degrades all of them and
+// exhausting any single minter's budget affects everybody.
 //
 // Two properties, and both matter:
 //

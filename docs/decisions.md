@@ -577,15 +577,21 @@ A minter set began as redundancy: several credentials so that one failing does n
 It said nothing about WHICH minter serves a given read, and the answer was Go's map iteration
 order — effectively random per request.
 
-Random is wrong when the upstream meters per **account**. DigitalOcean limits requests per account,
-so credentials minted by different accounts draw on separate budgets, and a set spanning accounts is
-a way to multiply the throughput available to a fleet of workers. That only pays off if a worker's
-requests land consistently on one account.
+Random is wrong when the upstream meters per **credential**. This paragraph originally said "per
+account", and that was refuted the next day by measurement — see the correction below: DigitalOcean
+meters **per token**, 5000/hour each, so two credentials from ONE account do not share a budget.
+
+What survives is the reason a set is worth spreading across, restated correctly: each minter is
+itself a token with its own budget, so K minters give K times the throughput for the mint, list and
+revoke calls this plugin makes — **within a single account**, which is a better story than the one
+this paragraph told. What does NOT follow is that a set multiplies a *client's* throughput, because
+an issued credential is metered on itself whichever minter made it. That only pays off if a worker's
+requests land consistently on one minter.
 
 **Isolation is the larger half of the argument, not balancing.** With random selection every client
-draws on every budget: one heavy client degrades all of them, and exhausting any single account
-affects everybody. With stable affinity a client draws on one budget, so a heavy or misbehaving
-client exhausts its own shard and the others are untouched. It is a bulkhead.
+draws on every budget: one heavy client degrades all of them, and exhausting any single minter's
+budget affects everybody. With stable affinity a client draws on one budget, so a heavy or
+misbehaving client exhausts its own shard and the others are untouched. It is a bulkhead.
 
 **Rendezvous (highest-random-weight) hashing, not `hash % N`.** Modulo reshuffles nearly every
 client when the set changes size, and a set changes size for ordinary reasons — a minter retired,

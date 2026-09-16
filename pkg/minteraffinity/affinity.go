@@ -7,11 +7,21 @@
 // says nothing about WHICH one serves, and today it is whichever Go's map iteration reaches
 // first — effectively random per request.
 //
-// Random is the wrong answer when the upstream meters per account. DigitalOcean, for one,
-// limits requests per ACCOUNT, so credentials minted by different accounts draw on separate
-// budgets. A set whose minters live in different accounts is therefore a way to multiply the
-// effective limit available to a fleet of workers — but only if a worker's requests
-// consistently land on one account rather than being sprayed across all of them.
+// Random is the wrong answer when the upstream meters per credential. DigitalOcean meters
+// **per token** — measured 2026-09-03: two credentials minted from ONE account, 25 requests spent
+// on the first, and the second's counter fell by one, its own request — at 5000/hour each.
+//
+// Two consequences, and they point in opposite directions. A set does NOT multiply a CLIENT's
+// throughput there, because every issued credential already carries its own budget whichever
+// minter made it. What a set multiplies is ISSUANCE: each minter is itself a token with its own
+// 5000/hour, so K minters give K times the budget for the mint, list and revoke calls this plugin
+// makes — and that holds WITHIN one account, so it needs no multi-account estate. Affinity is what
+// makes a worker's issuance land on one of those budgets consistently rather than spraying across
+// all of them.
+//
+// Do not restate this as a per-account limit: that was the earlier inference, drawn from where a
+// credential's OWNERSHIP comes from, and the measurement refuted it. See docs/decisions.md, "Why
+// minter selection has affinity", for the table of which clouds this has actually been measured on.
 //
 // # Why affinity rather than round-robin
 //

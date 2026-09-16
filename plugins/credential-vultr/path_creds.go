@@ -245,11 +245,11 @@ func (b *backend) selectMinter(setName, affinityKey string, capacity mintercapac
 	}
 	apiURL := b.vultrAPIURL()
 	// Affinity order, not map order. Map iteration is randomised, which spread each client's
-	// requests across every minter — and so across every upstream rate-limit budget, since a
-	// cloud that meters per account gives each minter's account its own. Ordering by a stable
-	// key pins a client to one budget (so a heavy client exhausts its own shard rather than
-	// everybody's) while leaving the rest of the list as its fallback, so redundancy is
-	// unchanged. See pkg/minteraffinity.
+	// requests across every minter — and so across every upstream rate-limit budget, since each
+	// minter is its own credential and is metered as one (measured on DigitalOcean: per token,
+	// 5000/hour each, from ONE account). Ordering by a stable key pins a client to one budget (so
+	// a heavy client exhausts its own shard rather than everybody's) while leaving the rest of the
+	// list as its fallback, so redundancy is unchanged. See pkg/minteraffinity.
 	atCapacity := false
 	for _, id := range minteraffinity.OrderKeys(affinityKey, states) {
 		ms := states[id]

@@ -124,11 +124,13 @@ overlap — the right lever when a credential is merely stale. When it has *leak
 
 ### Spreading a fleet across minters (`shard_key`)
 
-A role's minter set exists for redundancy, but it can also multiply an upstream rate limit: where a
-cloud meters per **account**, credentials minted by different accounts draw on separate budgets.
-Selection is by rendezvous hash of a per-client key, so a client is pinned to one minter and
-different clients spread across the set — and a heavy client exhausts its own shard rather than
-everybody's.
+A role's minter set exists for redundancy, but it can also multiply an upstream rate limit: the
+upstream meters per **credential**, so each minter carries its own budget for the mint, list and
+revoke calls — measured on DigitalOcean at 5000/hour per token, from a single account, so this needs
+no multi-account estate. Selection is by rendezvous hash of a per-client key, so a client is pinned
+to one minter and different clients spread across the set — and a heavy client exhausts its own
+shard rather than everybody's. Note this multiplies *issuance*: a credential you have been issued is
+metered on itself whichever minter made it.
 
 `shard_key` is **optional**:
 
