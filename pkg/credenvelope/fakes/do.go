@@ -25,6 +25,16 @@ type DOServer struct {
 	forbidCreate       bool
 	forbidSpacesCreate bool
 	fenceTokenMgmt     bool
+	// forcedExtraScopes are added to every minted token's reported scopes, and withheldScopes
+	// are removed from them: an API that grants something other than what was asked for. Knobs
+	// rather than default behaviour because DigitalOcean is not observed doing either — token
+	// management is fenced for our account (KI-009), so no recorded 200 exists to read — and a
+	// fake that quietly diverged the two would make the driver's reporting untestable.
+	//
+	// Withholding is the direction that costs a caller something: a credential reported with a
+	// permission it does not carry is refused by the upstream later, far from the role.
+	forcedExtraScopes []string
+	withheldScopes    []string
 }
 
 func NewDOServer() *DOServer {
@@ -167,6 +177,37 @@ func (s *DOServer) SetFenceTokenManagement(fenced bool) {
 	s.fenceTokenMgmt = fenced
 }
 
+// SetForcedExtraScopes makes every minted token report permissions that were not requested.
+func (s *DOServer) SetForcedExtraScopes(scopes []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forcedExtraScopes = scopes
+}
+
+// SetWithheldScopes makes every minted token report FEWER permissions than were requested, so a
+// driver that publishes its own request rather than the response cannot pass.
+func (s *DOServer) SetWithheldScopes(scopes []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.withheldScopes = scopes
+}
+
+// grantedScopes renders what the API decided to grant: what was asked for, plus anything forced,
+// minus anything withheld.
+func grantedScopes(requested, forced, withheld []string) []string {
+	drop := make(map[string]bool, len(withheld))
+	for _, s := range withheld {
+		drop[s] = true
+	}
+	granted := make([]string, 0, len(requested)+len(forced))
+	for _, s := range append(append([]string{}, requested...), forced...) {
+		if !drop[s] {
+			granted = append(granted, s)
+		}
+	}
+	return granted
+}
+
 // fenced reports whether the /v2/tokens route is closed, and if so writes DO's exact
 // edge-gateway refusal.
 func (s *DOServer) fenced(w http.ResponseWriter) bool {
@@ -228,6 +269,7 @@ func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	forbidCreate := s.forbidCreate
+	forced, withheld := s.forcedExtraScopes, s.withheldScopes
 	s.mu.Unlock()
 	if forbidCreate {
 		w.WriteHeader(http.StatusForbidden)
@@ -257,7 +299,7 @@ func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 	token := map[string]interface{}{
 		"id":               id,
 		jsonKeyName:        req.Name,
-		"scopes":           req.Scopes,
+		"scopes":           grantedScopes(req.Scopes, forced, withheld),
 		jsonKeyAccessToken: fmt.Sprintf("dop_v1_fake_%s", id),
 		jsonKeyCreatedAt:   fakeCreatedAt,
 	}

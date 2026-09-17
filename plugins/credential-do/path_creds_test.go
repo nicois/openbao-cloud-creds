@@ -2,6 +2,7 @@ package credentialdo_test
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -314,5 +315,87 @@ func TestCredsIssue_ClassifiesQuotaError(t *testing.T) {
 	// #5: the raw upstream body must NOT leak to the client.
 	if strings.Contains(msg, "server_error") {
 		t.Fatalf("client message leaked upstream detail: %q", msg)
+	}
+}
+
+// issueCreds mints one credential and fails on anything but success.
+func issueCreds(t *testing.T, b logical.Backend, storage logical.Storage) *logical.Response {
+	t.Helper()
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.ReadOperation, Path: "creds/test-role", Storage: storage,
+	})
+	if err != nil {
+		t.Fatalf("creds read failed: %v", err)
+	}
+	if resp == nil || resp.IsError() {
+		t.Fatalf("creds read error: %v", resp)
+	}
+	return resp
+}
+
+// reportedScopes reads the permission list the envelope publishes, from both places it appears: the
+// credential block's typed list and metadata.scope's flat string. Two renderings of one value, so a
+// test checking only one would not notice them diverging.
+func reportedScopes(t *testing.T, resp *logical.Response) ([]string, string) {
+	t.Helper()
+	cred, ok := resp.Data["credential"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected credential map, got %T", resp.Data["credential"])
+	}
+	list, ok := cred["scopes"].([]string)
+	if !ok {
+		t.Fatalf("credential.scopes is %T, not a string list", cred["scopes"])
+	}
+	meta, ok := resp.Data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %T", resp.Data["metadata"])
+	}
+	flat, _ := meta["scope"].(string)
+	return list, flat
+}
+
+// TestCredsReportAGrantWiderThanTheRoleAskedFor: the reason a credential carries a scope list is so
+// a client can CHECK it is scoped the way it expected. A list derived from the role cannot disagree
+// with the role, so publishing the role's own request answered that check from the question — and a
+// client verifying a subset concludes "correctly scoped" about a token that can do more.
+func TestCredsReportAGrantWiderThanTheRoleAskedFor(t *testing.T) {
+	srv := fakes.NewDOServer()
+	defer srv.Close()
+	// Sticky, like every knob on these fakes: restored so nothing later inherits it.
+	srv.SetForcedExtraScopes([]string{"actions:read"})
+	t.Cleanup(func() { srv.SetForcedExtraScopes(nil) })
+
+	b, storage := setupConfiguredBackend(t, srv.URL)
+	list, flat := reportedScopes(t, issueCreds(t, b, storage))
+
+	if !slices.Contains(list, "actions:read") {
+		t.Errorf("the credential reports %v, omitting a permission the token actually carries", list)
+	}
+	if !strings.Contains(flat, "actions:read") {
+		t.Errorf("metadata.scope is %q and disagrees with the credential block %v", flat, list)
+	}
+}
+
+// TestCredsDoNotClaimAScopeTheUpstreamWithheld is the direction that costs a caller something: told
+// the credential carries `write` when it does not, it is refused by DigitalOcean at some later call,
+// far from the role that promised it.
+func TestCredsDoNotClaimAScopeTheUpstreamWithheld(t *testing.T) {
+	srv := fakes.NewDOServer()
+	defer srv.Close()
+	srv.SetWithheldScopes([]string{"write"})
+	t.Cleanup(func() { srv.SetWithheldScopes(nil) })
+
+	b, storage := setupConfiguredBackend(t, srv.URL)
+	list, flat := reportedScopes(t, issueCreds(t, b, storage))
+
+	if slices.Contains(list, "write") {
+		t.Errorf("the credential claims %v, but the upstream withheld `write`; publishing the "+
+			"request tells a client the credential is correctly scoped when it is not", list)
+	}
+	if strings.Contains(flat, "write") {
+		t.Errorf("metadata.scope is %q and still claims a withheld permission", flat)
+	}
+	if !slices.Contains(list, "read") {
+		t.Errorf("the permission that WAS granted is missing from %v", list)
 	}
 }

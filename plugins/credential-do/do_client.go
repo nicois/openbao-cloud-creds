@@ -41,6 +41,12 @@ type tokenResponse struct {
 		ID          string `json:"id"`
 		Name        string `json:"name"`
 		AccessToken string `json:"access_token"`
+		// Scopes is what the API says it granted, which is not necessarily what was asked for.
+		// Decoded because the envelope reports a scope list and the only value worth reporting is
+		// the upstream's own: one derived from the role cannot disagree with the role, so it can
+		// never reveal a divergence. Absent from a response leaves it empty, which the creds path
+		// treats as "no information" rather than "nothing granted".
+		Scopes []string `json:"scopes"`
 	} `json:"token"`
 }
 

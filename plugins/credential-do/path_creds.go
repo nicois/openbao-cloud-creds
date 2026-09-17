@@ -138,6 +138,9 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	setName, minterID, client := args.sel.setID, args.sel.minterID, args.sel.client
 	tokenResp := args.token
 
+	// What the API says it granted, which is not necessarily what the role asked for.
+	published := b.publishedScopes(roleName, role.Scopes, tokenResp)
+
 	emitLeaseIssued(roleName)
 
 	expiresAt := now.Add(role.DefaultTTL)
@@ -146,14 +149,14 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		Role:  roleName,
 		Credential: map[string]interface{}{
 			minterTokenKey: tokenResp.Token.AccessToken,
-			fieldScopes:    role.Scopes,
+			fieldScopes:    published,
 		},
 		ExpiresAt:    expiresAt,
 		TTLSeconds:   int(role.DefaultTTL.Seconds()),
 		Renewable:    true,
 		CredentialID: tokenResp.Token.ID,
 		// DO scopes are fine-grained `<resource>:<verb>` permissions the token carries.
-		Scope:          strings.Join(role.Scopes, ","),
+		Scope:          strings.Join(published, ","),
 		ScopeKind:      credenvelope.ScopeKindScopes,
 		CredentialKind: credentialKindFor(role.credentialType()),
 		IssuedBy:       issuedBy,
@@ -191,6 +194,64 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	resp.Secret.MaxTTL = role.MaxTTL
 
 	return resp
+}
+
+// publishedScopes returns the permission list the envelope must report: what the upstream says it
+// granted, falling back to the role's own request only when the response reports nothing.
+//
+// Publishing the role's request was the bug this replaces. The only reason a credential carries a
+// scope list is so a client can CHECK it is scoped the way it expected, and a list derived from the
+// role cannot disagree with the role — so a grant that differed was structurally invisible rather
+// than absent, and a client verifying a subset concluded "correctly scoped" about a token that
+// could do more.
+//
+// This API's create response carries `scopes`. Whether it ever differs from the request is
+// unverified against the real cloud, because `/v2/tokens` is fenced for our account (KI-009 in
+// docs/known-issues.md) and no recorded 200 exists to read. That is a reason to report what comes
+// back rather than a reason to assume it matches.
+func (b *backend) publishedScopes(roleName string, requested []string, token *tokenResponse) []string {
+	granted := token.Token.Scopes
+	if len(granted) == 0 {
+		// Nothing reported: the role's own list is the best available statement, rather than a
+		// claim about the token that no response supports.
+		return requested
+	}
+	b.logGrantDifference(roleName, requested, granted)
+	return granted
+}
+
+// logGrantDifference reports a granted set that is not the requested set, in either direction. The
+// two mean different things: wider means every credential from this role is broader than the role
+// states, narrower means the role's promise was not kept and the caller will be refused by the
+// upstream at some later call, far from the role that promised it.
+func (b *backend) logGrantDifference(roleName string, requested, granted []string) {
+	if extra := absentFrom(granted, requested); len(extra) > 0 {
+		b.Logger().Warn("the upstream granted permissions this role did not ask for; every "+
+			"credential from this role is broader than the role states, and the role should be "+
+			"written to say so", fieldCloud, cloudName, fieldRole, roleName,
+			"unrequested", strings.Join(extra, ","), "granted", strings.Join(granted, ","))
+	}
+	if withheld := absentFrom(requested, granted); len(withheld) > 0 {
+		b.Logger().Error("the upstream withheld permissions this role asked for; the credential is "+
+			"reported with what it actually carries, and a caller relying on the withheld ones "+
+			"will be refused by the upstream instead", fieldCloud, cloudName, fieldRole, roleName,
+			"withheld", strings.Join(withheld, ","), "granted", strings.Join(granted, ","))
+	}
+}
+
+// absentFrom returns the values of subject that do not appear in reference.
+func absentFrom(subject, reference []string) []string {
+	present := make(map[string]bool, len(reference))
+	for _, v := range reference {
+		present[v] = true
+	}
+	out := make([]string, 0, len(subject))
+	for _, v := range subject {
+		if !present[v] {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
