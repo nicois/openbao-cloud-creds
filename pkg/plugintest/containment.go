@@ -35,6 +35,7 @@ func RunContainmentSuite(t *testing.T, h Harness) {
 		{"DisablingARoleWorksWhileTheCloudRefusesToMint", containDisableWhileMintRefused},
 		{"RevokingUpstreamDeletesWhatTheRoleIssued", containPurgeDeletesIssued},
 		{"ADryRunOfRevokingUpstreamDeletesNothing", containPurgeDryRunDeletesNothing},
+		{"RevokingUpstreamWithNoModeDeletes", containPurgeDefaultsToDeleting},
 		{"RevokingUpstreamTwiceIsACleanNoOp", containPurgeTwiceIsANoOp},
 		{"RevokingUpstreamLeavesTheRoleIssuing", containPurgeLeavesTheRoleIssuing},
 		{"RevokingUpstreamWorksOnADisabledRole", containPurgeWorksOnADisabledRole},
@@ -251,6 +252,42 @@ func containPurgeDryRunDeletesNothing(t *testing.T, h Harness) {
 	}
 	if progress := readProgress(t, b, storage, h.RolePath); progress.Data[purgeKeyArmed] != false {
 		t.Errorf("after a dry run the role reports %s=%v", purgeKeyArmed, progress.Data[purgeKeyArmed])
+	}
+}
+
+// containPurgeDefaultsToDeleting: `mode` is optional and its default is the destructive one.
+// A containment call is often written without it, so the default is part of the endpoint's
+// contract rather than a convenience.
+//
+// Flipping it to dry_run would be the worst available failure for this endpoint: every such
+// call would report a successful purge, having deleted nothing, and the incident would look
+// contained. That is invisible in review — the diff would read as making a destructive
+// endpoint safer.
+func containPurgeDefaultsToDeleting(t *testing.T, h Harness) {
+	requirePurgeable(t, h)
+	b, storage := newConfiguredBackend(t, h)
+
+	before := h.ProvisionedCount()
+	const reads = 2
+	live := credentialsFrom(h, reads)
+	for range reads {
+		readOrFail(t, b, storage, h.IssuePath)
+	}
+
+	resp := TryWrite(t, b, storage, purgePath(h.RolePath), map[string]interface{}{})
+	if resp == nil || resp.IsError() {
+		t.Fatalf("%s with no mode was refused: %v", purgePath(h.RolePath), resp)
+	}
+	if got := resp.Data[purgeKeyMode]; got != purgeModeNormal {
+		t.Fatalf("omitting %s ran in mode %v, want %q: an operator's call written without it "+
+			"must be the one that acts", purgeKeyMode, got, purgeModeNormal)
+	}
+	if got := progressCount(t, resp, purgeKeyDeleted); got != live {
+		t.Errorf("omitting %s reported %s=%d, want %d", purgeKeyMode, purgeKeyDeleted, got, live)
+	}
+	if got := h.ProvisionedCount(); got != before {
+		t.Errorf("the cloud still holds %d credentials, want %d: a call written without %s "+
+			"reported a purge it did not perform", got, before, purgeKeyMode)
 	}
 }
 
