@@ -336,7 +336,7 @@ func issueCreds(t *testing.T, b logical.Backend, storage logical.Storage) *logic
 // reportedScopes reads the permission list the envelope publishes, from both places it appears: the
 // credential block's typed list and metadata.scope's flat string. Two renderings of one value, so a
 // test checking only one would not notice them diverging.
-func reportedScopes(t *testing.T, resp *logical.Response) ([]string, string) {
+func reportedScopes(t *testing.T, resp *logical.Response) (typed []string, flat string) {
 	t.Helper()
 	cred, ok := resp.Data["credential"].(map[string]interface{})
 	if !ok {
@@ -350,7 +350,7 @@ func reportedScopes(t *testing.T, resp *logical.Response) ([]string, string) {
 	if !ok {
 		t.Fatalf("expected metadata map, got %T", resp.Data["metadata"])
 	}
-	flat, _ := meta["scope"].(string)
+	flat, _ = meta["scope"].(string)
 	return list, flat
 }
 
