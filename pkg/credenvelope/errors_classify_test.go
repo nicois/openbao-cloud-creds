@@ -161,3 +161,64 @@ func TestHealthStatusPreservesWhatTheStateMachineReads(t *testing.T) {
 		}
 	}
 }
+
+// An error that already carries a code was classified by a plugin that saw the upstream response, so
+// its own verdict is the authoritative one.
+//
+// This is load-bearing rather than tidy. Callers whose client returns a *PluginError instead of an HTTP
+// status pass StatusNone, which routes here; without unwrapping, a genuine `upstream_auth_failed` fell
+// through to the `internal` default and was then DROPPED by IndictsMinter — so a rejected login would
+// never reach the state machine, and nothing would gate on it.
+func TestClassifyHonoursAnErrorThatStatesItsOwnCode(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		want    ErrorCode
+		indicts bool
+	}{
+		{
+			name:    "a rejected login reaches the state machine",
+			err:     NewError(ErrUpstreamAuthFailed, http.StatusUnauthorized, "invalid credentials"),
+			want:    ErrUpstreamAuthFailed,
+			indicts: true,
+		},
+		{
+			name:    "an unimplemented client does not indict the credential",
+			err:     NewError(ErrUnsupported, http.StatusNotImplemented, "signing is a stub"),
+			want:    ErrUnsupported,
+			indicts: false,
+		},
+		{
+			name:    "a wrapped one is still found",
+			err:     fmt.Errorf("health check: %w", NewError(ErrUpstreamAuthFailed, 401, "nope")),
+			want:    ErrUpstreamAuthFailed,
+			indicts: true,
+		},
+		{
+			name:    "a throttle keeps its own meaning rather than becoming internal",
+			err:     NewError(ErrUpstreamQuotaExceeded, http.StatusTooManyRequests, "slow down"),
+			want:    ErrUpstreamQuotaExceeded,
+			indicts: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Classify(StatusNone, tc.err); got != tc.want {
+				t.Fatalf("Classify(StatusNone, %v) = %q, want %q", tc.err, got, tc.want)
+			}
+			if got := IndictsMinter(Classify(StatusNone, tc.err)); got != tc.indicts {
+				t.Fatalf("IndictsMinter = %v, want %v", got, tc.indicts)
+			}
+		})
+	}
+}
+
+// A transport failure still wins over any code, because it has none: nothing reached the upstream, so
+// there is no upstream verdict to honour.
+func TestClassifyStillPrefersTransportEvidence(t *testing.T) {
+	if got := Classify(StatusNone, &net.DNSError{IsNotFound: true}); got != ErrUpstreamUnavailable {
+		t.Fatalf("a DNS failure classified as %q, want %q", got, ErrUpstreamUnavailable)
+	}
+	if got := Classify(StatusNone, context.DeadlineExceeded); got != ErrUpstreamTimeout {
+		t.Fatalf("a deadline classified as %q, want %q", got, ErrUpstreamTimeout)
+	}
+}

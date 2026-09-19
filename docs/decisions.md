@@ -1370,7 +1370,7 @@ mapped to 501, and emitted by nothing. Since no code path ever produced it, no c
 can have observed it, so removing it breaks nobody — and leaving it would keep implying
 a behaviour that does not exist.
 
-## Why capability probes are rate-limited but not health-gated, and cached but not capped
+## Why capability probes are rate-limited, health-gated on role writes only, and cached but not capped
 
 A capability probe is a real mint against the cloud's real quota. It was outside
 every mechanism this project has for bounding real mints, which produced three
@@ -1382,14 +1382,52 @@ open, and a probe's own `429` opening one. There is nothing to weigh here — th
 quota is shared with the read path by definition, so a probe outside the breaker
 hammers a cloud that has just refused a caller.
 
-**Health gating: deliberately not.** The obvious implementation is
-`StateMachine.TryAcquire`, which couples the cooldown to serviceability. It is
-wrong here, for a reason that only shows up in the recovery path: an operator
-replacing a failed credential writes *the same minter id*, so a state machine still
-in `auth_failing` from the old credential would refuse the write that repairs it.
-The set would be unfixable except by turning verification off. So probes consult
-`InRateLimitCooldown` and never claim the half-open probe, which stays reserved for
-issuance for the reason already recorded in `pkg/recovery/ratelimit.go`.
+**Health gating: on a role write, and only there (revised 2026-09-19).** The obvious
+implementation is `StateMachine.TryAcquire`, which couples the cooldown to
+serviceability and applies to every probe. That is wrong, for a reason which only
+shows up in the recovery path: an operator replacing a failed credential writes *the
+same minter id*, so a state machine still in `auth_failing` from the old credential
+would refuse the write that repairs it, and the set would be unfixable except by
+turning verification off. So probes consult `InRateLimitCooldown` and never claim the
+half-open probe, which stays reserved for issuance for the reason already recorded in
+`pkg/recovery/ratelimit.go`.
+
+What that argument actually establishes is narrower than "not health-gated", which is
+how it was first written here. It rules out gating in `Limiter.acquire`, because
+acquire runs for set writes and role writes alike. It says nothing against gating the
+operation that cannot repair anything: `Gate.VerifyRole` now refuses before probing
+when any active minter of the bound set has a nonzero
+`StateMachine.ConsecutiveAuthFailures()`, answering `upstream_auth_failed`. Nothing
+about a role write changes a credential, so the unfixable-set problem cannot arise
+there, while the cost of not gating is real — a cloud that locks an account out after
+three consecutive rejected logins (DigitalOcean's console) loses the tries the repair
+needs to an operator enabling roles one at a time against a login already refusing them.
+
+**One rejection, not the `auth_failing` state**, and that distinction is the whole gate.
+Reaching that state takes two rejections at least `AuthFailThreshold` apart, so two
+inside that window leave it unset while two of three tries are spent — and the probe
+would spend the third. Hence a counter of rejected logins since the last success, which
+is what a lockout counts: separate from `ConsecutiveFailures` because a 503 is not a
+rejected credential, so it neither adds to the tally nor clears it, and only a success
+does.
+
+An asynchronous alternative — a third "provisional" role state, promoted by a worker
+once the minter recovers — was considered and rejected, because `auth_failing` is
+sticky (only `RecordSuccess` leaves it). A worker gated on it waits for an operator to
+repair the credential, and once they have, an ordinary write succeeds: promotion would
+converge unattended only where a synchronous write would have succeeded anyway, and
+never in the case it was meant to cover. It would also put a lifecycle field on a role
+struct that embeds no `Versioned` (see the entry below), where an older binary's
+rewrite would silently drop it and turn a provisional role into an enabled one.
+
+The asymmetry is what needs protecting, so both directions are tested: a role write
+refused, a set write NOT refused, `disabled=true` still landing, and a healthy minter
+still probed. Gating the set write makes the third of those fail.
+
+The trigger is fenced per cloud as well, by
+`capability/ProbeRefusedAfterOneRejectedLogin`, which spends one login on an ordinary
+credential read and then asserts the next role write is refused having minted nothing.
+Weakening the gate back to the `auth_failing` state fails it on nine of twelve subjects.
 
 **Recording: successes and rate limits only.** A probe that mints is a successful
 upstream mint and is recorded as health. A probe *refused on privilege grounds* is

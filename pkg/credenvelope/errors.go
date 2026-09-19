@@ -191,6 +191,16 @@ func classifyTransport(err error) ErrorCode {
 	if err == nil {
 		return ErrInternal
 	}
+	// An error that already states its own code is authoritative: it came from a plugin's own
+	// classifier, which saw the upstream response. Without this, a *PluginError carrying
+	// upstream_auth_failed falls through to the `internal` default below and is then DROPPED by
+	// IndictsMinter -- so a genuine rejected login recorded through Classify(StatusNone, err) would
+	// never reach the state machine. That is a trap rather than a behaviour: the only callers passing
+	// StatusNone are the ones whose client hands back a PluginError instead of a status.
+	var plugin *PluginError
+	if errors.As(err, &plugin) && plugin.Code != "" {
+		return plugin.Code
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return ErrUpstreamTimeout
 	}

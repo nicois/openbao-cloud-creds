@@ -179,6 +179,12 @@ func (sm *StateMachine) serviceable(_ time.Time) bool {
 func (sm *StateMachine) RetryIn(now time.Time) time.Duration {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+	return sm.retryInLocked(now)
+}
+
+// retryInLocked is RetryIn's body, for callers already holding the lock, so Snapshot can compute
+// every field under one.
+func (sm *StateMachine) retryInLocked(now time.Time) time.Duration {
 	if !sm.serviceable(now) {
 		return 0 // not a rate-limit problem; waiting will not fix it
 	}
@@ -266,25 +272,39 @@ func ParseRetryAfter(header http.Header, now time.Time) time.Duration {
 type Snapshot struct {
 	State               string `json:"state"`
 	ConsecutiveFailures int    `json:"consecutive_failures"`
-	LastSuccessAt       string `json:"last_success_at,omitempty"`
-	Selectable          bool   `json:"selectable"`
-	RateLimited         bool   `json:"rate_limited"`
-	RetryInSeconds      int    `json:"retry_in_seconds,omitempty"`
+	// ConsecutiveAuthFailures is the lockout-relevant count: rejected logins since the last good one.
+	ConsecutiveAuthFailures int    `json:"consecutive_auth_failures"`
+	LastSuccessAt           string `json:"last_success_at,omitempty"`
+	Selectable              bool   `json:"selectable"`
+	RateLimited             bool   `json:"rate_limited"`
+	RetryInSeconds          int    `json:"retry_in_seconds,omitempty"`
 }
 
 // Snapshot renders the machine's current state. It deliberately exposes no
 // credential material and no upstream error text — only the operator-facing facts.
+//
+// One RLock for the whole snapshot, rather than a stack of locking getters. Each getter is
+// individually safe, but between them a concurrent Record or RecordSuccess can land, and the caller
+// then receives a state that never existed: `state: auth_failing` beside
+// `consecutive_auth_failures: 0`, or a cooldown with no retry. That matters more than it reads,
+// because this snapshot is not only for human eyes -- the reconcile script fetches it over HTTP and
+// refuses an --enable run on one of these fields, so a torn read is a gate deciding on a state the
+// minter was never in.
 func (sm *StateMachine) Snapshot(now time.Time) Snapshot {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
 	snap := Snapshot{
-		State:               string(sm.State()),
-		ConsecutiveFailures: sm.ConsecutiveFailures(),
-		Selectable:          sm.Selectable(now),
-		RateLimited:         sm.InRateLimitCooldown(now),
+		State:                   string(sm.state),
+		ConsecutiveFailures:     sm.consecutiveFailures,
+		ConsecutiveAuthFailures: sm.consecutiveAuthFailures,
+		Selectable:              !now.Before(sm.cooldownUntil) && sm.serviceable(now),
+		RateLimited:             now.Before(sm.cooldownUntil) || sm.rateLimitStrikes > 0,
 	}
-	if last := sm.LastSuccessAt(); !last.IsZero() {
-		snap.LastSuccessAt = last.UTC().Format(time.RFC3339)
+	if !sm.lastSuccessAt.IsZero() {
+		snap.LastSuccessAt = sm.lastSuccessAt.UTC().Format(time.RFC3339)
 	}
-	if retryIn := sm.RetryIn(now); retryIn > 0 {
+	if retryIn := sm.retryInLocked(now); retryIn > 0 {
 		snap.RetryInSeconds = int(retryIn.Seconds())
 	}
 	return snap

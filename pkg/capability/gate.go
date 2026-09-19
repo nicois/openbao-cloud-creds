@@ -99,6 +99,11 @@ func (g Gate) VerifySuccessor(ctx context.Context, storage logical.Storage, setN
 // a compromised minter, a revoked key, an account locked out — so a probe standing
 // in front of it would make the containment lever fail exactly when it is needed. A
 // set write excludes disabled roles for the same reason (RolesBoundTo).
+//
+// Nor is an enabled role probed against a minter already known to be failing
+// authentication. The probe would spend a login on an account that is refusing us,
+// which on a cloud that locks out after a few attempts is how the remaining attempts
+// get burned while the operator is still enabling roles one at a time.
 func (g Gate) VerifyRole(ctx context.Context, storage logical.Storage, setName string, roleJSON []byte, checks ChecksFunc) *logical.Response {
 	if !g.Enabled || disabledRole(roleJSON) {
 		return nil
@@ -110,7 +115,41 @@ func (g Gate) VerifyRole(ctx context.Context, storage logical.Storage, setName s
 	if set == nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", setName)
 	}
+	if refusal := g.refuseLoginRejected(set); refusal != nil {
+		return refusal
+	}
 	return g.run(ctx, storage, checks(set, roleJSON))
+}
+
+// refuseLoginRejected rejects the write when any minter the probe would use has had a login
+// rejected since its last success, naming which one.
+//
+// ANY rather than ALL, because the probe fans out to every active minter in the set:
+// one member with a rejected login is one wasted login however healthy its siblings are.
+//
+// This is deliberately not symmetric with a set write. The rejected-login count clears
+// only on a success, so gating the set write too would make a failed
+// minter unrepairable — the operator's fix is to write a working credential under the
+// same minter id, and that write is exactly what would be refused. Role writes have
+// no such problem: nothing about a role changes a credential.
+func (g Gate) refuseLoginRejected(set *cloudconfig.MinterSet) *logical.Response {
+	active := cloudconfig.ActiveMinters(set.Minters)
+	for i := range active {
+		failing := g.Limiter.loginRejected(active[i].ID)
+		if failing == nil {
+			continue
+		}
+		if g.Logger != nil {
+			g.Logger.Warn("capability verification refused: the minter is failing authentication",
+				"cloud", g.Cloud, "minter_id", failing.Minter,
+				"consecutive_auth_failures", failing.Failures)
+		}
+		return credenvelope.ErrorResponse(credenvelope.ErrUpstreamAuthFailed,
+			"minter capability verification could not run: %v. Repair or retire that minter "+
+				"before enabling roles bound to it; a minter-set write is not gated on this, so "+
+				"replacing its credential is the way out", failing)
+	}
+	return nil
 }
 
 // disabledRole reports whether the role being written is turned off. An unparseable

@@ -7,8 +7,11 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -233,5 +236,158 @@ func TestGate_VerifyRoleSkipsADisabledRole(t *testing.T) {
 	}
 	if len(probed) != 0 {
 		t.Fatalf("a disabled role was probed: %v", probed)
+	}
+}
+
+// loginRejectedLimiter returns a limiter whose named minter has had ONE rejected login.
+//
+// One, deliberately: that is the whole point of the gate. The minter is still in TransientFailing --
+// reaching AuthFailing needs a second rejection at least AuthFailThreshold later -- and yet one of the
+// account's three tries is already spent, so the next probe is not free. Driving the real state machine
+// rather than faking a state is what makes this agree with what issuance sees.
+func loginRejectedLimiter(t *testing.T, minterID string) *Limiter {
+	t.Helper()
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	sm := newSM()
+	sm.RecordUpstream(http.StatusUnauthorized, nil, now)
+	if got := sm.State(); got == recovery.AuthFailing {
+		t.Fatalf("fixture reached auth_failing on one rejection; the gate would then prove nothing "+
+			"about the window before that state, which is the window it exists for (state=%q)", got)
+	}
+	if got := sm.ConsecutiveAuthFailures(); got != 1 {
+		t.Fatalf("fixture has %d rejected logins since its last success, want 1", got)
+	}
+	return &Limiter{
+		States: func(id string) *recovery.StateMachine {
+			if id == minterID {
+				return sm
+			}
+			return nil
+		},
+		Now: func() time.Time { return now.Add(time.Minute) },
+	}
+}
+
+// Enabling a role must not spend a login on an account that is already refusing us.
+// DigitalOcean's console locks out after three consecutive rejected logins, so an operator
+// enabling roles one at a time can burn the attempts that the repair itself needs —
+// and a probe cannot tell them anything a failing minter has not already said.
+func TestGate_RoleWriteRefusedAfterOneRejectedLogin(t *testing.T) {
+	storage := &logical.InmemStorage{}
+	putMinterSet(t, storage, twoMinterSet())
+
+	var probed []string
+	gate := Gate{Cloud: "test", Enabled: true, Limiter: loginRejectedLimiter(t, "minter-2")}
+	resp := gate.VerifyRole(t.Context(), storage, setAlpha,
+		[]byte(`{"name":"role-a"}`), probeRecorder(&probed, nil))
+
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("a role write was allowed to probe a minter whose login had just been rejected: %v", resp)
+	}
+	if len(probed) != 0 {
+		t.Fatalf("the write was refused but probes ran anyway (%v); the refusal exists to spend "+
+			"no login at all", probed)
+	}
+	message := resp.Error().Error()
+	if code, _ := credenvelope.CodeOf(message); code != credenvelope.ErrUpstreamAuthFailed {
+		t.Errorf("refusal carries %q, want %q: a client must be able to tell a wrong credential "+
+			"from a cooldown, because only one of them is worth retrying (message: %q)",
+			code, credenvelope.ErrUpstreamAuthFailed, message)
+	}
+	if !strings.Contains(message, "minter-2") {
+		t.Errorf("the refusal does not name which minter is failing: %q. A set can hold several, "+
+			"and the operator has to know which one to repair", message)
+	}
+}
+
+// A healthy minter with a state machine must still be probed. Without this the
+// previous test passes just as well for a check that refuses everything.
+func TestGate_RoleWriteProbesAHealthyMinter(t *testing.T) {
+	storage := &logical.InmemStorage{}
+	putMinterSet(t, storage, twoMinterSet())
+
+	var probed []string
+	sm := newSM()
+	gate := Gate{Cloud: "test", Enabled: true, Limiter: &Limiter{
+		States: func(string) *recovery.StateMachine { return sm },
+	}}
+	if resp := gate.VerifyRole(t.Context(), storage, setAlpha,
+		[]byte(`{"name":"role-a"}`), probeRecorder(&probed, nil)); resp != nil {
+		t.Fatalf("a healthy minter's role write was refused: %v", resp.Error())
+	}
+	if len(probed) == 0 {
+		t.Fatal("a healthy minter was not probed, so the write committed on no evidence")
+	}
+}
+
+// The repair for a rejected credential is writing a working one under the same minter
+// id, and the rejected-login count clears only on a success. Gating the SET write on
+// the same state would therefore refuse the only write that can end it, leaving the
+// set permanently unfixable.
+func TestGate_SetWriteIsNotRefusedAfterARejectedLogin(t *testing.T) {
+	storage := &logical.InmemStorage{}
+	putRole(t, storage, "role-a", map[string]interface{}{"name": "role-a", "minter_set": setAlpha, "shape": "read"})
+
+	var probed []string
+	gate := Gate{Cloud: "test", Enabled: true, Limiter: loginRejectedLimiter(t, "minter-1")}
+	if resp := gate.VerifySet(t.Context(), storage, twoMinterSet(), probeRecorder(&probed, nil)); resp != nil {
+		t.Fatalf("the write that repairs a failed minter was refused: %v", resp.Error())
+	}
+	if len(probed) == 0 {
+		t.Fatal("the replacement credential was accepted without being probed, so a minter that " +
+			"authenticates but cannot mint would silently become the set every bound role draws from")
+	}
+}
+
+// Containment must survive the incident it exists for. A rejected credential is one
+// of the reasons an operator reaches for disabled=true, so that write must land while
+// the account is refusing us.
+func TestGate_DisablingARoleStillWorksAfterARejectedLogin(t *testing.T) {
+	storage := &logical.InmemStorage{}
+	putMinterSet(t, storage, twoMinterSet())
+
+	var probed []string
+	gate := Gate{Cloud: "test", Enabled: true, Limiter: loginRejectedLimiter(t, "minter-1")}
+	if resp := gate.VerifyRole(t.Context(), storage, setAlpha,
+		[]byte(`{"name":"role-a","disabled":true}`), probeRecorder(&probed, nil)); resp != nil {
+		t.Fatalf("the containment lever was refused after a minter's login was rejected: %v", resp.Error())
+	}
+	if len(probed) != 0 {
+		t.Fatalf("a disabled role was probed: %v", probed)
+	}
+}
+
+// A throttle is not a rejected credential, and the two must not collapse into one answer. 429 and 503
+// both walk a minter through the same generic failure bookkeeping, so a gate keyed on "any consecutive
+// failure" would refuse a role write because the cloud was briefly busy -- and tell the operator to
+// repair a credential that is fine. The auth counter exists to keep those apart.
+func TestGate_RoleWriteIsNotRefusedForANonAuthFailure(t *testing.T) {
+	storage := &logical.InmemStorage{}
+	putMinterSet(t, storage, twoMinterSet())
+
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	sm := newSM()
+	sm.RecordUpstream(http.StatusInternalServerError, nil, now)
+	sm.RecordUpstream(http.StatusBadGateway, nil, now.Add(time.Second))
+	if got := sm.ConsecutiveFailures(); got < 2 {
+		t.Fatalf("fixture recorded %d generic failures, want at least 2", got)
+	}
+	if got := sm.ConsecutiveAuthFailures(); got != 0 {
+		t.Fatalf("fixture has %d rejected logins after two 5xx, want 0", got)
+	}
+
+	var probed []string
+	gate := Gate{Cloud: "test", Enabled: true, Limiter: &Limiter{
+		States: func(string) *recovery.StateMachine { return sm },
+		Now:    func() time.Time { return now.Add(time.Minute) },
+	}}
+	if resp := gate.VerifyRole(t.Context(), storage, setAlpha,
+		[]byte(`{"name":"role-a"}`), probeRecorder(&probed, nil)); resp != nil {
+		t.Fatalf("a role write was refused because the upstream had returned 5xx: %v. That is not a "+
+			"rejected credential, and refusing here would send an operator to repair a working "+
+			"minter", resp.Error())
+	}
+	if len(probed) == 0 {
+		t.Fatal("the write committed without probing, so the 5xx suppressed verification instead")
 	}
 }

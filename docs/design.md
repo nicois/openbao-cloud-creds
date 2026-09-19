@@ -204,9 +204,22 @@ upstream_creds/<cloud>/<cred_id> → {
   created_at: <iso8601>,
   last_success_at: <iso8601>,
   state: "healthy" | "transient_failing" | "auth_failing" | "missing",
-  consecutive_failures: <int>
+  consecutive_failures: <int>,
+  consecutive_auth_failures: <int>
 }
 ```
+
+`consecutive_failures` counts every failure against the minter; `consecutive_auth_failures` counts
+only the ones where the credential itself was REJECTED, since its last success. The second is what a
+cloud's account lockout counts, so it is the field to act on: nonzero means the next login spends
+another of the few tries remaining before the account is unusable by anything, including the write
+that would repair it. A 5xx or a timeout raises the first and not the second, and only a success
+clears either.
+
+Nonzero is already the signal — do not wait for `state` to reach `auth_failing`, which needs two
+rejections at least the auth-fail threshold apart and therefore stays `transient_failing` while two
+tries are already gone. `Gate.VerifyRole` refuses a role write on nonzero, and an external reconciler
+may read it here for the same purpose.
 
 ### Expiry tracking — required
 

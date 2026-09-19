@@ -32,6 +32,10 @@ type StateMachine struct {
 	enteredAuthFailed   time.Time
 	cooldownUntil       time.Time
 	consecutiveFailures int
+	// consecutiveAuthFailures counts rejected LOGINS since the last successful one, which is what a
+	// cloud's account lockout counts. Separate from consecutiveFailures because a 503 is not a
+	// rejected credential: it must neither add to this tally nor clear it.
+	consecutiveAuthFailures int
 
 	// rateLimitStrikes counts CONSECUTIVE 429s, reset by any success. It drives
 	// the exponential backoff and marks the half-open window: strikes > 0 with an
@@ -64,6 +68,7 @@ func (sm *StateMachine) RecordSuccess(at time.Time) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.consecutiveFailures = 0
+	sm.consecutiveAuthFailures = 0
 	sm.lastSuccessAt = at
 	sm.firstAuthErrorAt = time.Time{}
 	sm.cooldownUntil = time.Time{}
@@ -78,6 +83,17 @@ func (sm *StateMachine) ConsecutiveFailures() int {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.consecutiveFailures
+}
+
+// ConsecutiveAuthFailures reports how many rejected logins this minter's credential has accumulated
+// since its last successful one. Nonzero means the NEXT attempt spends another of the few tries the
+// account has before it locks out, which is a different and earlier signal than reaching AuthFailing:
+// that state needs two rejections at least AuthFailThreshold apart, so two inside that window leave it
+// unset while two attempts are already gone.
+func (sm *StateMachine) ConsecutiveAuthFailures() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.consecutiveAuthFailures
 }
 
 // RecordUpstream records the outcome of one upstream attempt, and is the entry
@@ -138,6 +154,13 @@ func (sm *StateMachine) RecordError(httpStatus int, at time.Time) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.consecutiveFailures++
+	if isAuthError(httpStatus) {
+		// Counted separately from consecutiveFailures, and reset only by a SUCCESS -- not by an
+		// intervening 500 or 429. This models the thing a cloud's lockout actually counts: failed
+		// LOGIN attempts since the last successful one. A 503 is not a rejected credential, so it
+		// neither adds to that tally nor clears it.
+		sm.consecutiveAuthFailures++
+	}
 	sm.lastErrorAt = at
 	if httpStatus == http.StatusTooManyRequests {
 		// Kept for direct RecordError callers that have not been migrated to

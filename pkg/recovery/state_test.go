@@ -218,3 +218,53 @@ func TestSelectable_SuccessClearsCooldown(t *testing.T) {
 		t.Fatal("RecordSuccess must clear the cool-down")
 	}
 }
+
+// The counter a cloud's account lockout actually tracks: rejected logins since the last successful
+// one. It is deliberately NOT consecutiveFailures, and the difference is what makes it usable as a
+// gate -- a 503 says nothing about the credential, so it must neither add to the tally nor clear it,
+// and only a success clears it.
+func TestConsecutiveAuthFailuresCountsRejectedLoginsOnly(t *testing.T) {
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+
+	t.Run("one rejection counts, before AuthFailing is reached", func(t *testing.T) {
+		sm := recovery.NewStateMachine(recovery.Config{AuthFailThreshold: 30 * time.Second, HealthCheckInterval: time.Minute})
+		sm.RecordUpstream(http.StatusUnauthorized, nil, now)
+		if got := sm.ConsecutiveAuthFailures(); got != 1 {
+			t.Fatalf("ConsecutiveAuthFailures()=%d, want 1", got)
+		}
+		if got := sm.State(); got == recovery.AuthFailing {
+			t.Fatal("one rejection reached AuthFailing; the counter would then add nothing over the state")
+		}
+	})
+
+	t.Run("an unrelated failure neither counts nor clears", func(t *testing.T) {
+		sm := recovery.NewStateMachine(recovery.Config{AuthFailThreshold: 30 * time.Second, HealthCheckInterval: time.Minute})
+		sm.RecordUpstream(http.StatusUnauthorized, nil, now)
+		sm.RecordUpstream(http.StatusServiceUnavailable, nil, now.Add(time.Second))
+		if got := sm.ConsecutiveAuthFailures(); got != 1 {
+			t.Fatalf("ConsecutiveAuthFailures()=%d after a 503, want 1: an unavailable upstream is not "+
+				"a rejected credential, so it must neither spend a try nor forgive one", got)
+		}
+		if got := sm.ConsecutiveFailures(); got != 2 {
+			t.Fatalf("ConsecutiveFailures()=%d, want 2: the generic counter still counts both", got)
+		}
+	})
+
+	t.Run("a success clears it", func(t *testing.T) {
+		sm := recovery.NewStateMachine(recovery.Config{AuthFailThreshold: 30 * time.Second, HealthCheckInterval: time.Minute})
+		sm.RecordUpstream(http.StatusForbidden, nil, now)
+		sm.RecordSuccess(now.Add(time.Second))
+		if got := sm.ConsecutiveAuthFailures(); got != 0 {
+			t.Fatalf("ConsecutiveAuthFailures()=%d after a success, want 0", got)
+		}
+	})
+
+	t.Run("the snapshot carries it, so another process can gate on it", func(t *testing.T) {
+		sm := recovery.NewStateMachine(recovery.Config{AuthFailThreshold: 30 * time.Second, HealthCheckInterval: time.Minute})
+		sm.RecordUpstream(http.StatusUnauthorized, nil, now)
+		if got := sm.Snapshot(now).ConsecutiveAuthFailures; got != 1 {
+			t.Fatalf("Snapshot().ConsecutiveAuthFailures=%d, want 1: the reconcile script reads this "+
+				"over HTTP and cannot see the counter otherwise", got)
+		}
+	})
+}

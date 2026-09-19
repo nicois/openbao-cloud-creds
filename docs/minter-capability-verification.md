@@ -165,10 +165,12 @@ minter cannot mint what you asked for" — and only one of those is worth retryi
 
 Three things it deliberately does **not** do:
 
-- **It does not gate on minter health, only on the cooldown.** Gating on health
-  would make a broken set unfixable: an operator replacing a failed credential
-  writes the same minter id, so a state machine still in `auth_failing` from the
-  old credential would refuse the very write that repairs it.
+- **It does not gate on minter health.** Health is gated one level up, for one
+  operation only — see "Enabling a role is refused after a single rejected login"
+  below. The check cannot live in the limiter because the limiter runs for set writes
+  too, and gating those would make a broken set unfixable: an operator replacing a
+  failed credential writes the same minter id, so a state machine still carrying the
+  OLD credential's rejected logins would refuse the very write that repairs it.
 - **It does not take the half-open single-flight claim.** That claim belongs to
   issuance ([`ttl-semantics.md`](ttl-semantics.md) and `pkg/recovery/ratelimit.go`):
   spending it on a configuration write would defer a live caller's read to answer
@@ -206,22 +208,90 @@ Expired verdicts are swept by the reconcile worker, and setting
 `capability_cache_ttl=0` clears the whole keyspace on the next sweep — so "off"
 means off, not "off from now on".
 
+## Enabling a role is refused after a single rejected login
+
+A probe against a minter whose credential has just been rejected cannot tell an
+operator anything the minter has not already said, and it is not free: several clouds
+lock an account out after a few consecutive rejected logins (DigitalOcean's console
+allows three), so each further probe spends one of the tries remaining before the
+account is unusable by anything — including the write that would fix it. Enabling
+roles one at a time against a broken login is how the remaining tries get burned.
+
+The trigger is **one** rejection, not the `auth_failing` state. That state needs two
+rejections at least `AuthFailThreshold` (30s) apart, so two inside that window leave
+it unset — while two of the account's three tries are already gone, and the probe
+would spend the third. `StateMachine.ConsecutiveAuthFailures()` is the observable: it
+counts rejected logins since the last successful one, which is what a lockout counts,
+and is deliberately NOT `ConsecutiveFailures` — a 503 is not a rejected credential, so
+it neither adds to that tally nor clears it. Only a success clears it.
+
+So `Gate.VerifyRole` refuses before probing when **any** active minter of the bound
+set has a nonzero count, naming which one, and answers `upstream_auth_failed`:
+
+```
+upstream_auth_failed: minter capability verification could not run: minter
+"do-console-1" has 1 rejected login(s) since its last success.
+Repair or retire that minter before enabling roles bound to it; a minter-set
+write is not gated on this, so replacing its credential is the way out
+```
+
+`upstream_auth_failed` rather than `upstream_quota_exceeded` because the two call for
+opposite responses: a cooldown expires on its own and the write is worth retrying, an
+auth failure is a wrong credential and retrying makes it worse.
+
+**Any** rather than **all**, because the probe fans out to every active minter in the
+set: one member with a rejected login is one wasted login however healthy its siblings
+are.
+
+Four boundaries make this safe rather than a new way to wedge a mount, and each has a
+test that fails if it is crossed:
+
+- **A set write is never refused this way.** The rejected-login count clears only on a
+  success, so gating the repair path would leave the set permanently broken. Nothing
+  about a role write changes a credential, which is why only role writes are gated.
+- **`disabled=true` still lands.** A rejected credential is one of the reasons an
+  operator reaches for the containment lever, so it must work during exactly that
+  incident — after one rejection as much as after twenty. A disabled role is not probed
+  at all, so this refusal never reaches it.
+- **A healthy minter is still probed.** Otherwise the refusal would be
+  indistinguishable from a check that refuses everything.
+- **A minter whose only failures were 5xx is still probed.** A throttle or a broken
+  upstream is not a rejected credential, and refusing there would send an operator to
+  repair a minter that is fine.
+
+An **asynchronous** alternative was considered and rejected: a third role state
+("provisional") that persists the operator's intent and lets a worker promote the role
+once the minter is healthy. It cannot do what it looks like it does. `auth_failing` is
+sticky by construction (`pkg/recovery/state.go`: no upstream error leaves that state,
+only `RecordSuccess` does), so a promotion worker gated on it would wait until an
+operator repaired the credential — and once they have, an ordinary write succeeds.
+Promotion would converge unattended only in the case where a synchronous write would
+have succeeded anyway, and never in the case it was meant to cover. It would also cost
+a lifecycle field on a role struct that does **not** embed `cloudconfig.Versioned`
+(none of the ten do), which is the version-skew hazard in `AGENTS.md` §8: an older
+binary reads the role, rewrites the whole struct, drops the field it does not know, and
+a provisional role silently becomes an enabled one.
+
 ## Failure surface
 
 A failed probe produces a **configuration-time error response** on the write that
 triggered it:
 
 ```
-minter capability verification failed: minter "minter-1" cannot mint the
-credential role(s) purge-only require: probe api-client creation returned 403:
-you may not grant access to apiId 9901
+config_invalid: minter capability verification failed: minter "minter-1" cannot
+mint the credential role(s) purge-only require: probe api-client creation
+returned 403: you may not grant access to apiId 9901
 (set verify_minter_capability=false on the config endpoint to skip this check)
 ```
 
-It is not an issuance-time envelope error, so it carries no `error_code` — the
-`error_code` model in [`techrfc.md`](techrfc.md) describes credential-read
-responses, and this response never reaches a credential-reading client. Nothing
-in the response-envelope contract changed; `api_version` stays `"2"`.
+It carries `config_invalid`, and the conformance `error-taxonomy` category asserts
+that (`CapabilityRejectionIsConfigInvalid`). This paragraph previously said the
+opposite — that a configuration-time response carries no `error_code`, on the grounds
+that the `error_code` model in [`techrfc.md`](techrfc.md) describes credential-read
+responses. The code model was since made universal: `logical.ErrorResponse` is banned
+by lint outside `pkg/credenvelope`, so no error response can be built without one.
+What remains true is the narrower claim: this response is not an envelope, so nothing
+in the response-envelope contract changed and `api_version` stays `"2"`.
 
 ### Not done: a runtime `minter_insufficient_privilege` error code
 
@@ -248,6 +318,28 @@ probe using the role's real mint shape (and the minimum lifetime on the
 no-revoke clouds), a rotation rejected when only the *successor* is refused (set
 unchanged, nothing retired, no upstream leak), and `verify_minter_capability=false`
 skipping the probe entirely.
+
+The refusal is asserted twice, at two levels, and the second only became possible when
+the trigger moved to a single rejection.
+
+`pkg/capability/gate_test.go` covers the shared logic: refused on a role write, NOT
+refused on a set write (the repair path), `disabled=true` still landing, and a healthy
+minter still probed. Its fixture drives one rejection and asserts the minter has *not*
+reached `auth_failing`, so a gate keyed on that state fails it.
+
+`capability/ProbeRefusedAfterOneRejectedLogin` covers it per cloud. An earlier revision
+of this document argued no conformance case was affordable, because reaching
+`auth_failing` needed two rejections 30s apart and therefore a new per-plugin seam.
+That reasoning died with the trigger: one rejection is reachable through the
+`FailNextMintWithStatus` seam the table already has. The case spends the login on an
+ordinary credential read rather than on a probe — a probe's own refusal is deliberately
+never recorded against the minter — asserts that read answered `upstream_auth_failed`,
+then asserts the following role write is refused **and minted nothing**, comparing
+`ProvisionedCount` either side. Weakening the gate back to the `auth_failing` state
+fails it on nine of the twelve subjects. AWS and GCP skip it with a printed reason —
+they inject clients rather than talking to an HTTP fake, so `FailNextMintWithStatus`
+is unwired — and OCI does not reach it at all, because it declares the whole
+`capability` category as a gap.
 
 The "authenticates but cannot mint" shape is expressed with a dedicated fake knob
 rather than a one-shot status override — e.g. Akamai's `SetUngrantableAPIID`

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -56,6 +57,9 @@ func RunCapabilitySuite(t *testing.T, h Harness) {
 	})
 	t.Run("ProbeRefusedWhileTheCloudIsThrottlingUs", func(t *testing.T) {
 		capProbeRespectsRateLimit(t, h)
+	})
+	t.Run("ProbeRefusedAfterOneRejectedLogin", func(t *testing.T) {
+		capProbeRefusedAfterRejectedLogin(t, h)
 	})
 }
 
@@ -256,5 +260,70 @@ func capProbeRespectsRateLimit(t *testing.T, h Harness) {
 		t.Fatalf("the second write was refused, but not as a rate limit: %q. A cooldown and an "+
 			"incapable minter are different answers, and only one of them is worth retrying",
 			got)
+	}
+}
+
+// authRefusalFragment is the text a probe refused because the minter's credential has been rejected
+// carries (from capability.LoginRejected). Asserted separately from the rate-limit fragment
+// because the two call for opposite responses: a cooldown expires on its own, a rejected login does
+// not.
+const authRefusalFragment = "rejected login"
+
+// capProbeRefusedAfterRejectedLogin covers the window BEFORE a minter reaches auth_failing.
+//
+// That state needs two rejections at least the plugin's AuthFailThreshold apart, so two inside that
+// window leave it unset -- while two of the account's tries are already spent, and the probe would
+// spend another. Several clouds lock an account out after a small number of consecutive rejected
+// logins (DigitalOcean's console allows three), including the try the repair itself needs. So ONE
+// rejection is the trigger, and this is the case that pins it: a gate keyed on the auth_failing state
+// passes every other assertion in this suite and still permits that probe.
+func capProbeRefusedAfterRejectedLogin(t *testing.T, h Harness) {
+	if h.FailNextMintWithStatus == nil {
+		t.Skipf("%s: FailNextMintWithStatus is not wired, so a rejected login cannot be forced and "+
+			"this cloud's probe gate is not asserted", h.Cloud)
+	}
+	// newConfiguredBackend, not newBackend: this case needs an ISSUABLE role, because the login has to
+	// be spent by an ordinary credential read. A probe's own refusal is deliberately never recorded
+	// against the minter (it says the minter lacks a grant, not that its credential is wrong), so no
+	// amount of failing probes could drive this counter.
+	b, storage := newConfiguredBackend(t, h)
+	h.ConfigureProbe(t, b, storage, true)
+
+	if reason := h.FailNextMintWithStatus(t, http.StatusUnauthorized); reason != "" {
+		t.Skipf("%s: %s", h.Cloud, reason)
+	}
+	// The setup has to PROVE it spent a rejected login, not merely that something went wrong: a
+	// transport error, or a 404 from a role that is not there, would leave the counter at zero and turn
+	// the assertion below into a confusing failure about the gate rather than about the setup.
+	resp, err := issue(t, b, storage, h.IssuePath)
+	if err != nil {
+		t.Fatalf("reading %s failed at the transport, so no login was spent: %v", h.IssuePath, err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("a mint forced to 401 produced a credential: %v", resp)
+	}
+	assertCode(t, resp, credenvelope.ErrUpstreamAuthFailed,
+		"a credential read whose mint was forced to 401")
+
+	// FailNextMintWithStatus failed only that ONE mint, so the wire would now accept a probe. The
+	// refusal therefore has to come from the gate, and "refused" has to mean no upstream call was made
+	// at all -- an error response after spending the login would defeat the point.
+	before := h.ProvisionedCount()
+	refused := h.WriteProbeRole(t, b, storage)
+	if after := h.ProvisionedCount(); after != before {
+		t.Errorf("the refused write still minted upstream (%d -> %d). The gate exists to spend no "+
+			"login against an account that is already refusing them", before, after)
+	}
+	if refused == nil || !refused.IsError() {
+		t.Fatalf("a role write was allowed to probe a minter whose credential had just been "+
+			"rejected: %v. Each probe is a real login, and this account has already refused one -- "+
+			"further attempts spend the tries the repair needs", refused)
+	}
+	assertCode(t, refused, credenvelope.ErrUpstreamAuthFailed,
+		"a role write whose bound minter had just had a login rejected")
+	if got := refused.Error().Error(); !strings.Contains(got, authRefusalFragment) {
+		t.Fatalf("the write was refused with the right code but not as a rejected login: %q. A "+
+			"cooldown, an incapable minter and a rejected credential are three different answers, "+
+			"and only one of them is fixed by waiting", got)
 	}
 }

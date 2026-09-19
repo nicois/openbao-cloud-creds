@@ -18,10 +18,14 @@ import (
 //
 // What it deliberately does NOT do:
 //
-//   - It does not gate on minter HEALTH, only on the rate-limit window. Gating on
-//     health would make a set unfixable: an operator replacing a failed credential
-//     writes the same minter id, so a state machine still in AuthFailing from the
-//     old credential would refuse the very write that repairs it.
+//   - It does not gate on minter health in acquire, so a probe reaching it is
+//     refused only by the rate-limit window. Health is gated one level up and for
+//     ONE operation: Gate.VerifyRole refuses a role write whose probe would spend a
+//     login on a minter whose credential has been rejected. A SET write must never be
+//     gated that way, which is why the check cannot live here — acquire runs for both, and an
+//     operator replacing a failed credential writes the same minter id, so a state
+//     machine still counting the old credential's rejections would refuse the very
+//     write that repairs it.
 //   - It does not take the half-open single-flight claim. That claim exists for
 //     issuance (see the ratelimit.go commentary): spending it on a configuration
 //     write would defer a live caller's read to answer a question the operator
@@ -52,6 +56,44 @@ type Throttled struct {
 func (t *Throttled) Error() string {
 	return fmt.Sprintf("minter %q is in a rate-limit cooldown; retry in %s",
 		t.Minter, t.RetryIn.Round(time.Second))
+}
+
+// LoginRejected reports that a probe was not attempted because this minter's credential has
+// already been rejected at least once since its last success. Like *Throttled it is a refusal rather
+// than a verdict, but the two call for opposite responses: a cooldown expires on its own, while a
+// rejected login is a wrong credential and waiting makes it worse.
+//
+// Worse specifically: several clouds lock an account out after a small number of consecutive rejected
+// logins (DigitalOcean's console allows three), so each further probe spends one of the tries remaining
+// before the account is unusable by anything -- including the write that would fix it.
+type LoginRejected struct {
+	Minter   string
+	Failures int
+}
+
+func (a *LoginRejected) Error() string {
+	return fmt.Sprintf("minter %q has %d rejected login(s) since its last success",
+		a.Minter, a.Failures)
+}
+
+// loginRejected reports whether this minter's credential has been rejected since it last succeeded, and
+// how many times. A minter with no state machine reports nothing: no state means nothing has been
+// observed, which is not evidence of failure (a candidate being written for the first time is the
+// ordinary case).
+//
+// The gate is ANY rejected login, not the AuthFailing state. That state needs two rejections at least
+// AuthFailThreshold apart, so two inside that window leave it unset while two of the account's three
+// tries are already spent -- and the probe would spend the third. One rejection is already the signal
+// that the next attempt is not free.
+func (l *Limiter) loginRejected(minterID string) *LoginRejected {
+	sm := l.stateFor(minterID)
+	if sm == nil {
+		return nil
+	}
+	if n := sm.ConsecutiveAuthFailures(); n > 0 {
+		return &LoginRejected{Minter: minterID, Failures: n}
+	}
+	return nil
 }
 
 // acquire reports whether a probe may call the upstream for this minter now. A nil
