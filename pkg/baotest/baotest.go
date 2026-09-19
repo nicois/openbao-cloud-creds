@@ -28,6 +28,7 @@
 package baotest
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -288,6 +289,32 @@ func (c *Cluster) Write(path string, data map[string]interface{}) *api.Secret {
 	secret, err := c.client.Logical().Write(path, data)
 	if err != nil {
 		c.t.Fatalf("write %s failed: %v\nlog:\n%s", path, err, c.LogTail())
+	}
+	return secret
+}
+
+// WriteWithContext is Write, bound to a context so a hung server fails the test instead of
+// hanging it. Callers pass t.Context(), which is cancelled when the test ends.
+func (c *Cluster) WriteWithContext(
+	ctx context.Context, path string, data map[string]interface{},
+) *api.Secret {
+	c.t.Helper()
+	secret, err := c.client.Logical().WriteWithContext(ctx, path, data)
+	if err != nil {
+		c.t.Fatalf("write %s failed: %v\nlog:\n%s", path, err, c.LogTail())
+	}
+	return secret
+}
+
+// ReadWithContext is Read, bound to a context so a hung server fails the test instead of hanging it.
+func (c *Cluster) ReadWithContext(ctx context.Context, path string) *api.Secret {
+	c.t.Helper()
+	secret, err := c.client.Logical().ReadWithContext(ctx, path)
+	if err != nil {
+		c.t.Fatalf("read %s failed: %v\nlog:\n%s", path, err, c.LogTail())
+	}
+	if secret == nil {
+		c.t.Fatalf("read %s returned no secret", path)
 	}
 	return secret
 }

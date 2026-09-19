@@ -1,6 +1,7 @@
 package baotest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -257,7 +258,163 @@ func RunScenario(t *testing.T, c *Cluster, tc Case) {
 	want += tc.mintsPerRead()
 	assertReloadThenIssue(t, c, tc, want)
 
+	want = assertTokenRevocationCascade(t, c, tc, want)
+
 	assertPurgeUpstream(t, c, tc, want)
+}
+
+// assertTokenRevocationCascade proves the chain an operator needs when a machine identity is
+// destroyed: that revoking the TOKEN which read a credential also destroys the credential
+// upstream, and that a marker written onto the login's SecretID is still on the token afterwards
+// so the token can be found in the first place.
+//
+// Both halves are core's, not a plugin's, which is why this is here and not in conformance —
+// an in-process test stubs OpenBao out and therefore cannot observe either. They are documented
+// ("When a token is revoked, OpenBao will revoke all leases that were created using that token";
+// SecretID metadata "will be set on tokens issued with this SecretID"), and this asserts them
+// against the running server because a containment procedure built on documentation alone is a
+// procedure nobody has run.
+//
+// What it buys: given a parent identity recorded in SecretID metadata, every token descended from
+// it is selectable by `auth/token/lookup-accessor`, and revoking those tokens reaches the cloud.
+// That is a whole VM-teardown cascade out of existing primitives, with no per-identity revocation
+// endpoint anywhere.
+//
+// Gated on HardRevoke because that is what makes the upstream effect observable: where a lease
+// ending deletes nothing, this proves nothing the revoke case has not already proven.
+func assertTokenRevocationCascade(t *testing.T, c *Cluster, tc Case, want int) int {
+	t.Helper()
+	// Also skipped for a shared credential: this case is about a lease that OWNS its credential, so
+	// where a read serves one it does not own there is nothing for a revoke to delete and the
+	// arithmetic below would be wrong rather than merely uninteresting.
+	if !tc.HardRevoke || tc.SharesOneCredential {
+		return want
+	}
+	ctx := t.Context()
+	token, accessor := cascadeIdentity(ctx, t, c, tc)
+	assertParentMarkerIsDiscoverable(ctx, t, c, accessor)
+
+	want += readCredentialAs(ctx, t, c, tc, token)
+	AssertUpstream(t, tc, want)
+
+	// The whole point, in one call: nothing addresses the lease, the credential or the plugin.
+	c.WriteWithContext(ctx, "auth/token/revoke-accessor", map[string]interface{}{"accessor": accessor})
+
+	want -= tc.mintsPerRead()
+	AssertUpstream(t, tc, want)
+	return want
+}
+
+// cascadeAuthMount and friends: one AppRole mount standing in for a unit identity, carrying the
+// marker a teardown would use to find its children.
+const (
+	cascadeAuthMount   = "approle-cascade"
+	cascadeRole        = "unit"
+	cascadePolicy      = "cascade-reader"
+	cascadeMarkerKey   = "parent_secret_id_accessor"
+	cascadeMarkerValue = "parent-accessor-marker"
+)
+
+// cascadeIdentity builds a unit-shaped AppRole, logs in as it, and returns (token, accessor).
+//
+// Asserts the first half of the chain on the way through: the marker written into the SecretID's
+// metadata is on the token the login produced.
+func cascadeIdentity(
+	ctx context.Context, t *testing.T, c *Cluster, tc Case,
+) (token, accessor string) {
+	t.Helper()
+	if err := c.Client().Sys().EnableAuthWithOptionsWithContext(ctx, cascadeAuthMount,
+		&api.EnableAuthOptions{Type: "approle"}); err != nil {
+		t.Fatalf("enabling approle at %s: %v", cascadeAuthMount, err)
+	}
+	// t.Context() is already cancelled by the time cleanups run, so this needs a context that
+	// outlives it -- the mount has to come off even though the test is over. A failure here is
+	// reported rather than ignored: a mount left behind fails the NEXT plugin's run at enable time,
+	// which is a confusing place to learn about it.
+	t.Cleanup(func() {
+		if err := c.Client().Sys().DisableAuthWithContext(
+			context.WithoutCancel(ctx), cascadeAuthMount); err != nil {
+			t.Errorf("leaving %s mounted: %v", cascadeAuthMount, err)
+		}
+	})
+
+	c.WriteWithContext(ctx, "sys/policies/acl/"+cascadePolicy, map[string]interface{}{
+		"policy": fmt.Sprintf("path %q {\n  capabilities = [\"read\"]\n}\n", tc.issuePath()),
+	})
+	// Removed for the same reason as the mount: the name is reused by every plugin's run, so one left
+	// behind would let the next run pass on a stale policy written for a different mount path.
+	t.Cleanup(func() {
+		if err := c.Client().Sys().DeletePolicyWithContext(
+			context.WithoutCancel(ctx), cascadePolicy); err != nil {
+			t.Errorf("leaving policy %s behind: %v", cascadePolicy, err)
+		}
+	})
+	c.WriteWithContext(ctx, "auth/"+cascadeAuthMount+"/role/"+cascadeRole, map[string]interface{}{
+		"token_policies": cascadePolicy,
+		// Periodic and unlimited, as a node identity is: revocation is the only thing that ends it,
+		// which is exactly why the cascade matters.
+		"token_period":       "1h",
+		"secret_id_num_uses": 0,
+		"secret_id_ttl":      0,
+	})
+
+	rolePath := "auth/" + cascadeAuthMount + "/role/" + cascadeRole
+	roleID := Str(t, c.ReadWithContext(ctx, rolePath+"/role-id").Data, "role_id")
+	issued := c.WriteWithContext(ctx, rolePath+"/secret-id", map[string]interface{}{
+		"metadata": fmt.Sprintf(`{%q: %q}`, cascadeMarkerKey, cascadeMarkerValue),
+	})
+
+	login := c.WriteWithContext(ctx, "auth/"+cascadeAuthMount+"/login", map[string]interface{}{
+		"role_id": roleID, "secret_id": Str(t, issued.Data, "secret_id"),
+	})
+	if login.Auth == nil {
+		t.Fatal("AppRole login returned no auth block")
+	}
+	if got := login.Auth.Metadata[cascadeMarkerKey]; got != cascadeMarkerValue {
+		t.Fatalf("token metadata %s is %q, want %q. Without the SecretID's metadata on the token "+
+			"there is no way to select the tokens descended from one parent identity, and a "+
+			"teardown cascade has nothing to enumerate",
+			cascadeMarkerKey, got, cascadeMarkerValue)
+	}
+	if login.Auth.Accessor == "" {
+		t.Fatal("AppRole login returned no token accessor, so the token could never be revoked")
+	}
+	return login.Auth.ClientToken, login.Auth.Accessor
+}
+
+// assertParentMarkerIsDiscoverable is the step a controller actually performs. It never sees a
+// login response: it lists `auth/token/accessors` and has to recover the parent marker from an
+// accessor alone. cascadeIdentity proves PROPAGATION; only this proves DISCOVERABILITY, which is
+// what makes "revoke every token descended from this parent" implementable.
+func assertParentMarkerIsDiscoverable(ctx context.Context, t *testing.T, c *Cluster, accessor string) {
+	t.Helper()
+	lookedUp := c.WriteWithContext(ctx, "auth/token/lookup-accessor",
+		map[string]interface{}{"accessor": accessor})
+	meta := Nested(t, lookedUp.Data, "meta")
+	if got := meta[cascadeMarkerKey]; got != cascadeMarkerValue {
+		t.Fatalf("lookup-accessor reports meta[%s]=%v, want %q. Without the marker here a controller "+
+			"holding only an accessor cannot tell which parent a token descends from, so the "+
+			"enumerate-then-match step has nothing to match on",
+			cascadeMarkerKey, got, cascadeMarkerValue)
+	}
+}
+
+// readCredentialAs issues through the unit's own token, returning how many credentials that minted.
+func readCredentialAs(ctx context.Context, t *testing.T, c *Cluster, tc Case, token string) int {
+	t.Helper()
+	asUnit, err := c.Client().Clone()
+	if err != nil {
+		t.Fatalf("cloning the API client: %v", err)
+	}
+	asUnit.SetToken(token)
+	credential, err := asUnit.Logical().ReadWithContext(ctx, tc.issuePath())
+	if err != nil {
+		t.Fatalf("reading %s as the unit identity: %v", tc.issuePath(), err)
+	}
+	if credential == nil || credential.LeaseID == "" {
+		t.Fatalf("reading %s as the unit identity produced no lease", tc.issuePath())
+	}
+	return tc.mintsPerRead()
 }
 
 // assertPurgeUpstream drives containment's second lever through the real API: destroy what
