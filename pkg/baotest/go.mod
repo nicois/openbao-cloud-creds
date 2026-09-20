@@ -3,7 +3,7 @@ module github.com/nicois/openbao-cloud-creds/pkg/baotest
 go 1.27.0
 
 require (
-	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.4.0
+	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.5.0
 	github.com/openbao/openbao/api/v2 v2.6.0
 )
 

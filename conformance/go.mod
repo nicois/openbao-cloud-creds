@@ -3,20 +3,20 @@ module github.com/nicois/openbao-cloud-creds/conformance
 go 1.27.0
 
 require (
-	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.4.0
-	github.com/nicois/openbao-cloud-creds/pkg/mintledger v0.4.0
-	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.4.0
-	github.com/nicois/openbao-cloud-creds/pkg/plugintest v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-akamai v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-aws v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-azure v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-do v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-exoscale v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-gcp v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-oci v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-ovh v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-upcloud v0.4.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-vultr v0.4.0
+	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.5.0
+	github.com/nicois/openbao-cloud-creds/pkg/mintledger v0.5.0
+	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.5.0
+	github.com/nicois/openbao-cloud-creds/pkg/plugintest v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-akamai v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-aws v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-azure v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-do v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-exoscale v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-gcp v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-oci v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-ovh v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-upcloud v0.5.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-vultr v0.5.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
 
@@ -64,19 +64,19 @@ require (
 	github.com/mitchellh/go-testing-interface v1.14.2-0.20210821155943-2d9075ca8770 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/capability v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/issuedlist v0.4.0
-	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/mintercapacity v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/requester v0.4.0
-	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/upstreampurge v0.4.0 // indirect
-	github.com/nicois/openbao-cloud-creds/pkg/worker v0.4.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/capability v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/issuedlist v0.5.0
+	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/mintercapacity v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/requester v0.5.0
+	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/upstreampurge v0.5.0 // indirect
+	github.com/nicois/openbao-cloud-creds/pkg/worker v0.5.0 // indirect
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/openbao/go-kms-wrapping/v2 v2.8.0 // indirect
 	github.com/openbao/openbao/api/v2 v2.6.0 // indirect
