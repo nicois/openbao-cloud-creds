@@ -55,7 +55,7 @@ require (
 
 require (
 	github.com/hashicorp/go-hclog v1.6.3
-	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.3.0
+	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.4.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
 
