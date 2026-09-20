@@ -20,7 +20,7 @@ E2E_BUILD_TAG := e2e
 CLOUD_REAL_BUILD_TAG := cloud_real
 SCALE_BUILD_TAG := scale
 
-.PHONY: check-release-tags install-hooks build build-standalone dist test test-conformance test-e2e test-cloud-real-do test-cloud-real-do-spaces test-cloud-real-aws test-scale lint fmt clean smoke-test
+.PHONY: fmt check-release-tags install-hooks build build-standalone dist test test-conformance test-e2e test-cloud-real-do test-cloud-real-do-spaces test-cloud-real-aws test-scale lint fmt clean smoke-test
 
 build:
 	go build $(MODULE_PREFIX)/...
@@ -178,12 +178,30 @@ lint:
 		(cd $$dir && golangci-lint run --build-tags=$$tag ./...) || exit 1; \
 	done
 
+# Applies exactly the formatters `make lint` enforces (`formatters: gofmt, goimports` in
+# .golangci.yml), per module, through the same tool — so "formatted" has one definition and
+# running this cannot leave lint red.
+#
+# It replaces a target that could never have worked here: `gofmt -w .` followed by a bare
+# `go fix`, which means "the package in the current directory" and this directory is a workspace
+# root holding no Go files, so it exited 1 with "no Go files in <root>" before reaching anything
+# else. `go fix` was also the wrong tool — it rewrites pre-Go1 API usage and is a no-op on modern
+# code — and it appeared three times, which is what an automated edit does when nobody runs the
+# target. `goimports -w .` needed a binary that is not installed and that golangci-lint already
+# carries.
+# A build-tagged module needs no tag here, unlike `lint`: formatters are file-based, so
+# `golangci-lint fmt` rewrites a file the build would exclude, and it has no --build-tags flag to
+# pass anyway. Verified rather than assumed — misformatting a line in e2e's tagged source is
+# reported with no tag given.
+#
+# `sort` is for its side effect of de-duplicating: three TAGGED_LINT_TARGETS name directories that
+# are already in LINT_DIRS (credential-do twice, for cloud_real and scale), and formatting a
+# module three times is only idempotent, not free.
 fmt:
-	gofmt -w .
-	go fix
-	go fix
-	go fix
-	goimports -w .
+	@for dir in $(sort $(LINT_DIRS) $(foreach target,$(TAGGED_LINT_TARGETS),$(firstword $(subst :, ,$(target))))); do \
+		echo "=== Formatting $$dir ==="; \
+		(cd $$dir && golangci-lint fmt ./...) || exit 1; \
+	done
 
 clean:
 	go clean $(MODULE_PREFIX)/...
