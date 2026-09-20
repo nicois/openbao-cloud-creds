@@ -34,13 +34,13 @@ func capBackend(t *testing.T, canMint *atomic.Bool, mints *atomic.Int64, verify 
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
-		Data: map[string]interface{}{"region": "eu", "verify_minter_capability": verify},
+		Data: map[string]any{"region": "eu", "verify_minter_capability": verify},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capSetPath, Storage: storage,
-		Data: map[string]interface{}{"minters": []interface{}{map[string]interface{}{
+		Data: map[string]any{"minters": []any{map[string]any{
 			"id": "minter-1", "client_id": "cid", "client_secret": "secret", "never_expires": true,
 		}}},
 	}); err != nil || (resp != nil && resp.IsError()) {
@@ -54,7 +54,7 @@ func capWriteRole(t *testing.T, b logical.Backend, storage logical.Storage) *log
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
-		Data: map[string]interface{}{"default_ttl": 3600, "max_ttl": 3600, "minter_set": "default"},
+		Data: map[string]any{"default_ttl": 3600, "max_ttl": 3600, "minter_set": "default"},
 	})
 	if err != nil {
 		t.Fatalf("role write errored: %v", err)

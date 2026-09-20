@@ -22,7 +22,7 @@ const (
 // newObservabilityBackend builds an Akamai backend via Factory with a buffer-backed
 // logger (so warn-logs are assertable) and the given minter-set written through the
 // API. minterExpiryWarnSecs is the config threshold in seconds (0 = omit, use default).
-func newObservabilityBackend(t *testing.T, minters []interface{}, minterExpiryWarnSecs int) (*backend, *strings.Builder, *gometrics.InmemSink, logical.Storage) {
+func newObservabilityBackend(t *testing.T, minters []any, minterExpiryWarnSecs int) (*backend, *strings.Builder, *gometrics.InmemSink, logical.Storage) {
 	t.Helper()
 	sink := gometrics.NewInmemSink(time.Minute, time.Minute)
 	mcfg := gometrics.DefaultConfig("test")
@@ -46,7 +46,7 @@ func newObservabilityBackend(t *testing.T, minters []interface{}, minterExpiryWa
 	bk := b.(*backend)
 	storage := config.StorageView
 
-	cfgData := map[string]interface{}{
+	cfgData := map[string]any{
 		fieldHost:   "akab-test.luna.akamaiapis.net",
 		fieldAPIURL: srv.URL,
 	}
@@ -61,7 +61,7 @@ func newObservabilityBackend(t *testing.T, minters []interface{}, minterExpiryWa
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
-		Data: map[string]interface{}{fieldMintersKey: minters},
+		Data: map[string]any{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write: err=%v resp=%v", err, resp)
 	}
@@ -80,8 +80,8 @@ func gaugePresent(sink *gometrics.InmemSink, suffix string) bool {
 }
 
 func TestEmitMinterMetrics_AgeGaugeForNeverExpires(t *testing.T) {
-	bk, logBuf, sink, _ := newObservabilityBackend(t, []interface{}{
-		map[string]interface{}{"id": "m1", minterTokenKey: "ct-a:at-a:cs-a", "never_expires": true},
+	bk, logBuf, sink, _ := newObservabilityBackend(t, []any{
+		map[string]any{"id": "m1", minterTokenKey: "ct-a:at-a:cs-a", "never_expires": true},
 	}, 0)
 
 	bk.emitMinterMetrics()
@@ -99,9 +99,9 @@ func TestEmitMinterMetrics_WarnsWithinThreshold(t *testing.T) {
 	// the nearer one (3d) is within the 7d warn threshold.
 	soon := time.Now().Add(3 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	later := time.Now().Add(40 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	bk, logBuf, _, _ := newObservabilityBackend(t, []interface{}{
-		map[string]interface{}{"id": "m1", minterTokenKey: "ct-a:at-a:cs-a", fieldExpiresAt: soon},
-		map[string]interface{}{"id": "m2", minterTokenKey: "ct-b:at-b:cs-b", fieldExpiresAt: later},
+	bk, logBuf, _, _ := newObservabilityBackend(t, []any{
+		map[string]any{"id": "m1", minterTokenKey: "ct-a:at-a:cs-a", fieldExpiresAt: soon},
+		map[string]any{"id": "m2", minterTokenKey: "ct-b:at-b:cs-b", fieldExpiresAt: later},
 	}, 0)
 
 	bk.emitMinterMetrics()
@@ -114,9 +114,9 @@ func TestEmitMinterMetrics_WarnsWithinThreshold(t *testing.T) {
 func TestEmitMinterMetrics_NoWarnOutsideThreshold(t *testing.T) {
 	a := time.Now().Add(30 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	bExpiry := time.Now().Add(60 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	bk, logBuf, _, _ := newObservabilityBackend(t, []interface{}{
-		map[string]interface{}{"id": "m1", minterTokenKey: "ct-a:at-a:cs-a", fieldExpiresAt: a},
-		map[string]interface{}{"id": "m2", minterTokenKey: "ct-b:at-b:cs-b", fieldExpiresAt: bExpiry},
+	bk, logBuf, _, _ := newObservabilityBackend(t, []any{
+		map[string]any{"id": "m1", minterTokenKey: "ct-a:at-a:cs-a", fieldExpiresAt: a},
+		map[string]any{"id": "m2", minterTokenKey: "ct-b:at-b:cs-b", fieldExpiresAt: bExpiry},
 	}, 0)
 
 	bk.emitMinterMetrics()
@@ -127,8 +127,8 @@ func TestEmitMinterMetrics_NoWarnOutsideThreshold(t *testing.T) {
 }
 
 func TestConfig_MinterExpiryWarnRoundTrip(t *testing.T) {
-	bk, _, _, storage := newObservabilityBackend(t, []interface{}{
-		map[string]interface{}{"id": "m1", minterTokenKey: "ct-a:at-a:cs-a", "never_expires": true},
+	bk, _, _, storage := newObservabilityBackend(t, []any{
+		map[string]any{"id": "m1", minterTokenKey: "ct-a:at-a:cs-a", "never_expires": true},
 	}, 86400)
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{

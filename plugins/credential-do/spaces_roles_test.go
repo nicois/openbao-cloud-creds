@@ -17,9 +17,9 @@ func spacesRoleSetup(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", "token": "dop_v1_test", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", "token": "dop_v1_test", "never_expires": true},
 			},
 		},
 	})
@@ -32,7 +32,7 @@ func spacesRoleSetup(t *testing.T) (logical.Backend, logical.Storage) {
 // writeRole writes a role and returns the response, without failing the test — callers
 // that expect a refusal need to inspect it.
 func writeRole(t *testing.T, b logical.Backend, storage logical.Storage, name string,
-	data map[string]interface{},
+	data map[string]any,
 ) *logical.Response {
 	t.Helper()
 	data["minter_set"] = "default"
@@ -67,7 +67,7 @@ func requireRoleRefused(t *testing.T, resp *logical.Response, mustMention ...str
 	}
 }
 
-func readRole(t *testing.T, b logical.Backend, storage logical.Storage, name string) map[string]interface{} {
+func readRole(t *testing.T, b logical.Backend, storage logical.Storage, name string) map[string]any {
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.ReadOperation,
@@ -83,7 +83,7 @@ func readRole(t *testing.T, b logical.Backend, storage logical.Storage, name str
 func TestSpacesRole_WriteAndRead(t *testing.T) {
 	b, storage := spacesRoleSetup(t)
 
-	resp := writeRole(t, b, storage, "backup-reader", map[string]interface{}{
+	resp := writeRole(t, b, storage, "backup-reader", map[string]any{
 		"credential_type": "spaces_key",
 		"grants":          "backups:read,archive:readwrite",
 		"region":          "nyc3",
@@ -119,7 +119,7 @@ func TestSpacesRole_WriteAndRead(t *testing.T) {
 func TestSpacesRole_DefaultsToToken(t *testing.T) {
 	b, storage := spacesRoleSetup(t)
 
-	resp := writeRole(t, b, storage, "legacy", map[string]interface{}{
+	resp := writeRole(t, b, storage, "legacy", map[string]any{
 		"scopes": "droplet:read",
 	})
 	if resp != nil && resp.IsError() {
@@ -133,7 +133,7 @@ func TestSpacesRole_DefaultsToToken(t *testing.T) {
 func TestSpacesRole_RejectsAnUnknownCredentialType(t *testing.T) {
 	b, storage := spacesRoleSetup(t)
 
-	resp := writeRole(t, b, storage, "bogus", map[string]interface{}{
+	resp := writeRole(t, b, storage, "bogus", map[string]any{
 		"credential_type": "spaces-key",
 		"grants":          "backups:read",
 		"region":          "nyc3",
@@ -145,7 +145,7 @@ func TestSpacesRole_RequiresGrantsAndRegion(t *testing.T) {
 	b, storage := spacesRoleSetup(t)
 
 	t.Run("no grants", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "nogrants", map[string]interface{}{
+		resp := writeRole(t, b, storage, "nogrants", map[string]any{
 			"credential_type": "spaces_key",
 			"region":          "nyc3",
 		})
@@ -155,7 +155,7 @@ func TestSpacesRole_RequiresGrantsAndRegion(t *testing.T) {
 	// Without a region there is no endpoint, and without an endpoint the credential
 	// cannot be used at all — so an unset region is a broken role, not a default.
 	t.Run("no region", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "noregion", map[string]interface{}{
+		resp := writeRole(t, b, storage, "noregion", map[string]any{
 			"credential_type": "spaces_key",
 			"grants":          "backups:read",
 		})
@@ -170,7 +170,7 @@ func TestSpacesRole_RejectsFieldsBelongingToTheOtherCredentialType(t *testing.T)
 	b, storage := spacesRoleSetup(t)
 
 	t.Run("scopes on a spaces_key role", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "mixed1", map[string]interface{}{
+		resp := writeRole(t, b, storage, "mixed1", map[string]any{
 			"credential_type": "spaces_key",
 			"grants":          "backups:read",
 			"region":          "nyc3",
@@ -180,7 +180,7 @@ func TestSpacesRole_RejectsFieldsBelongingToTheOtherCredentialType(t *testing.T)
 	})
 
 	t.Run("grants on a token role", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "mixed2", map[string]interface{}{
+		resp := writeRole(t, b, storage, "mixed2", map[string]any{
 			"credential_type": "token",
 			"scopes":          "droplet:read",
 			"grants":          "backups:read",
@@ -189,7 +189,7 @@ func TestSpacesRole_RejectsFieldsBelongingToTheOtherCredentialType(t *testing.T)
 	})
 
 	t.Run("region on a token role", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "mixed3", map[string]interface{}{
+		resp := writeRole(t, b, storage, "mixed3", map[string]any{
 			"credential_type": "token",
 			"scopes":          "droplet:read",
 			"region":          "nyc3",
@@ -207,7 +207,7 @@ func TestSpacesRole_RejectsFieldsBelongingToTheOtherCredentialType(t *testing.T)
 func TestSpacesRole_RejectsFullAccessMixedWithScopedGrants(t *testing.T) {
 	b, storage := spacesRoleSetup(t)
 
-	resp := writeRole(t, b, storage, "escalate", map[string]interface{}{
+	resp := writeRole(t, b, storage, "escalate", map[string]any{
 		"credential_type": "spaces_key",
 		"grants":          "backups:read,*:fullaccess",
 		"region":          "nyc3",
@@ -222,7 +222,7 @@ func TestSpacesRole_RejectsFullAccessMixedWithScopedGrants(t *testing.T) {
 func TestSpacesRole_RejectsFullAccessOnANamedBucket(t *testing.T) {
 	b, storage := spacesRoleSetup(t)
 
-	resp := writeRole(t, b, storage, "escalate2", map[string]interface{}{
+	resp := writeRole(t, b, storage, "escalate2", map[string]any{
 		"credential_type": "spaces_key",
 		"grants":          "backups:fullaccess",
 		"region":          "nyc3",
@@ -234,7 +234,7 @@ func TestSpacesRole_RejectsFullAccessOnANamedBucket(t *testing.T) {
 func TestSpacesRole_AcceptsAccountWideFullAccessAlone(t *testing.T) {
 	b, storage := spacesRoleSetup(t)
 
-	resp := writeRole(t, b, storage, "everything", map[string]interface{}{
+	resp := writeRole(t, b, storage, "everything", map[string]any{
 		"credential_type": "spaces_key",
 		"grants":          "*:fullaccess",
 		"region":          "nyc3",
@@ -252,7 +252,7 @@ func TestSpacesRole_RejectsAMalformedGrant(t *testing.T) {
 
 	for _, grant := range []string{"backups", "backups:", ":read", "backups:sideways", "*:read"} {
 		t.Run(grant, func(t *testing.T) {
-			resp := writeRole(t, b, storage, "malformed", map[string]interface{}{
+			resp := writeRole(t, b, storage, "malformed", map[string]any{
 				"credential_type": "spaces_key",
 				"grants":          grant,
 				"region":          "nyc3",
@@ -267,7 +267,7 @@ func TestSpacesRole_RejectsAMalformedGrant(t *testing.T) {
 func TestSpacesRole_EndpointOverrideIsKept(t *testing.T) {
 	b, storage := spacesRoleSetup(t)
 
-	resp := writeRole(t, b, storage, "custom", map[string]interface{}{
+	resp := writeRole(t, b, storage, "custom", map[string]any{
 		"credential_type": "spaces_key",
 		"grants":          "backups:read",
 		"region":          "nyc3",

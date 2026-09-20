@@ -13,7 +13,7 @@ func TestReconcile_DryRun(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "reconcile",
 		Storage:   storage,
-		Data:      map[string]interface{}{"mode": "dry_run"},
+		Data:      map[string]any{"mode": "dry_run"},
 	}
 	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestReconcile_Normal(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "reconcile",
 		Storage:   storage,
-		Data:      map[string]interface{}{"mode": "normal"},
+		Data:      map[string]any{"mode": "normal"},
 	}
 	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {
@@ -60,7 +60,7 @@ func TestReconcile_NoClient(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "reconcile",
 		Storage:   storage,
-		Data:      map[string]interface{}{"mode": "normal"},
+		Data:      map[string]any{"mode": "normal"},
 	}
 	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {

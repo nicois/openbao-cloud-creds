@@ -140,11 +140,11 @@ func scaleBackendOn(t *testing.T, storage logical.Storage, apiURL string) *backe
 	}
 	for _, w := range []struct {
 		path string
-		data map[string]interface{}
+		data map[string]any
 	}{
-		{"config", map[string]interface{}{fieldDOAPIURLKey: apiURL, fieldVerifyCapability: false}},
-		{"minter-sets/default", map[string]interface{}{fieldMintersKey: []interface{}{
-			map[string]interface{}{
+		{"config", map[string]any{fieldDOAPIURLKey: apiURL, fieldVerifyCapability: false}},
+		{"minter-sets/default", map[string]any{fieldMintersKey: []any{
+			map[string]any{
 				"id": benchMinterID, minterTokenKey: "dop_v1_scale", neverExpiresKey: true,
 			},
 		}}},

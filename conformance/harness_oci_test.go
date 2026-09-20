@@ -43,13 +43,13 @@ func ociHarness(t *testing.T) plugintest.Harness {
 		Factory: credentialoci.Factory,
 		Inject:  func(b logical.Backend) { credentialoci.TestSetClient(b, fake) },
 		Configure: func(t *testing.T, b logical.Backend, storage logical.Storage) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
+			plugintest.Write(t, b, storage, configPath, map[string]any{
 				ociRegionField: ociRegion, ociRotationCheck: ociCheckSeconds,
 			})
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, ociMinterToken)))
 			// Writing the role provisions slot_count credentials through the bound
 			// set's minter, so a creds read has something to return.
-			plugintest.Write(t, b, storage, rolePath, map[string]interface{}{
+			plugintest.Write(t, b, storage, rolePath, map[string]any{
 				ociUserOCIDField: ociUserOCID, ociSlotCountField: ociSlots,
 				ociRotationPeriod: ociPeriodSeconds,
 				fieldDefaultTTL:   ociDefaultTTLSecs, fieldMaxTTL: ociMaxTTLSeconds,

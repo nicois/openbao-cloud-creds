@@ -14,9 +14,9 @@ func TestRoleCRUD(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", "access_key_id": "AKIA1", "secret_access_key": "s1", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", "access_key_id": "AKIA1", "secret_access_key": "s1", "never_expires": true},
 			},
 		},
 	}
@@ -29,12 +29,12 @@ func TestRoleCRUD(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/deploy-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/deploy",
 			"minter_set":   "default",
-			"session_tags": map[string]interface{}{
+			"session_tags": map[string]any{
 				"team": "platform",
 			},
 			"external_id": "ext-123",
@@ -115,7 +115,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/orphan",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/orphan",
@@ -138,7 +138,7 @@ func TestRoleValidation_MissingARN(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 900,
 			"max_ttl":     3600,
 		},
@@ -159,7 +159,7 @@ func TestRoleValidation_TTLTooLow(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  60, // below 900s minimum
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",
@@ -184,7 +184,7 @@ func TestRoleValidation_MaxTTLTooLow(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  300,
 			"max_ttl":      600, // below the 900s STS minimum
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",
@@ -205,7 +205,7 @@ func TestRoleValidation_TTLTooHigh(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  900,
 			"max_ttl":      86400, // above 43200s maximum
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",
@@ -227,7 +227,7 @@ func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  7200,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",

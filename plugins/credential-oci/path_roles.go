@@ -129,7 +129,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		Cloud:      cloudName,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
-		CloudConfig: map[string]interface{}{
+		CloudConfig: map[string]any{
 			fieldUserOCID:  userOCID,
 			fieldSlotCount: slotCount,
 			fieldRotation:  rotationPeriod.String(),
@@ -253,8 +253,7 @@ func (b *backend) maybeInitializeSlots(ctx context.Context, req *logical.Request
 		// `internal`, which told an operator to check their configuration when the
 		// real answer is "this build cannot talk to OCI".
 		code := credenvelope.Classify(credenvelope.StatusNone, err)
-		var pluginErr *credenvelope.PluginError
-		if errors.As(err, &pluginErr) {
+		if pluginErr, ok := errors.AsType[*credenvelope.PluginError](err); ok {
 			code = pluginErr.Code
 		}
 		return credenvelope.ErrorResponse(code,
@@ -280,9 +279,9 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 
 	// Load slot status
 	slots, _ := loadAllSlots(ctx, req.Storage, name, role.SlotCount)
-	slotStatus := make([]map[string]interface{}, 0, len(slots))
+	slotStatus := make([]map[string]any, 0, len(slots))
 	for _, s := range slots {
-		slotStatus = append(slotStatus, map[string]interface{}{
+		slotStatus = append(slotStatus, map[string]any{
 			fieldSlotIndex:     s.SlotIndex,
 			"state":            string(s.State),
 			"rotated_at":       s.RotatedAt.UTC().Format(time.RFC3339),
@@ -302,8 +301,8 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // roleData renders a role for its read endpoint, in the same field names and units the
 // write schema accepts. That is what lets a write to an existing role prefill from it
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
-func roleData(role *ociRole) map[string]interface{} {
-	return map[string]interface{}{
+func roleData(role *ociRole) map[string]any {
+	return map[string]any{
 		fieldName:                  role.Name,
 		fieldUserOCID:              role.UserOCID,
 		fieldSlotCount:             role.SlotCount,
@@ -317,7 +316,7 @@ func roleData(role *ociRole) map[string]interface{} {
 }
 
 // storedRoleData renders a STORED role the same way, for a write that is patching one.
-func storedRoleData(raw []byte) (map[string]interface{}, error) {
+func storedRoleData(raw []byte) (map[string]any, error) {
 	var role ociRole
 	if err := json.Unmarshal(raw, &role); err != nil {
 		return nil, err

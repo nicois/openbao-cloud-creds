@@ -43,7 +43,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"region": "eu",
 		},
 	}
@@ -57,9 +57,9 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":            "minter-1",
 					"client_id":     "test-client-id",
 					"client_secret": "test-client-secret",
@@ -78,7 +78,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600,
 			"max_ttl":     3600,
 			"minter_set":  "default",
@@ -121,7 +121,7 @@ func TestCredsIssue(t *testing.T) {
 		t.Fatal("expected credential_id")
 	}
 
-	cred, ok := resp.Data["credential"].(map[string]interface{})
+	cred, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected credential map, got %T", resp.Data["credential"])
 	}
@@ -147,7 +147,7 @@ func TestCredsIssue(t *testing.T) {
 	}
 
 	// Verify provenance in the envelope metadata
-	meta := resp.Data["metadata"].(map[string]interface{})
+	meta := resp.Data["metadata"].(map[string]any)
 	if meta["minter_set"] != "default" {
 		t.Fatalf("expected minter_set=default, got %v", meta["minter_set"])
 	}
@@ -258,7 +258,7 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"region": "eu",
 			// The injected token client fails on purpose, so the role-write capability
 			// probe would (correctly) reject the role. This test exercises issuance-time
@@ -276,9 +276,9 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":            "minter-1",
 					"client_id":     "bad-id",
 					"client_secret": "bad-secret",
@@ -297,7 +297,7 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600,
 			"max_ttl":     3600,
 			"minter_set":  "default",

@@ -14,9 +14,9 @@ func TestMinterSetCRUD(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/backup",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "m1", "token": "dop_v1_a", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "m1", "token": "dop_v1_a", "never_expires": true},
 			},
 		},
 	}
@@ -53,9 +53,9 @@ func TestMinterSetValidationRejectsSingleExpiring(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/bad",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "m1", "token": "x", "expires_at": "2027-01-01T00:00:00Z"},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "m1", "token": "x", "expires_at": "2027-01-01T00:00:00Z"},
 			},
 		},
 	}

@@ -29,7 +29,7 @@ func TestUpCloudFake_CreateToken(t *testing.T) {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -59,7 +59,7 @@ func TestUpCloudFake_DeleteToken(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.SetBasicAuth("testuser", "testtoken")
 	resp, _ := http.DefaultClient.Do(req)
-	var createResult map[string]interface{}
+	var createResult map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &createResult); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -106,7 +106,7 @@ func TestUpCloudFake_ListTokens(t *testing.T) {
 
 	// UpCloud returns a bare JSON array of tokens (verified against the live
 	// API), not an object with a "tokens" key.
-	var tokens []interface{}
+	var tokens []any
 	data, _ := io.ReadAll(resp2.Body)
 	if err := json.Unmarshal(data, &tokens); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)

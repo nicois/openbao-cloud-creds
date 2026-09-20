@@ -33,7 +33,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			// The injected IAM client fails on purpose, so the role-write capability
 			// probe would (correctly) reject the role. This test exercises
 			// issuance-time failure/recovery, not configuration-time verification.
@@ -50,9 +50,9 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":               "minter-1",
 					"credentials_json": testCredentialsJSON,
 					"never_expires":    true,
@@ -70,7 +70,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "target-sa@test-project.iam.gserviceaccount.com",

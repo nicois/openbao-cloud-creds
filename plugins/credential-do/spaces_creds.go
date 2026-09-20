@@ -101,7 +101,7 @@ func (b *backend) buildSpacesResponse(ctx context.Context, req *logical.Request,
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			// The S3 shape, and only it. endpoint and region are here rather than in
 			// metadata because an S3 client cannot be constructed without them and they
 			// are not derivable from the key material — see credenvelope.KindS3Credentials.
@@ -142,7 +142,7 @@ func (b *backend) buildSpacesResponse(ctx context.Context, req *logical.Request,
 			"failed to persist credential tracking record")
 	}
 
-	resp := b.Secret(secretTypeSpacesKey).Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret(secretTypeSpacesKey).Response(env.ToMap(), map[string]any{
 		internalKeyAccessKey: key.AccessKey,
 		fieldRole:            roleName,
 		fieldMinterSet:       setName,

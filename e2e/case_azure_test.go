@@ -29,13 +29,13 @@ func azureCase(t *testing.T) e2eCase {
 
 	return e2eCase{
 		Cloud: "azure",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			azureTenantField: azureTenant,
 			azureGraphField:  srv.URL,
 			azureLoginField:  srv.URL,
 		},
 		MinterSet: minterSet(tokenMinter(azureMinterToken)),
-		Role: map[string]interface{}{
+		Role: map[string]any{
 			fieldDefaultTTL: hourTTL, fieldMaxTTL: dayTTL,
 			azureAppObjIDField: azureAppObjectID, azureClientIDField: azureAppClientID,
 			fieldMinterSet: defaultSet,

@@ -23,13 +23,13 @@ func capBackend(t *testing.T, verify bool) (logical.Backend, logical.Storage, *f
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
-	capWrite(t, b, cfg.StorageView, "config", map[string]interface{}{
+	capWrite(t, b, cfg.StorageView, "config", map[string]any{
 		"do_api_url": srv.URL, "verify_minter_capability": verify,
 	})
 	return b, cfg.StorageView, srv
 }
 
-func capWrite(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]interface{}) {
+func capWrite(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]any) {
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
@@ -39,7 +39,7 @@ func capWrite(t *testing.T, b logical.Backend, storage logical.Storage, path str
 	}
 }
 
-func capTryWrite(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]interface{}) *logical.Response {
+func capTryWrite(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]any) *logical.Response {
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
@@ -57,16 +57,16 @@ const (
 	capVerifyMsg = "capability verification failed"
 )
 
-func capDefaultSet(id, token string) map[string]interface{} {
-	return map[string]interface{}{
-		"minters": []interface{}{
-			map[string]interface{}{"id": id, "token": token, "never_expires": true},
+func capDefaultSet(id, token string) map[string]any {
+	return map[string]any{
+		"minters": []any{
+			map[string]any{"id": id, "token": token, "never_expires": true},
 		},
 	}
 }
 
-func capRoleFields() map[string]interface{} {
-	return map[string]interface{}{
+func capRoleFields() map[string]any {
+	return map[string]any{
 		"default_ttl": 900, "max_ttl": 3600, "scopes": capRoleData, "minter_set": "default",
 	}
 }
@@ -157,7 +157,7 @@ func TestCapability_DisabledRoleNotProbedOnSetWrite(t *testing.T) {
 
 	// There is no disable endpoint; Disabled is set out of band, so plant the
 	// role directly.
-	entry, err := logical.StorageEntryJSON(capRolePath, map[string]interface{}{
+	entry, err := logical.StorageEntryJSON(capRolePath, map[string]any{
 		"name": "probe-role", "scopes": capRoleData, "minter_set": "default", "disabled": true,
 	})
 	if err != nil {

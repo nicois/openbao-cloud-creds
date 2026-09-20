@@ -57,9 +57,9 @@ type recordedResponse struct {
 		Method string `json:"method"`
 		Path   string `json:"path"`
 	} `json:"request"`
-	Status      int         `json:"status"`
-	RespondedBy string      `json:"responded_by"`
-	Body        interface{} `json:"body"`
+	Status      int    `json:"status"`
+	RespondedBy string `json:"responded_by"`
+	Body        any    `json:"body"`
 }
 
 // unassertable names recordings the fake is deliberately not held to, with the
@@ -189,7 +189,7 @@ func TestRecordedEvidenceForFencedTokenEndpoint(t *testing.T) {
 func TestJSONShapeDescribesFieldsAndTypes(t *testing.T) {
 	cases := []struct {
 		name  string
-		value interface{}
+		value any
 		want  []string
 	}{
 		{
@@ -292,14 +292,14 @@ func TestDOFakeSpacesShapesMatchTheDocumentedAPI(t *testing.T) {
 // fakeSpacesKeyCreate drives the fake's mint over HTTP and returns what a client sees.
 // Over HTTP rather than by calling the handler, because the JSON encoding is the part
 // being compared.
-func fakeSpacesKeyCreate(t *testing.T) (status int, body interface{}) {
+func fakeSpacesKeyCreate(t *testing.T) (status int, body any) {
 	t.Helper()
 	server := fakes.NewDOServer()
 	defer server.Close()
 	return callFake(t, server.URL+spacesKeysPath, http.MethodPost, spacesCreateRequestBody)
 }
 
-func fakeSpacesKeyList(t *testing.T) (status int, body interface{}) {
+func fakeSpacesKeyList(t *testing.T) (status int, body any) {
 	t.Helper()
 	server := fakes.NewDOServer()
 	defer server.Close()
@@ -311,7 +311,7 @@ func fakeSpacesKeyList(t *testing.T) (status int, body interface{}) {
 	return callFake(t, server.URL+spacesKeysPath, http.MethodGet, "")
 }
 
-func fakeSpacesKeyDelete(t *testing.T) (status int, body interface{}) {
+func fakeSpacesKeyDelete(t *testing.T) (status int, body any) {
 	t.Helper()
 	server := fakes.NewDOServer()
 	defer server.Close()
@@ -325,13 +325,13 @@ func fakeSpacesKeyDelete(t *testing.T) (status int, body interface{}) {
 
 // accessKeyOf reads the access key out of a mint response the way the plugin's client
 // does, so a fake that renamed the field fails here rather than silently.
-func accessKeyOf(t *testing.T, body interface{}) string {
+func accessKeyOf(t *testing.T, body any) string {
 	t.Helper()
-	wrapper, ok := body.(map[string]interface{})
+	wrapper, ok := body.(map[string]any)
 	if !ok {
 		t.Fatalf("the fake's mint response is not a JSON object: %T", body)
 	}
-	key, ok := wrapper["key"].(map[string]interface{})
+	key, ok := wrapper["key"].(map[string]any)
 	if !ok {
 		t.Fatalf("the fake's mint response has no `key` object: %v", wrapper)
 	}
@@ -344,7 +344,7 @@ func accessKeyOf(t *testing.T, body interface{}) string {
 
 // callFake performs one request against the fake and decodes the response. An empty
 // requestBody sends none.
-func callFake(t *testing.T, url, method, requestBody string) (status int, body interface{}) {
+func callFake(t *testing.T, url, method, requestBody string) (status int, body any) {
 	t.Helper()
 	reader := io.Reader(http.NoBody)
 	if requestBody != "" {
@@ -371,7 +371,7 @@ func callFake(t *testing.T, url, method, requestBody string) (status int, body i
 	if strings.TrimSpace(string(raw)) == "" {
 		return resp.StatusCode, nil
 	}
-	var decoded interface{}
+	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("the fake returned non-JSON (%q): %v", string(raw), err)
 	}
@@ -379,12 +379,12 @@ func callFake(t *testing.T, url, method, requestBody string) (status int, body i
 }
 
 // assertFakeShape compares a recording to the fake by field paths and leaf types.
-func assertFakeShape(t *testing.T, name string, recorded recordedResponse, fakeStatus int, fakeBody interface{}) {
+func assertFakeShape(t *testing.T, name string, recorded recordedResponse, fakeStatus int, fakeBody any) {
 	t.Helper()
 	assertShape(t, name, fakeStatus, recorded.Status, fakeBody, jsonShape(recorded.Body))
 }
 
-func assertShape(t *testing.T, subject string, gotStatus, wantStatus int, gotBody interface{}, wantShape []string) {
+func assertShape(t *testing.T, subject string, gotStatus, wantStatus int, gotBody any, wantShape []string) {
 	t.Helper()
 	if gotStatus != wantStatus {
 		t.Errorf("%s: the fake answered %d, want %d", subject, gotStatus, wantStatus)
@@ -403,9 +403,9 @@ func assertShape(t *testing.T, subject string, gotStatus, wantStatus int, gotBod
 
 // mustDecode is how these cases are written: as the JSON a response really carries,
 // rather than as hand-built Go maps that could not have come off the wire.
-func mustDecode(t *testing.T, raw string) interface{} {
+func mustDecode(t *testing.T, raw string) any {
 	t.Helper()
-	var decoded interface{}
+	var decoded any
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 		t.Fatalf("test fixture %q is not JSON: %v", raw, err)
 	}
@@ -414,7 +414,7 @@ func mustDecode(t *testing.T, raw string) interface{} {
 
 // fakeMintForbiddenBody drives the fake to the one state whose real counterpart is
 // recorded: a minter that authenticates but may not manage tokens.
-func fakeMintForbiddenBody(t *testing.T) (status int, body interface{}) {
+func fakeMintForbiddenBody(t *testing.T) (status int, body any) {
 	t.Helper()
 	server := fakes.NewDOServer()
 	defer server.Close()
@@ -437,14 +437,14 @@ func fakeMintForbiddenBody(t *testing.T) (status int, body interface{}) {
 	if err != nil {
 		t.Fatalf("reading the fake's body failed: %v", err)
 	}
-	var decoded interface{}
+	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("the fake returned non-JSON (%q): %v", string(raw), err)
 	}
 	return resp.StatusCode, decoded
 }
 
-func assertFakeBody(t *testing.T, name string, recorded recordedResponse, fakeStatus int, fakeBody interface{}) {
+func assertFakeBody(t *testing.T, name string, recorded recordedResponse, fakeStatus int, fakeBody any) {
 	t.Helper()
 	if fakeStatus != recorded.Status {
 		t.Errorf("%s: fake answered %d, real DO answered %d", name, fakeStatus, recorded.Status)
@@ -460,7 +460,7 @@ func assertFakeBody(t *testing.T, name string, recorded recordedResponse, fakeSt
 // responses can be compared without comparing one account's data to a fake's invented
 // values. Array elements collapse to one `[]` path: the fake sends one key and a real
 // account sends however many it has, and the difference is not a shape difference.
-func jsonShape(value interface{}) []string {
+func jsonShape(value any) []string {
 	if value == nil {
 		// No body at all — a 204, which is the only thing a Spaces delete may answer with.
 		// Reported as no shape rather than as a null leaf so that "empty" compares equal
@@ -477,9 +477,9 @@ func jsonShape(value interface{}) []string {
 	return shape
 }
 
-func collectShape(value interface{}, path string, seen map[string]bool) {
+func collectShape(value any, path string, seen map[string]bool) {
 	switch typed := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if len(typed) == 0 {
 			seen[describeLeaf(path, "empty object")] = true
 			return
@@ -491,7 +491,7 @@ func collectShape(value interface{}, path string, seen map[string]bool) {
 			}
 			collectShape(nested, child, seen)
 		}
-	case []interface{}:
+	case []any:
 		if len(typed) == 0 {
 			seen[describeLeaf(path, "empty array")] = true
 			return
@@ -532,7 +532,7 @@ func readRecording(t *testing.T, name string) recordedResponse {
 	return recorded
 }
 
-func mustJSON(t *testing.T, value interface{}) string {
+func mustJSON(t *testing.T, value any) string {
 	t.Helper()
 	encoded, err := json.Marshal(value)
 	if err != nil {

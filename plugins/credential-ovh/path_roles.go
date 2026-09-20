@@ -202,8 +202,8 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // roleData renders a role for its read endpoint, in the same field names and units the
 // write schema accepts. That is what lets a write to an existing role prefill from it
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
-func roleData(role *ovhRole) map[string]interface{} {
-	return map[string]interface{}{
+func roleData(role *ovhRole) map[string]any {
+	return map[string]any{
 		"name":                     role.Name,
 		"default_ttl":              int(role.DefaultTTL.Seconds()),
 		"max_ttl":                  int(role.MaxTTL.Seconds()),
@@ -214,7 +214,7 @@ func roleData(role *ovhRole) map[string]interface{} {
 }
 
 // storedRoleData renders a STORED role the same way, for a write that is patching one.
-func storedRoleData(raw []byte) (map[string]interface{}, error) {
+func storedRoleData(raw []byte) (map[string]any, error) {
 	var role ovhRole
 	if err := json.Unmarshal(raw, &role); err != nil {
 		return nil, err

@@ -157,7 +157,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			minterTokenKey: tokenResp.Token.AccessToken,
 			fieldScopes:    published,
 		},
@@ -178,7 +178,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	// a leaked DigitalOcean token is traceable to this mount and this role, and no further — while
 	// the question an incident asks is which unit is compromised, and core handed us the answer.
 	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+tokenResp.Token.ID,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole:         roleName,
 			trackFieldMinter:  minterID,
 			trackFieldCreated: now.UTC().Format(time.RFC3339),
@@ -197,7 +197,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		}
 	}
 
-	resp := b.Secret(secretTypeToken).Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret(secretTypeToken).Response(env.ToMap(), map[string]any{
 		"upstream_token_id": tokenResp.Token.ID,
 		fieldRole:           roleName,
 		fieldMinterSet:      setName,

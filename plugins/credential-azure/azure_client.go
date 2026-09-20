@@ -276,7 +276,7 @@ func (c *azureClient) RotateMinter(ctx context.Context, old cloudconfig.Minter) 
 		return cloudconfig.Minter{}, fmt.Errorf("addPassword failed (status %d): %w", status, err)
 	}
 
-	clientID := strings.SplitN(old.Token, ":", 2)[0]
+	clientID, _, _ := strings.Cut(old.Token, ":")
 	successor := cloudconfig.Minter{
 		ID:           old.ID + "-rot-" + rotationSuffix(),
 		Token:        clientID + ":" + pw.SecretText,

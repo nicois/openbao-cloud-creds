@@ -30,7 +30,7 @@ func TestAkamaiFake_CreateClient(t *testing.T) {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -43,11 +43,11 @@ func TestAkamaiFake_CreateClient(t *testing.T) {
 		t.Fatalf("expected clientName cloud-creds-test-lease1, got %v", result["clientName"])
 	}
 
-	creds, ok := result["credentials"].([]interface{})
+	creds, ok := result["credentials"].([]any)
 	if !ok || len(creds) == 0 {
 		t.Fatal("expected credentials array with at least one entry")
 	}
-	cred := creds[0].(map[string]interface{})
+	cred := creds[0].(map[string]any)
 	if cred["clientToken"] == nil {
 		t.Fatal("expected clientToken in credentials")
 	}
@@ -70,7 +70,7 @@ func TestAkamaiFake_DeleteClient(t *testing.T) {
 	createReq.Header.Set("Authorization", "EG1-HMAC-SHA256 client_token=xxx;access_token=yyy;timestamp=zzz;nonce=nnn;signature=sss")
 
 	resp, _ := http.DefaultClient.Do(createReq)
-	var createResult map[string]interface{}
+	var createResult map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &createResult); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -115,7 +115,7 @@ func TestAkamaiFake_ListClients(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp2.StatusCode)
 	}
 
-	var result []interface{}
+	var result []any
 	data, _ := io.ReadAll(resp2.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -126,7 +126,7 @@ func TestAkamaiFake_ListClients(t *testing.T) {
 	}
 
 	// List should NOT return credentials
-	client := result[0].(map[string]interface{})
+	client := result[0].(map[string]any)
 	if client["credentials"] != nil {
 		t.Fatal("list should not return credentials")
 	}
@@ -149,7 +149,7 @@ func TestAkamaiFake_HealthCheck(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)

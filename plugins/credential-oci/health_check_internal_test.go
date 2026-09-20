@@ -130,16 +130,16 @@ func healthWorkerBackend(t *testing.T) *backend {
 
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
-		Data: map[string]interface{}{testRegionField: testRegionValue},
+		Data: map[string]any{testRegionField: testRegionValue},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
-		Data: map[string]interface{}{
-			mintersKey: []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			mintersKey: []any{
+				map[string]any{
 					"id": "minter-1", minterTokenKey: "tenancy:user1:fp:key", "never_expires": true,
 				},
 			},

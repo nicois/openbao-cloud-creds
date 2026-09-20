@@ -12,9 +12,9 @@ func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Stor
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", "key": "EXO_test_key", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", "key": "EXO_test_key", "never_expires": true},
 			},
 		},
 	}
@@ -32,7 +32,7 @@ func TestRoleCRUD(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/compute-rw",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 900,
 			"max_ttl":     3600,
 			"role_id":     "iam-role-uuid-abc123",
@@ -113,7 +113,7 @@ func TestRoleValidation_TTL(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 7200,
 			"max_ttl":     3600,
 			"role_id":     "iam-role-uuid-abc123",
@@ -133,7 +133,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 	b, storage := getTestBackend(t)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/orphan", Storage: storage,
-		Data: map[string]interface{}{"default_ttl": 900, "max_ttl": 3600, "role_id": "iam-role-uuid-x", "minter_set": "nonexistent"},
+		Data: map[string]any{"default_ttl": 900, "max_ttl": 3600, "role_id": "iam-role-uuid-x", "minter_set": "nonexistent"},
 	}
 	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil {

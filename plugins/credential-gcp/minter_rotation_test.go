@@ -112,7 +112,7 @@ func (c *fakeSAKeyClient) DeleteKey(_ context.Context, keyName string) error {
 // check) injected. The impersonation TestConnection fails for any minter whose
 // SA JSON contains failHealthMarker, letting a test fail the successor's
 // health-check deterministically.
-func newRotationBackend(t *testing.T, store *fakeSAKeyStore, minters []interface{}) (*backend, logical.Storage) {
+func newRotationBackend(t *testing.T, store *fakeSAKeyStore, minters []any) (*backend, logical.Storage) {
 	t.Helper()
 
 	config := logical.TestBackendConfig()
@@ -140,14 +140,14 @@ func newRotationBackend(t *testing.T, store *fakeSAKeyStore, minters []interface
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{},
+		Data: map[string]any{},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
-		Data: map[string]interface{}{fieldMintersKey: minters},
+		Data: map[string]any{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write: err=%v resp=%v", err, resp)
 	}
@@ -171,8 +171,8 @@ func loadSetFromStorage(t *testing.T, storage logical.Storage) cloudconfig.Minte
 	return set
 }
 
-func neverExpiresMinter(id, credsJSON string) map[string]interface{} {
-	return map[string]interface{}{
+func neverExpiresMinter(id, credsJSON string) map[string]any {
+	return map[string]any{
 		"id": id, minterCredentialsJSONKey: credsJSON, "never_expires": true,
 	}
 }
@@ -182,14 +182,14 @@ func neverExpiresMinter(id, credsJSON string) map[string]interface{} {
 // retired minter is never selected while the successor is.
 func TestMinterRotation_HappyPath(t *testing.T) {
 	store := newFakeSAKeyStore()
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, "{\"k\":1}"),
 		neverExpiresMinter(rotMinter2ID, "{\"k\":2}"),
 	})
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("rotate: err=%v resp=%v", err, resp)
@@ -281,13 +281,13 @@ func TestMinterRotation_HappyPath(t *testing.T) {
 func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 	exp1 := time.Now().Add(10 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	exp2 := time.Now().Add(50 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	expiringMinter := func(id, credsJSON, exp string) map[string]interface{} {
-		return map[string]interface{}{
+	expiringMinter := func(id, credsJSON, exp string) map[string]any {
+		return map[string]any{
 			"id": id, minterCredentialsJSONKey: credsJSON, fieldExpiresAt: exp,
 		}
 	}
 	store := newFakeSAKeyStore()
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		expiringMinter(rotMinter1ID, "{\"k\":1}", exp1),
 		expiringMinter(rotMinter2ID, "{\"k\":2}", exp2),
 	})
@@ -313,7 +313,7 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil {
 		t.Fatalf("rotate err: %v", err)
@@ -344,14 +344,14 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
 	store := newFakeSAKeyStore()
 	store.failHealth = true
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, "{\"k\":1}"),
 		neverExpiresMinter(rotMinter2ID, "{\"k\":2}"),
 	})
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil {
 		t.Fatalf("rotate err: %v", err)
@@ -385,14 +385,14 @@ func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
 func TestMinterRotation_OrgPolicyBlocked(t *testing.T) {
 	store := newFakeSAKeyStore()
 	store.orgPolicyBlock = true
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, "{\"k\":1}"),
 		neverExpiresMinter(rotMinter2ID, "{\"k\":2}"),
 	})
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil {
 		t.Fatalf("rotate err: %v", err)
@@ -427,14 +427,14 @@ func TestMinterRotation_OrgPolicyBlocked(t *testing.T) {
 // reads it back.
 func TestRotateConfig_MinterRetireGraceRoundTrip(t *testing.T) {
 	store := newFakeSAKeyStore()
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, "{\"k\":1}"),
 		neverExpiresMinter(rotMinter2ID, "{\"k\":2}"),
 	})
 
 	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{fieldMinterRetireGrace: 86400},
+		Data: map[string]any{fieldMinterRetireGrace: 86400},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
@@ -457,7 +457,7 @@ func TestRetireSweep_DropsAfterGraceKeepsBeforeGrace(t *testing.T) {
 	store := newFakeSAKeyStore()
 	store.addKey("keys/old")
 	store.addKey("keys/recent")
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		neverExpiresMinter("active-1", "{\"k\":1}"),
 		neverExpiresMinter("old-expired", "{\"k\":2}"),
 		neverExpiresMinter("recent", "{\"k\":3}"),

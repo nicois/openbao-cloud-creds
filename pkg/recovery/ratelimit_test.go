@@ -92,15 +92,13 @@ func TestOnlyOneRequestProbesTheHalfOpenWindow(t *testing.T) {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for range callers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if sm.TryAcquire(afterCooldown) {
 				mu.Lock()
 				granted++
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if granted != 1 {

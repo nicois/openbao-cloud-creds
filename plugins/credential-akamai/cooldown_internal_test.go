@@ -24,7 +24,7 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 	// config: operational settings only (host required for EdgeGrid signing)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
-		Data: map[string]interface{}{"host": "akab-test.luna.akamaiapis.net"},
+		Data: map[string]any{"host": "akab-test.luna.akamaiapis.net"},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
@@ -34,10 +34,10 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 	// Token is the EdgeGrid triple client_token:access_token:client_secret.
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", minterTokenKey: "ct-1:at-1:cs-1", "never_expires": true},
-				map[string]interface{}{"id": "minter-2", minterTokenKey: "ct-2:at-2:cs-2", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", minterTokenKey: "ct-1:at-1:cs-1", "never_expires": true},
+				map[string]any{"id": "minter-2", minterTokenKey: "ct-2:at-2:cs-2", "never_expires": true},
 			},
 		},
 	}

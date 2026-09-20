@@ -17,7 +17,7 @@ func setupSpacesBackend(t *testing.T, srv *fakes.DOServer) (logical.Backend, log
 	b, storage := setupConfiguredBackend(t, srv.URL)
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/spaces", Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":     900,
 			"max_ttl":         3600,
 			"credential_type": "spaces_key",
@@ -33,7 +33,7 @@ func setupSpacesBackend(t *testing.T, srv *fakes.DOServer) (logical.Backend, log
 }
 
 func issueFrom(t *testing.T, b logical.Backend, storage logical.Storage, role string,
-	data map[string]interface{},
+	data map[string]any,
 ) *logical.Response {
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
@@ -58,7 +58,7 @@ func TestSpacesCreds_IssuesAnS3Credential(t *testing.T) {
 		t.Fatalf("issuing a Spaces key failed: %v", resp)
 	}
 
-	cred, ok := resp.Data["credential"].(map[string]interface{})
+	cred, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected a credential object, got %T", resp.Data["credential"])
 	}
@@ -83,7 +83,7 @@ func TestSpacesCreds_IssuesAnS3Credential(t *testing.T) {
 		t.Error("the credential carries a session_token, which a Spaces key does not have")
 	}
 
-	meta := resp.Data["metadata"].(map[string]interface{})
+	meta := resp.Data["metadata"].(map[string]any)
 	if meta["credential_kind"] != string(credenvelope.KindS3Credentials) {
 		t.Errorf("expected credential_kind %q, got %v",
 			credenvelope.KindS3Credentials, meta["credential_kind"])
@@ -129,7 +129,7 @@ func TestSpacesCreds_PinningTheWrongShapeIsRefusedWithoutMinting(t *testing.T) {
 
 	t.Run("s3 pin against the token role", func(t *testing.T) {
 		before := srv.ProvisionedCount()
-		resp := issueFrom(t, b, storage, "test-role", map[string]interface{}{
+		resp := issueFrom(t, b, storage, "test-role", map[string]any{
 			"credential_kind": string(credenvelope.KindS3Credentials),
 		})
 		requireKindRefusal(t, resp, string(credenvelope.KindScopedToken))
@@ -140,7 +140,7 @@ func TestSpacesCreds_PinningTheWrongShapeIsRefusedWithoutMinting(t *testing.T) {
 
 	t.Run("scoped_token pin against the spaces role", func(t *testing.T) {
 		before := srv.ProvisionedSpacesKeyCount()
-		resp := issueFrom(t, b, storage, "spaces", map[string]interface{}{
+		resp := issueFrom(t, b, storage, "spaces", map[string]any{
 			"credential_kind": string(credenvelope.KindScopedToken),
 		})
 		requireKindRefusal(t, resp, string(credenvelope.KindS3Credentials))
@@ -150,7 +150,7 @@ func TestSpacesCreds_PinningTheWrongShapeIsRefusedWithoutMinting(t *testing.T) {
 	})
 
 	t.Run("matching pins are served", func(t *testing.T) {
-		resp := issueFrom(t, b, storage, "spaces", map[string]interface{}{
+		resp := issueFrom(t, b, storage, "spaces", map[string]any{
 			"credential_kind": string(credenvelope.KindS3Credentials),
 		})
 		if resp == nil || resp.IsError() {
@@ -185,7 +185,7 @@ func TestSpacesCreds_RevokeDeletesTheKeyUpstream(t *testing.T) {
 	if resp == nil || resp.IsError() {
 		t.Fatalf("issue failed: %v", resp)
 	}
-	accessKey := resp.Data["credential"].(map[string]interface{})["access_key_id"].(string)
+	accessKey := resp.Data["credential"].(map[string]any)["access_key_id"].(string)
 	if !srv.HasSpacesKey(accessKey) {
 		t.Fatal("the key was not created upstream")
 	}

@@ -25,7 +25,7 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	t.Cleanup(srv.Close)
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: config.StorageView,
-		Data: map[string]interface{}{"host": "akab-test.luna.akamaiapis.net", "akamai_api_url": srv.URL},
+		Data: map[string]any{"host": "akab-test.luna.akamaiapis.net", "akamai_api_url": srv.URL},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}
@@ -40,7 +40,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"host": "akab-test.luna.akamaiapis.net",
 		},
 	}
@@ -73,9 +73,9 @@ func TestMinterSetRejectsInvalidToken(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/bad",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":            "minter-1",
 					"token":         "invalid-no-colons",
 					"never_expires": true,
@@ -100,7 +100,7 @@ func TestConfigWriteMissingHost(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data:      map[string]interface{}{},
+		Data:      map[string]any{},
 	}
 
 	resp, err := b.HandleRequest(t.Context(), req)

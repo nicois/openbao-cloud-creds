@@ -32,7 +32,7 @@ func TestOVHFake_TokenEndpoint(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	body, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(body, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -132,7 +132,7 @@ func TestOVHFake_TokenCountIncreases(t *testing.T) {
 		"client_secret": {"test-client-secret"},
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		resp, err := http.Post(srv.TokenEndpointURL(), "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
 		if err != nil {
 			t.Fatalf("request %d failed: %v", i, err)

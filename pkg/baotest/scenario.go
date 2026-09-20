@@ -96,9 +96,9 @@ type Case struct {
 
 	// Config, MinterSet and Role are the three writes, in that order. Config must
 	// point the plugin at this case's fake.
-	Config    map[string]interface{}
-	MinterSet map[string]interface{}
-	Role      map[string]interface{}
+	Config    map[string]any
+	MinterSet map[string]any
+	Role      map[string]any
 
 	// RoleName, SetName and MinterID name what the three writes created. Each
 	// defaults to the constant above, and each is asserted back out of the response —
@@ -297,7 +297,7 @@ func assertInventoryListsWhatIsOutstanding(t *testing.T, c *Cluster, tc Case, is
 		t.Fatalf("%s lists nothing while a credential is outstanding: an inventory that "+
 			"understates what is live is worse than none", tc.inventoryPath())
 	}
-	keys, _ := listed.Data["keys"].([]interface{})
+	keys, _ := listed.Data["keys"].([]any)
 	credentialID, _ := issued.Data["credential_id"].(string)
 	if !containsString(keys, credentialID) {
 		t.Fatalf("%s does not list the credential just issued (%q): %v", tc.inventoryPath(),
@@ -327,7 +327,7 @@ const fieldRequestedByTokenAccessor = "requested_by_token_accessor"
 // what joins an entry to the cloud's console.
 func assertNoMaterialListed(t *testing.T, issued, listed *api.Secret) {
 	t.Helper()
-	credential, ok := issued.Data["credential"].(map[string]interface{})
+	credential, ok := issued.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("the issuance response carries no credential block: %v", issued.Data)
 	}
@@ -352,21 +352,21 @@ func assertNoMaterialListed(t *testing.T, issued, listed *api.Secret) {
 // neither secret nor long, and matching them would produce false positives.
 const shortestSecret = 16
 
-func inventoryEntry(t *testing.T, listed *api.Secret, key string) map[string]interface{} {
+func inventoryEntry(t *testing.T, listed *api.Secret, key string) map[string]any {
 	t.Helper()
-	info, ok := listed.Data["key_info"].(map[string]interface{})
+	info, ok := listed.Data["key_info"].(map[string]any)
 	if !ok {
 		t.Fatalf("the inventory carries no key_info, so an entry says nothing but an id. A client "+
 			"receives what core marshals, which is what this layer exists to check: %v", listed.Data)
 	}
-	entry, ok := info[key].(map[string]interface{})
+	entry, ok := info[key].(map[string]any)
 	if !ok {
 		t.Fatalf("key_info has no object for %q: %v", key, info)
 	}
 	return entry
 }
 
-func containsString(values []interface{}, want string) bool {
+func containsString(values []any, want string) bool {
 	for _, v := range values {
 		if s, ok := v.(string); ok && s == want {
 			return true
@@ -410,7 +410,7 @@ func assertTokenRevocationCascade(t *testing.T, c *Cluster, tc Case, want int) i
 	AssertUpstream(t, tc, want)
 
 	// The whole point, in one call: nothing addresses the lease, the credential or the plugin.
-	c.WriteWithContext(ctx, "auth/token/revoke-accessor", map[string]interface{}{"accessor": accessor})
+	c.WriteWithContext(ctx, "auth/token/revoke-accessor", map[string]any{"accessor": accessor})
 
 	want -= tc.mintsPerRead()
 	AssertUpstream(t, tc, want)
@@ -450,7 +450,7 @@ func cascadeIdentity(
 		}
 	})
 
-	c.WriteWithContext(ctx, "sys/policies/acl/"+cascadePolicy, map[string]interface{}{
+	c.WriteWithContext(ctx, "sys/policies/acl/"+cascadePolicy, map[string]any{
 		"policy": fmt.Sprintf("path %q {\n  capabilities = [\"read\"]\n}\n", tc.issuePath()),
 	})
 	// Removed for the same reason as the mount: the name is reused by every plugin's run, so one left
@@ -461,7 +461,7 @@ func cascadeIdentity(
 			t.Errorf("leaving policy %s behind: %v", cascadePolicy, err)
 		}
 	})
-	c.WriteWithContext(ctx, "auth/"+cascadeAuthMount+"/role/"+cascadeRole, map[string]interface{}{
+	c.WriteWithContext(ctx, "auth/"+cascadeAuthMount+"/role/"+cascadeRole, map[string]any{
 		"token_policies": cascadePolicy,
 		// Periodic and unlimited, as a node identity is: revocation is the only thing that ends it,
 		// which is exactly why the cascade matters.
@@ -472,11 +472,11 @@ func cascadeIdentity(
 
 	rolePath := "auth/" + cascadeAuthMount + "/role/" + cascadeRole
 	roleID := Str(t, c.ReadWithContext(ctx, rolePath+"/role-id").Data, "role_id")
-	issued := c.WriteWithContext(ctx, rolePath+"/secret-id", map[string]interface{}{
+	issued := c.WriteWithContext(ctx, rolePath+"/secret-id", map[string]any{
 		"metadata": fmt.Sprintf(`{%q: %q}`, cascadeMarkerKey, cascadeMarkerValue),
 	})
 
-	login := c.WriteWithContext(ctx, "auth/"+cascadeAuthMount+"/login", map[string]interface{}{
+	login := c.WriteWithContext(ctx, "auth/"+cascadeAuthMount+"/login", map[string]any{
 		"role_id": roleID, "secret_id": Str(t, issued.Data, "secret_id"),
 	})
 	if login.Auth == nil {
@@ -501,7 +501,7 @@ func cascadeIdentity(
 func assertParentMarkerIsDiscoverable(ctx context.Context, t *testing.T, c *Cluster, accessor string) {
 	t.Helper()
 	lookedUp := c.WriteWithContext(ctx, "auth/token/lookup-accessor",
-		map[string]interface{}{"accessor": accessor})
+		map[string]any{"accessor": accessor})
 	meta := Nested(t, lookedUp.Data, "meta")
 	if got := meta[cascadeMarkerKey]; got != cascadeMarkerValue {
 		t.Fatalf("lookup-accessor reports meta[%s]=%v, want %q. Without the marker here a controller "+
@@ -550,7 +550,7 @@ func assertPurgeUpstream(t *testing.T, c *Cluster, tc Case, live int) {
 		// Matched inside the message rather than parsed off the front of it: the API client
 		// wraps a refusal in its own request context, so what a client actually receives is
 		// the code somewhere in a larger string.
-		err := c.WriteExpectingError(tc.purgePath(), map[string]interface{}{})
+		err := c.WriteExpectingError(tc.purgePath(), map[string]any{})
 		if !strings.Contains(err.Error(), string(credenvelope.ErrUnsupported)) {
 			t.Errorf("revoking upstream on %s was refused with %v, which does not carry %q — an "+
 				"operator cannot tell a cloud that will not do this from one that failed to",
@@ -559,14 +559,14 @@ func assertPurgeUpstream(t *testing.T, c *Cluster, tc Case, live int) {
 		return
 	}
 
-	dry := c.Write(tc.purgePath(), map[string]interface{}{purgeKeyMode: purgeModeDryRun})
+	dry := c.Write(tc.purgePath(), map[string]any{purgeKeyMode: purgeModeDryRun})
 	if got := JSONInt(t, dry.Data[purgeKeyTracked]); got != live {
 		t.Errorf("the dry run reported %s=%d, want the %d credentials this role has issued",
 			purgeKeyTracked, got, live)
 	}
 	AssertUpstream(t, tc, live)
 
-	purged := c.Write(tc.purgePath(), map[string]interface{}{purgeKeyMode: purgeModeNormal})
+	purged := c.Write(tc.purgePath(), map[string]any{purgeKeyMode: purgeModeNormal})
 	if got := Str(t, purged.Data, purgeKeyMode); got != purgeModeNormal {
 		t.Errorf("the purge reported %s=%q, want %q", purgeKeyMode, got, purgeModeNormal)
 	}
@@ -651,7 +651,7 @@ func AssertEnvelope(t *testing.T, tc Case, secret *api.Secret) {
 // version a client should read it as, what shape the credential block is, and which
 // minter issued it. Split out of AssertEnvelope to keep each readable — and because
 // these are the fields a CLIENT keys off, where the ones above are what it consumes.
-func assertEnvelopeMetadata(t *testing.T, tc Case, metadata map[string]interface{}) {
+func assertEnvelopeMetadata(t *testing.T, tc Case, metadata map[string]any) {
 	t.Helper()
 	if got := Str(t, metadata, "api_version"); got != credenvelope.APIVersion {
 		t.Errorf("envelope api_version is %q, want %q", got, credenvelope.APIVersion)
@@ -850,19 +850,19 @@ func otherKindThan(served string) credenvelope.CredentialKind {
 
 // MinterSet wraps minter maps in the "minters" field every minter-set write takes.
 // Values must be JSON-encodable: unlike the in-process tests, these cross the HTTP API.
-func MinterSet(minters ...map[string]interface{}) map[string]interface{} {
-	list := make([]interface{}, 0, len(minters))
+func MinterSet(minters ...map[string]any) map[string]any {
+	list := make([]any, 0, len(minters))
 	for _, one := range minters {
 		list = append(list, one)
 	}
-	return map[string]interface{}{FieldMinters: list}
+	return map[string]any{FieldMinters: list}
 }
 
 // TokenMinter builds the id/token/never_expires minter the token-style clouds take. The
 // id is DefaultMinterID because the scenario asserts that same id back out of the
 // envelope's provenance metadata.
-func TokenMinter(token string) map[string]interface{} {
-	return map[string]interface{}{
+func TokenMinter(token string) map[string]any {
+	return map[string]any{
 		FieldID: DefaultMinterID, FieldToken: token, FieldNeverExpires: true,
 	}
 }
@@ -870,7 +870,7 @@ func TokenMinter(token string) map[string]interface{} {
 // JSONInt reads a number that has been through the API's JSON decoder, which uses
 // json.Number — an int in the plugin is not an int by the time it lands here, which is
 // exactly the coercion this layer exists to exercise.
-func JSONInt(t *testing.T, raw interface{}) int {
+func JSONInt(t *testing.T, raw any) int {
 	t.Helper()
 	switch v := raw.(type) {
 	case json.Number:
@@ -891,7 +891,7 @@ func JSONInt(t *testing.T, raw interface{}) int {
 
 // Str reads a string field, failing with the field name rather than a bare type
 // assertion panic.
-func Str(t *testing.T, data map[string]interface{}, key string) string {
+func Str(t *testing.T, data map[string]any, key string) string {
 	t.Helper()
 	raw, ok := data[key]
 	if !ok {
@@ -905,20 +905,20 @@ func Str(t *testing.T, data map[string]interface{}, key string) string {
 }
 
 // Nested reads an object field.
-func Nested(t *testing.T, data map[string]interface{}, key string) map[string]interface{} {
+func Nested(t *testing.T, data map[string]any, key string) map[string]any {
 	t.Helper()
 	raw, ok := data[key]
 	if !ok {
 		t.Fatalf("field %q is absent from %s", key, fieldNames(data))
 	}
-	value, ok := raw.(map[string]interface{})
+	value, ok := raw.(map[string]any)
 	if !ok {
 		t.Fatalf("field %q is %T, want an object", key, raw)
 	}
 	return value
 }
 
-func fieldNames(data map[string]interface{}) string {
+func fieldNames(data map[string]any) string {
 	names := make([]string, 0, len(data))
 	for name := range data {
 		names = append(names, name)

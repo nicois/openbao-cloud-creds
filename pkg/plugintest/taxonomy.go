@@ -187,7 +187,7 @@ func RunMinterVisibilitySuite(t *testing.T, h Harness) {
 		t.Fatalf("reading %s failed: err=%v resp=%v", h.SetPath, err, resp)
 	}
 
-	minters, ok := resp.Data["minters"].([]map[string]interface{})
+	minters, ok := resp.Data["minters"].([]map[string]any)
 	if !ok || len(minters) == 0 {
 		t.Fatalf("%s exposes no per-minter status (%T), so a minter's health is invisible to the "+
 			"operator who has to act on it", h.SetPath, resp.Data["minters"])

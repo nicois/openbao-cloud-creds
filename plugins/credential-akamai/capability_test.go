@@ -29,7 +29,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Re
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldDefaultTTL: capRoleTTL, fieldMaxTTL: capRoleMaxTTL,
 			fieldGroupID: capGroupID, fieldAPIAccess: capRoleAPIAccess,
 			fieldMinterSet: defaultSetName,
@@ -46,7 +46,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Re
 // client grant access it does not itself hold, so this is the common
 // misconfiguration: a minter provisioned with Identity-Management rights alone.
 func TestCapability_RoleWriteRejectedWhenMinterCannotGrantRoleAPI(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", minter1Token),
 	})
 	srv.SetUngrantableAPIID(capForbiddenAPIID)
@@ -69,7 +69,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotGrantRoleAPI(t *testing.T) 
 // The probe is a real create, so it must also be a real delete: a successful
 // role write leaves no api client behind.
 func TestCapability_ProbeLeavesNoAPIClient(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", minter1Token),
 	})
 
@@ -87,7 +87,7 @@ func TestCapability_ProbeLeavesNoAPIClient(t *testing.T) {
 // role asks for. The probe run before the commit must reject the rotation, leave
 // the set untouched, and delete the successor's upstream api client.
 func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", minter1Token),
 		neverExpiresMinter("minter-2", minter2Token),
 	})
@@ -101,7 +101,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-1"},
+		Data: map[string]any{fieldMinterID: "minter-1"},
 	})
 	if err != nil {
 		t.Fatalf("rotate errored: %v", err)
@@ -127,12 +127,12 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
 // verify_minter_capability=false skips the probe entirely: the role binds even
 // though its api cannot be granted, and no probe client is ever created.
 func TestCapability_DisabledSkipsProbe(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", minter1Token),
 	})
 	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldHost: testHost, fieldAPIURL: srv.URL, fieldVerifyCapability: false,
 		},
 	}); err != nil || (resp != nil && resp.IsError()) {

@@ -27,15 +27,15 @@ const (
 	ovhTrackingPrefix = "active-tokens/"
 )
 
-func ovhMinter(id string) map[string]interface{} {
-	return map[string]interface{}{
+func ovhMinter(id string) map[string]any {
+	return map[string]any{
 		fieldID: id, ovhClientIDField: ovhClientID, ovhClientSecretField: ovhClientSecret,
 		fieldNeverExpires: true,
 	}
 }
 
-func ovhRoleFields() map[string]interface{} {
-	return map[string]interface{}{
+func ovhRoleFields() map[string]any {
+	return map[string]any{
 		fieldDefaultTTL: hourTTL, fieldMaxTTL: hourTTL, fieldMinterSet: defaultSet,
 	}
 }
@@ -48,7 +48,7 @@ func ovhHarness(t *testing.T) plugintest.Harness {
 		Cloud:   "ovh",
 		Factory: credentialovh.Factory,
 		Configure: func(t *testing.T, b logical.Backend, storage logical.Storage) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
+			plugintest.Write(t, b, storage, configPath, map[string]any{
 				ovhRegionField: ovhRegion, ovhTokenEndpointField: srv.TokenEndpointURL(),
 			})
 			plugintest.Write(t, b, storage, setPath, minterSet(ovhMinter(liveMinterID)))
@@ -74,7 +74,7 @@ func ovhHarness(t *testing.T) plugintest.Harness {
 		TrackingPrefix: ovhTrackingPrefix,
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
+			plugintest.Write(t, b, storage, configPath, map[string]any{
 				ovhRegionField: ovhRegion, ovhTokenEndpointField: srv.TokenEndpointURL(),
 				fieldVerifyCapability: verify,
 			})

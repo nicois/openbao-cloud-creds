@@ -2,7 +2,10 @@
 // for all cloud credential plugins.
 package credenvelope
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // APIVersion is the current envelope schema version. Clients pin to this.
 //
@@ -75,12 +78,7 @@ func AllScopeKinds() []ScopeKind {
 
 // ValidScopeKind reports whether kind is in the closed vocabulary.
 func ValidScopeKind(kind ScopeKind) bool {
-	for _, k := range AllScopeKinds() {
-		if k == kind {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(AllScopeKinds(), kind)
 }
 
 // Metadata holds per-response metadata that clients use for version pinning
@@ -105,21 +103,21 @@ type Metadata struct {
 // Envelope is the uniform response shape returned by all cloud credential
 // plugins, regardless of strategy (native, JIT, phased rotation).
 type Envelope struct {
-	Cloud        string                 `json:"cloud"`
-	Role         string                 `json:"role"`
-	Credential   map[string]interface{} `json:"credential"`
-	ExpiresAt    time.Time              `json:"expires_at"`
-	TTLSeconds   int                    `json:"ttl_seconds"`
-	Renewable    bool                   `json:"renewable"`
-	CredentialID string                 `json:"credential_id"`
-	Metadata     Metadata               `json:"metadata"`
+	Cloud        string         `json:"cloud"`
+	Role         string         `json:"role"`
+	Credential   map[string]any `json:"credential"`
+	ExpiresAt    time.Time      `json:"expires_at"`
+	TTLSeconds   int            `json:"ttl_seconds"`
+	Renewable    bool           `json:"renewable"`
+	CredentialID string         `json:"credential_id"`
+	Metadata     Metadata       `json:"metadata"`
 }
 
 // EnvelopeParams collects the inputs needed to construct an Envelope.
 type EnvelopeParams struct {
 	Cloud          string
 	Role           string
-	Credential     map[string]interface{}
+	Credential     map[string]any
 	ExpiresAt      time.Time
 	TTLSeconds     int
 	Renewable      bool
@@ -157,8 +155,8 @@ func NewEnvelope(p EnvelopeParams) *Envelope {
 
 // ToMap converts the Envelope to a map[string]interface{} suitable for use as
 // an OpenBao logical.Response Data field.
-func (e *Envelope) ToMap() map[string]interface{} {
-	return map[string]interface{}{
+func (e *Envelope) ToMap() map[string]any {
+	return map[string]any{
 		"cloud":         e.Cloud,
 		"role":          e.Role,
 		"credential":    e.Credential,
@@ -166,7 +164,7 @@ func (e *Envelope) ToMap() map[string]interface{} {
 		"ttl_seconds":   e.TTLSeconds,
 		"renewable":     e.Renewable,
 		"credential_id": e.CredentialID,
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"scope":           e.Metadata.Scope,
 			"scope_kind":      string(e.Metadata.ScopeKind),
 			"credential_kind": string(e.Metadata.CredentialKind),

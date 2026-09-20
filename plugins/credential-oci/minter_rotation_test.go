@@ -28,16 +28,16 @@ func TestMinterSetRotate_RejectsAndDoesNotMutate(t *testing.T) {
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{testRegionField: testRegionValue},
+		Data: map[string]any{testRegionField: testRegionValue},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config: %v %v", err, resp)
 	}
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/" + rotationTestSet, Storage: storage,
-		Data: map[string]interface{}{mintersKey: []interface{}{
-			map[string]interface{}{"id": "minter-1", minterTokenKey: "tenancy:user1:fp:key", "never_expires": true},
-			map[string]interface{}{"id": "minter-2", minterTokenKey: "tenancy:user2:fp:key", "never_expires": true},
+		Data: map[string]any{mintersKey: []any{
+			map[string]any{"id": "minter-1", minterTokenKey: "tenancy:user1:fp:key", "never_expires": true},
+			map[string]any{"id": "minter-2", minterTokenKey: "tenancy:user2:fp:key", "never_expires": true},
 		}},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write: %v %v", err, resp)
@@ -47,7 +47,7 @@ func TestMinterSetRotate_RejectsAndDoesNotMutate(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/" + rotationTestSet + "/rotate", Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-1"},
+		Data: map[string]any{fieldMinterID: "minter-1"},
 	})
 	if err != nil {
 		t.Fatalf("rotate request errored: %v", err)
@@ -86,7 +86,7 @@ func TestConfigMinterRetireGraceRejectedWhereNothingRetires(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{testRegionField: testRegionValue, fieldMinterRetireGrace: graceSeconds},
+		Data: map[string]any{testRegionField: testRegionValue, fieldMinterRetireGrace: graceSeconds},
 	})
 	if err != nil {
 		t.Fatalf("config write errored: %v", err)

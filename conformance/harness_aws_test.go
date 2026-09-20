@@ -32,8 +32,8 @@ const (
 	awsTrackingPrefix = "active-tokens/"
 )
 
-func awsMinter(id, keyID, secret string) map[string]interface{} {
-	return map[string]interface{}{
+func awsMinter(id, keyID, secret string) map[string]any {
+	return map[string]any{
 		fieldID: id, awsAccessKeyField: keyID, awsSecretKeyField: secret,
 		fieldNeverExpires: true,
 	}
@@ -41,8 +41,8 @@ func awsMinter(id, keyID, secret string) map[string]interface{} {
 
 // awsRoleFields is the mint shape: an ARN to assume, inside the 900s–43200s
 // window AWS can enforce with DurationSeconds.
-func awsRoleFields() map[string]interface{} {
-	return map[string]interface{}{
+func awsRoleFields() map[string]any {
+	return map[string]any{
 		fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 		awsRoleARNField: awsRoleARN, fieldMinterSet: defaultSet,
 	}
@@ -62,7 +62,7 @@ func awsHarness(t *testing.T) plugintest.Harness {
 				})
 		},
 		Configure: func(t *testing.T, b logical.Backend, storage logical.Storage) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{awsRegionField: awsRegion})
+			plugintest.Write(t, b, storage, configPath, map[string]any{awsRegionField: awsRegion})
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(awsMinter(liveMinterID, awsLiveKeyID, awsLiveSecret)))
 			plugintest.Write(t, b, storage, rolePath, awsRoleFields())
@@ -89,7 +89,7 @@ func awsHarness(t *testing.T) plugintest.Harness {
 		TrackingPrefix: awsTrackingPrefix,
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
+			plugintest.Write(t, b, storage, configPath, map[string]any{
 				awsRegionField: awsRegion, fieldVerifyCapability: verify,
 			})
 			plugintest.Write(t, b, storage, setPath,

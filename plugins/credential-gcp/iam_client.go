@@ -130,7 +130,7 @@ func signServiceAccountJWT(key *serviceAccountKey) (jwt, tokenURI string, err er
 	}
 
 	now := time.Now()
-	claims := map[string]interface{}{
+	claims := map[string]any{
 		"iss": key.ClientEmail,
 		// The MINTER's own assertion scope, which is a different question from a
 		// role's scopes: this is the breadth of the minter service account's own

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,7 +61,7 @@ const (
 type AkamaiServer struct {
 	*httptest.Server
 	mu         sync.Mutex
-	clients    map[string]map[string]interface{}
+	clients    map[string]map[string]any
 	nextID     atomic.Int64
 	nextCredID atomic.Int64
 	nextStatus int
@@ -83,8 +84,8 @@ type AkamaiServer struct {
 	// selfAPIAccess / selfGroupAccess are the grants GET /api-clients/self reports
 	// for the signing credential. Rotation replicates these onto the successor, so
 	// tests set them to assert the copy (SetSelfGrants).
-	selfAPIAccess   interface{}
-	selfGroupAccess interface{}
+	selfAPIAccess   any
+	selfGroupAccess any
 	// ungrantableAPIID, when non-zero, is an apiId this account's signing
 	// credential may not delegate: creating an api client whose apiAccess includes
 	// it returns 403. Models the real Akamai rule that an api client cannot grant
@@ -95,26 +96,24 @@ type AkamaiServer struct {
 
 func NewAkamaiServer() *AkamaiServer {
 	s := &AkamaiServer{
-		clients:                 make(map[string]map[string]interface{}),
+		clients:                 make(map[string]map[string]any),
 		expectedSecrets:         make(map[string]string),
 		identityManagementAPIID: fakeIdentityManagementAPIID,
 	}
-	for ct, cs := range fakeStandardCredentials {
-		s.expectedSecrets[ct] = cs
-	}
+	maps.Copy(s.expectedSecrets, fakeStandardCredentials)
 	s.nextID.Store(fakeStartID)
 	s.nextCredID.Store(fakeStartCredID)
 	// Default self-grants: a minter that can reach one content API plus
 	// Identity-Management, which is the realistic shape of an operator-provisioned
 	// minter (it must hold every api its roles hand out).
-	s.selfAPIAccess = map[string]interface{}{
+	s.selfAPIAccess = map[string]any{
 		"allAccessibleApis": false,
-		"apis": []map[string]interface{}{
+		"apis": []map[string]any{
 			{jsonKeyAPIID: fakeContentAPIID, jsonKeyAPIName: "CCU APIs", jsonKeyAccessLevel: accessLevelRW},
 			{jsonKeyAPIID: fakeIdentityManagementAPIID, jsonKeyAPIName: fakeIdentityManagementAPIName, jsonKeyAccessLevel: accessLevelRW},
 		},
 	}
-	s.selfGroupAccess = map[string]interface{}{"groups": []map[string]interface{}{{"groupId": fakeSelfGroupID}}}
+	s.selfGroupAccess = map[string]any{"groups": []map[string]any{{"groupId": fakeSelfGroupID}}}
 	s.Server = httptest.NewServer(s.handler())
 	return s
 }
@@ -122,7 +121,7 @@ func NewAkamaiServer() *AkamaiServer {
 // SetSelfGrants overrides the apiAccess / groupAccess GET /api-clients/self
 // reports. Test-only: rotation copies these onto the successor, so a test can
 // give the incumbent a distinctive grant and assert the successor received it.
-func (s *AkamaiServer) SetSelfGrants(apiAccess, groupAccess interface{}) {
+func (s *AkamaiServer) SetSelfGrants(apiAccess, groupAccess any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.selfAPIAccess = apiAccess
@@ -152,7 +151,7 @@ func (s *AkamaiServer) SetUngrantableAPIID(apiID int) {
 // GrantsForClient returns the apiAccess and groupAccess recorded for a created
 // API client. Test-only: lets a rotation test assert what the successor was
 // actually granted.
-func (s *AkamaiServer) GrantsForClient(clientID string) (apiAccess, groupAccess interface{}) {
+func (s *AkamaiServer) GrantsForClient(clientID string) (apiAccess, groupAccess any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.clients[clientID]
@@ -188,7 +187,7 @@ func (s *AkamaiServer) ProvisionedCount() int {
 func (s *AkamaiServer) AddRawClient(clientID, clientName string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.clients[clientID] = map[string]interface{}{
+	s.clients[clientID] = map[string]any{
 		jsonKeyClientID:   clientID,
 		jsonKeyClientName: clientName,
 		jsonKeyIsLocked:   false,
@@ -202,7 +201,7 @@ func (s *AkamaiServer) AddRawClient(clientID, clientName string) {
 func (s *AkamaiServer) AddRawClientWithCreatedDate(clientID, clientName, createdDate string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.clients[clientID] = map[string]interface{}{
+	s.clients[clientID] = map[string]any{
 		jsonKeyClientID:    clientID,
 		jsonKeyClientName:  clientName,
 		jsonKeyIsLocked:    false,
@@ -266,7 +265,7 @@ func (s *AkamaiServer) checkInjectedError(w http.ResponseWriter) bool {
 
 	if status != 0 {
 		w.WriteHeader(status)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyError:   injectedErrorValue,
 			jsonKeyMessage: fmt.Sprintf("injected %d", status),
 		})
@@ -295,11 +294,11 @@ func parseClientToken(auth string) string {
 // "client_token", "signature") from an EdgeGrid Authorization header.
 func edgeGridAuthField(auth, key string) string {
 	prefix := key + "="
-	for _, part := range strings.Split(auth, ";") {
+	for part := range strings.SplitSeq(auth, ";") {
 		part = strings.TrimSpace(part)
 		part = strings.TrimPrefix(part, "EG1-HMAC-SHA256 ")
-		if strings.HasPrefix(part, prefix) {
-			return strings.TrimPrefix(part, prefix)
+		if after, ok := strings.CutPrefix(part, prefix); ok {
+			return after
 		}
 	}
 	return ""
@@ -311,11 +310,11 @@ func edgeGridAuthField(auth, key string) string {
 // with the canonical request, so taking it verbatim from the header avoids any
 // re-formatting drift in field order/separators.
 func edgeGridAuthData(auth string) string {
-	idx := strings.Index(auth, "signature=")
-	if idx < 0 {
+	before, _, ok := strings.Cut(auth, "signature=")
+	if !ok {
 		return ""
 	}
-	return auth[:idx]
+	return before
 }
 
 // akamaiHMACSHA256 computes HMAC-SHA256, matching the plugin's signing primitive.
@@ -382,7 +381,7 @@ func (s *AkamaiServer) validateEdgeGridSignature(r *http.Request, auth string) b
 
 func (s *AkamaiServer) writeUnauthorized(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusUnauthorized)
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/unauthorized",
 		jsonKeyTitle:  "Unauthorized",
 		jsonKeyDetail: "Missing or invalid EdgeGrid authorization",
@@ -417,14 +416,14 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 	createCred := r.URL.Query().Get("createCredential") == "true"
 
 	var req struct {
-		ClientName      string      `json:"clientName"`
-		AuthorizedUsers []string    `json:"authorizedUsers"`
-		APIAccess       interface{} `json:"apiAccess"`
-		GroupAccess     interface{} `json:"groupAccess"`
+		ClientName      string   `json:"clientName"`
+		AuthorizedUsers []string `json:"authorizedUsers"`
+		APIAccess       any      `json:"apiAccess"`
+		GroupAccess     any      `json:"groupAccess"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/bad-request",
 			jsonKeyTitle:  "Bad Request",
 			jsonKeyDetail: "Invalid request body",
@@ -437,7 +436,7 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if forbidden != 0 && apiAccessGrants(req.APIAccess, forbidden) {
 		w.WriteHeader(http.StatusForbidden)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/forbidden",
 			jsonKeyTitle:  titleForbidden,
 			jsonKeyDetail: fmt.Sprintf("you may not grant access to apiId %d", forbidden),
@@ -447,7 +446,7 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 
 	clientID := fmt.Sprintf("akamai-client-%d", s.nextID.Add(1))
 
-	client := map[string]interface{}{
+	client := map[string]any{
 		jsonKeyClientID:    clientID,
 		jsonKeyClientName:  req.ClientName,
 		"authorizedUsers":  req.AuthorizedUsers,
@@ -457,10 +456,10 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 		jsonKeyCreatedDate: fakeCreatedAt,
 	}
 
-	var credentials []map[string]interface{}
+	var credentials []map[string]any
 	if createCred {
 		credID := s.nextCredID.Add(1)
-		credentials = append(credentials, map[string]interface{}{
+		credentials = append(credentials, map[string]any{
 			"credentialId": credID,
 			"clientToken":  fmt.Sprintf("akab-ct-%s", clientID),
 			"clientSecret": fmt.Sprintf("akab-cs-%s-secret", clientID),
@@ -482,17 +481,17 @@ func (s *AkamaiServer) createClient(w http.ResponseWriter, r *http.Request) {
 // apiAccessGrants reports whether a create-api-client apiAccess body asks for the
 // given apiId. The body is whatever the caller sent, so every level is checked
 // defensively rather than assumed.
-func apiAccessGrants(apiAccess interface{}, apiID int) bool {
-	access, ok := apiAccess.(map[string]interface{})
+func apiAccessGrants(apiAccess any, apiID int) bool {
+	access, ok := apiAccess.(map[string]any)
 	if !ok {
 		return false
 	}
-	apis, ok := access["apis"].([]interface{})
+	apis, ok := access["apis"].([]any)
 	if !ok {
 		return false
 	}
 	for _, entry := range apis {
-		api, ok := entry.(map[string]interface{})
+		api, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -523,7 +522,7 @@ func (s *AkamaiServer) deleteClient(w http.ResponseWriter, r *http.Request) {
 
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/not-found",
 			jsonKeyTitle:  "Not Found",
 			jsonKeyDetail: "API client not found",
@@ -542,10 +541,10 @@ func (s *AkamaiServer) listClients(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	clients := make([]map[string]interface{}, 0, len(s.clients))
+	clients := make([]map[string]any, 0, len(s.clients))
 	for _, c := range s.clients {
 		// List does not return credentials
-		clients = append(clients, map[string]interface{}{
+		clients = append(clients, map[string]any{
 			jsonKeyClientID:    c[jsonKeyClientID],
 			jsonKeyClientName:  c[jsonKeyClientName],
 			jsonKeyIsLocked:    c[jsonKeyIsLocked],
@@ -573,7 +572,7 @@ func (s *AkamaiServer) allowedAPIs(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, []map[string]interface{}{
+	writeJSON(w, []map[string]any{
 		{
 			jsonKeyAPIID:   apiID,
 			jsonKeyAPIName: fakeIdentityManagementAPIName,
@@ -596,7 +595,7 @@ func (s *AkamaiServer) getSelf(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if failPrefix != "" && strings.HasPrefix(token, failPrefix) {
 		w.WriteHeader(http.StatusInternalServerError)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyType:   "https://problems.luna.akamaiapis.net/identity-management/server-error",
 			jsonKeyTitle:  "Server Error",
 			jsonKeyDetail: msgHealthCheckDisabledByKnob,
@@ -609,7 +608,7 @@ func (s *AkamaiServer) getSelf(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		jsonKeyClientID:    "minter-self-id",
 		jsonKeyClientName:  "cloud-creds-minter",
 		jsonKeyIsLocked:    false,

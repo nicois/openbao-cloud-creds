@@ -21,7 +21,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"region": "us-ashburn-1",
 		},
 	}
@@ -35,9 +35,9 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":            "minter-1",
 					"token":         "tenancy:user:fingerprint:key",
 					"never_expires": true,
@@ -55,7 +55,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"user_ocid":       "ocid1.user.oc1..testuser",
 			"slot_count":      2,
 			"rotation_period": 604800,
@@ -102,7 +102,7 @@ func TestCredsRead(t *testing.T) {
 		t.Fatal("expected credential_id")
 	}
 
-	cred, ok := resp.Data["credential"].(map[string]interface{})
+	cred, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected credential map, got %T", resp.Data["credential"])
 	}
@@ -114,7 +114,7 @@ func TestCredsRead(t *testing.T) {
 	}
 
 	// Verify metadata, including minter-set provenance recorded on the slot.
-	meta, ok := resp.Data["metadata"].(map[string]interface{})
+	meta, ok := resp.Data["metadata"].(map[string]any)
 	if !ok || meta["api_version"] != credenvelope.APIVersion {
 		t.Fatalf("bad metadata: %v", resp.Data["metadata"])
 	}
@@ -176,7 +176,7 @@ func TestCredsRead_MultipleReadsReturnSameSlot(t *testing.T) {
 
 	// Multiple reads should return the freshest slot (which is the same until rotation)
 	var credIDs []string
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req := &logical.Request{
 			Operation: logical.ReadOperation,
 			Path:      "creds/test-role",

@@ -89,7 +89,7 @@ func TestDedupe_IsDeterministicallyOrdered(t *testing.T) {
 	}
 }
 
-func putRole(t *testing.T, storage logical.Storage, name string, role map[string]interface{}) {
+func putRole(t *testing.T, storage logical.Storage, name string, role map[string]any) {
 	t.Helper()
 	entry, err := logical.StorageEntryJSON("roles/"+name, role)
 	if err != nil {
@@ -102,9 +102,9 @@ func putRole(t *testing.T, storage logical.Storage, name string, role map[string
 
 func TestRolesBoundTo_FiltersBySetAndSkipsDisabled(t *testing.T) {
 	storage := &logical.InmemStorage{}
-	putRole(t, storage, "in-set", map[string]interface{}{"name": "in-set", "minter_set": "alpha"})
-	putRole(t, storage, "other-set", map[string]interface{}{"name": "other-set", "minter_set": "beta"})
-	putRole(t, storage, "off", map[string]interface{}{"name": "off", "minter_set": "alpha", "disabled": true})
+	putRole(t, storage, "in-set", map[string]any{"name": "in-set", "minter_set": "alpha"})
+	putRole(t, storage, "other-set", map[string]any{"name": "other-set", "minter_set": "beta"})
+	putRole(t, storage, "off", map[string]any{"name": "off", "minter_set": "alpha", "disabled": true})
 
 	bound, err := RolesBoundTo(t.Context(), storage, "alpha")
 	if err != nil {

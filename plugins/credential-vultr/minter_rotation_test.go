@@ -27,16 +27,16 @@ func TestMinterSetRotate_RejectsAndDoesNotMutate(t *testing.T) {
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{},
+		Data: map[string]any{},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config: %v %v", err, resp)
 	}
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/" + rotationTestSet, Storage: storage,
-		Data: map[string]interface{}{fieldMintersKey: []interface{}{
-			map[string]interface{}{"id": "minter-1", minterTokenKey: "vultr_key_1", "never_expires": true},
-			map[string]interface{}{"id": "minter-2", minterTokenKey: "vultr_key_2", "never_expires": true},
+		Data: map[string]any{fieldMintersKey: []any{
+			map[string]any{"id": "minter-1", minterTokenKey: "vultr_key_1", "never_expires": true},
+			map[string]any{"id": "minter-2", minterTokenKey: "vultr_key_2", "never_expires": true},
 		}},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write: %v %v", err, resp)
@@ -46,7 +46,7 @@ func TestMinterSetRotate_RejectsAndDoesNotMutate(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/" + rotationTestSet + "/rotate", Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-1"},
+		Data: map[string]any{fieldMinterID: "minter-1"},
 	})
 	if err != nil {
 		t.Fatalf("rotate request errored: %v", err)
@@ -85,7 +85,7 @@ func TestConfigMinterRetireGraceRejectedWhereNothingRetires(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{fieldMinterRetireGrace: graceSeconds},
+		Data: map[string]any{fieldMinterRetireGrace: graceSeconds},
 	})
 	if err != nil {
 		t.Fatalf("config write errored: %v", err)

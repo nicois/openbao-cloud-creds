@@ -177,7 +177,7 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 		"cloud", cloudName, "minter_set", name,
 		"retired_minter_id", minterID, "successor_id", successor.ID)
 
-	return &logical.Response{Data: map[string]interface{}{
+	return &logical.Response{Data: map[string]any{
 		"successor_id":      successor.ID,
 		"retired_minter_id": minterID,
 		"retired_at":        retiredAt,

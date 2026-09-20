@@ -31,7 +31,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"region": "eu",
 			// The injected token client fails on purpose, so the role-write capability
 			// probe would (correctly) reject the role. This test exercises issuance-time
@@ -49,9 +49,9 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":            "minter-1",
 					"client_id":     "test-client-id",
 					"client_secret": "test-client-secret",
@@ -70,7 +70,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600,
 			"max_ttl":     3600,
 			"minter_set":  "default",

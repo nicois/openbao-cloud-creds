@@ -167,7 +167,7 @@ func (e Endpoint) list(ctx context.Context, req *logical.Request,
 	}
 
 	keys := make([]string, 0, limit)
-	info := make(map[string]interface{}, limit)
+	info := make(map[string]any, limit)
 	last := cursor
 	for index := cursor.prefix; index < len(e.Prefixes) && len(keys) < limit; index++ {
 		prefix := e.Prefixes[index]
@@ -250,12 +250,12 @@ func parseCursor(value string, prefixes int) (cursorAt, *logical.Response) {
 // published renders one record through the allowlist. An unreadable record still yields an entry:
 // the credential IS outstanding, and dropping it would understate the inventory — the one direction
 // that must never happen on this endpoint.
-func published(value []byte) map[string]interface{} {
-	record := map[string]interface{}{}
+func published(value []byte) map[string]any {
+	record := map[string]any{}
 	if err := json.Unmarshal(value, &record); err != nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	out := make(map[string]interface{}, len(record))
+	out := make(map[string]any, len(record))
 	for key, v := range record {
 		if slices.Contains(Fields(), key) {
 			out[key] = v

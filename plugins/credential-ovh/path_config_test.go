@@ -33,7 +33,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"region": "eu",
 		},
 	}
@@ -69,7 +69,7 @@ func TestConfigWrite_InvalidRegion(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"region": "invalid",
 		},
 	}
@@ -92,7 +92,7 @@ func TestConfigWrite_AllRegions(t *testing.T) {
 				Operation: logical.UpdateOperation,
 				Path:      "config",
 				Storage:   storage,
-				Data: map[string]interface{}{
+				Data: map[string]any{
 					"region": region,
 				},
 			}

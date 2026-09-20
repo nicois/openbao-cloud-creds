@@ -92,7 +92,7 @@ func (b *backend) buildSharedSpacesResponse(role *doRole, roleName string,
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			credKeyAccessKeyID:     key.AccessKey,
 			credKeySecretAccessKey: key.SecretKey,
 			credKeyEndpoint:        role.Endpoint,
@@ -115,7 +115,7 @@ func (b *backend) buildSharedSpacesResponse(role *doRole, roleName string,
 	// The minter recorded is the one that MINTED this key, not one selected for this read:
 	// that is what an auditor correlating the credential with an account needs, and on a
 	// re-served key no selection happened at all.
-	resp := b.Secret(secretTypeSpacesKeyRotated).Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret(secretTypeSpacesKeyRotated).Response(env.ToMap(), map[string]any{
 		internalKeyAccessKey: key.AccessKey,
 		fieldRole:            roleName,
 		fieldMinterSet:       key.MinterSet,

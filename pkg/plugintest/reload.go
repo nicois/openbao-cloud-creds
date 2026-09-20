@@ -134,15 +134,15 @@ func assertInvalidPersistedSetIsRefused(t *testing.T, h Harness) {
 	if err != nil || entry == nil {
 		t.Fatalf("could not read the persisted minter set at %q: err=%v entry=%v", h.SetPath, err, entry)
 	}
-	var set map[string]interface{}
+	var set map[string]any
 	if err := json.Unmarshal(entry.Value, &set); err != nil {
 		t.Fatalf("persisted minter set is not JSON: %v", err)
 	}
-	minters, ok := set["minters"].([]interface{})
+	minters, ok := set["minters"].([]any)
 	if !ok || len(minters) == 0 {
 		t.Fatalf("persisted minter set holds no minters: %v", set)
 	}
-	first, ok := minters[0].(map[string]interface{})
+	first, ok := minters[0].(map[string]any)
 	if !ok {
 		t.Fatalf("minters[0] is %T, want an object", minters[0])
 	}
@@ -151,7 +151,7 @@ func assertInvalidPersistedSetIsRefused(t *testing.T, h Harness) {
 	// left untouched so the only thing wrong is the set's composition.
 	delete(first, "never_expires")
 	first["expires_at"] = time.Now().Add(30 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	set["minters"] = []interface{}{first}
+	set["minters"] = []any{first}
 
 	value, err := json.Marshal(set)
 	if err != nil {
@@ -193,7 +193,7 @@ func assertFutureSchemaSetIsRefused(t *testing.T, h Harness) {
 	if err != nil || entry == nil {
 		t.Fatalf("could not read the persisted minter set at %q: err=%v entry=%v", h.SetPath, err, entry)
 	}
-	var set map[string]interface{}
+	var set map[string]any
 	if err := json.Unmarshal(entry.Value, &set); err != nil {
 		t.Fatalf("persisted minter set is not JSON: %v", err)
 	}

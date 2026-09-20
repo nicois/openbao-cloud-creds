@@ -24,7 +24,7 @@ func fillTracking(t *testing.T, storage logical.Storage, minterID string, n int)
 	for i := range n {
 		entry, err := logical.StorageEntryJSON(
 			fmt.Sprintf("%s%s-%d", activeTrackingPrefix, minterID, i),
-			map[string]interface{}{fieldRole: "test-role", "minter": minterID})
+			map[string]any{fieldRole: "test-role", "minter": minterID})
 		if err != nil {
 			t.Fatalf("encoding a tracking record failed: %v", err)
 		}
@@ -44,7 +44,7 @@ func twoMinterBackend(t *testing.T) (*backend, logical.Storage) {
 		t.Fatalf("factory failed: %v", err)
 	}
 	storage := cfg.StorageView
-	write := func(path string, data map[string]interface{}) {
+	write := func(path string, data map[string]any) {
 		t.Helper()
 		resp, err := b.HandleRequest(t.Context(), &logical.Request{
 			Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
@@ -55,10 +55,10 @@ func twoMinterBackend(t *testing.T) (*backend, logical.Storage) {
 	}
 	// No api_url: nothing here reaches upstream, and the capability probe is off by omission of a
 	// bound role at set-write time.
-	write("minter-sets/default", map[string]interface{}{
-		"minters": []interface{}{
-			map[string]interface{}{"id": "minter-1", minterTokenKey: "dop_v1_a", "never_expires": true},
-			map[string]interface{}{"id": "minter-2", minterTokenKey: "dop_v1_b", "never_expires": true},
+	write("minter-sets/default", map[string]any{
+		"minters": []any{
+			map[string]any{"id": "minter-1", minterTokenKey: "dop_v1_a", "never_expires": true},
+			map[string]any{"id": "minter-2", minterTokenKey: "dop_v1_b", "never_expires": true},
 		},
 	})
 	return b.(*backend), storage

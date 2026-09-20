@@ -14,7 +14,7 @@ func writeSpacesRole(t *testing.T, b logical.Backend, storage logical.Storage, n
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/" + name, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 900, "max_ttl": 3600,
 			"credential_type": "spaces_key",
 			"grants":          "backups:read",
@@ -113,7 +113,7 @@ func TestSpacesCapability_GrantsArePartOfTheProbeIdentity(t *testing.T) {
 	srv.SetForbidSpacesKeyCreate(true)
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/writer", Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 900, "max_ttl": 3600,
 			"credential_type": "spaces_key",
 			"grants":          "archive:readwrite",

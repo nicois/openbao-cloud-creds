@@ -284,7 +284,7 @@ func (c *Cluster) Reload(plugin string) {
 // need it read back here rather than inferred: a report assembled by the plugin has crossed
 // the RPC boundary and OpenBao's JSON layer by the time a client sees it, and its numbers
 // arrive as json.Number.
-func (c *Cluster) Write(path string, data map[string]interface{}) *api.Secret {
+func (c *Cluster) Write(path string, data map[string]any) *api.Secret {
 	c.t.Helper()
 	secret, err := c.client.Logical().Write(path, data)
 	if err != nil {
@@ -296,7 +296,7 @@ func (c *Cluster) Write(path string, data map[string]interface{}) *api.Secret {
 // WriteWithContext is Write, bound to a context so a hung server fails the test instead of
 // hanging it. Callers pass t.Context(), which is cancelled when the test ends.
 func (c *Cluster) WriteWithContext(
-	ctx context.Context, path string, data map[string]interface{},
+	ctx context.Context, path string, data map[string]any,
 ) *api.Secret {
 	c.t.Helper()
 	secret, err := c.client.Logical().WriteWithContext(ctx, path, data)
@@ -321,7 +321,7 @@ func (c *Cluster) ReadWithContext(ctx context.Context, path string) *api.Secret 
 
 // WriteExpectingError is for the writes that MUST be refused. It returns the error so the
 // caller can assert on the code the client actually receives.
-func (c *Cluster) WriteExpectingError(path string, data map[string]interface{}) error {
+func (c *Cluster) WriteExpectingError(path string, data map[string]any) error {
 	c.t.Helper()
 	secret, err := c.client.Logical().Write(path, data)
 	if err == nil {

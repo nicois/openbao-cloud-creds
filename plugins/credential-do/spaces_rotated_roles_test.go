@@ -2,6 +2,7 @@ package credentialdo_test
 
 import (
 	"fmt"
+	"maps"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -9,17 +10,15 @@ import (
 
 // rotatedRole is the smallest complete rotated-Spaces role: the two Spaces fields plus the
 // two lifecycle fields, both of which an operator must state rather than inherit.
-func rotatedRole(extra map[string]interface{}) map[string]interface{} {
-	data := map[string]interface{}{
+func rotatedRole(extra map[string]any) map[string]any {
+	data := map[string]any{
 		"credential_type": "spaces_key_rotated",
 		"grants":          "backups:read",
 		"region":          "nyc3",
 		"rotation_period": "2160h", // 90 days
 		"overlap_ttl":     "48h",
 	}
-	for k, v := range extra {
-		data[k] = v
-	}
+	maps.Copy(data, extra)
 	return data
 }
 
@@ -64,7 +63,7 @@ func TestRotatedSpacesRole_ValidatesTheLifecycleNumbers(t *testing.T) {
 	// remaining life is exactly overlap_ttl — the instant it rotates — so max_ttl above
 	// that is a promise the plugin cannot keep.
 	t.Run("max_ttl above overlap_ttl", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "toolong", rotatedRole(map[string]interface{}{
+		resp := writeRole(t, b, storage, "toolong", rotatedRole(map[string]any{
 			"max_ttl": "72h",
 		}))
 		requireRoleRefused(t, resp, "max_ttl", "overlap_ttl")
@@ -83,7 +82,7 @@ func TestRotatedSpacesRole_ValidatesTheLifecycleNumbers(t *testing.T) {
 	})
 
 	t.Run("rotation_period below the floor", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "tooshort", rotatedRole(map[string]interface{}{
+		resp := writeRole(t, b, storage, "tooshort", rotatedRole(map[string]any{
 			"rotation_period": "30m",
 			"overlap_ttl":     "10m",
 			"max_ttl":         "5m",
@@ -94,7 +93,7 @@ func TestRotatedSpacesRole_ValidatesTheLifecycleNumbers(t *testing.T) {
 	// Jitter is subtracted from the period, so a jitter at or above it could schedule a
 	// rotation at or before the mint itself.
 	t.Run("rotation_jitter at the period", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "alljitter", rotatedRole(map[string]interface{}{
+		resp := writeRole(t, b, storage, "alljitter", rotatedRole(map[string]any{
 			"rotation_jitter": "2160h",
 		}))
 		requireRoleRefused(t, resp, "rotation_jitter", "rotation_period")
@@ -103,7 +102,7 @@ func TestRotatedSpacesRole_ValidatesTheLifecycleNumbers(t *testing.T) {
 	// An overlap longer than the period would keep more than two keys alive at once,
 	// which is how a 200-per-account cap is reached without anybody adding a role.
 	t.Run("overlap_ttl above the period", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "bigoverlap", rotatedRole(map[string]interface{}{
+		resp := writeRole(t, b, storage, "bigoverlap", rotatedRole(map[string]any{
 			"overlap_ttl": "4320h",
 		}))
 		requireRoleRefused(t, resp, "overlap_ttl", "rotation_period")
@@ -115,7 +114,7 @@ func TestRotatedSpacesRole_ValidatesTheLifecycleNumbers(t *testing.T) {
 func TestRotatedSpacesRole_AcceptsAnExplicitZeroJitter(t *testing.T) {
 	b, storage := spacesRoleSetup(t)
 
-	resp := writeRole(t, b, storage, "predictable", rotatedRole(map[string]interface{}{
+	resp := writeRole(t, b, storage, "predictable", rotatedRole(map[string]any{
 		"rotation_jitter": "0",
 	}))
 	if resp != nil && resp.IsError() {
@@ -134,18 +133,18 @@ func TestRotatedSpacesRole_RejectsLifecycleFieldsOnTheOtherTypes(t *testing.T) {
 
 	for _, tc := range []struct {
 		name  string
-		data  map[string]interface{}
+		data  map[string]any
 		field string
 	}{
-		{"rotation_period on a spaces_key role", map[string]interface{}{
+		{"rotation_period on a spaces_key role", map[string]any{
 			"credential_type": "spaces_key", "grants": "backups:read", "region": "nyc3",
 			"rotation_period": "2160h",
 		}, "rotation_period"},
-		{"overlap_ttl on a spaces_key role", map[string]interface{}{
+		{"overlap_ttl on a spaces_key role", map[string]any{
 			"credential_type": "spaces_key", "grants": "backups:read", "region": "nyc3",
 			"overlap_ttl": "48h",
 		}, "overlap_ttl"},
-		{"rotation_jitter on a token role", map[string]interface{}{
+		{"rotation_jitter on a token role", map[string]any{
 			"credential_type": "token", "scopes": "droplet:read",
 			"rotation_jitter": "1h",
 		}, "rotation_jitter"},
@@ -174,7 +173,7 @@ func TestRotatedSpacesRole_KeepsTheSpacesPrivilegeModel(t *testing.T) {
 	})
 
 	t.Run("scopes", func(t *testing.T) {
-		resp := writeRole(t, b, storage, "scoped2", rotatedRole(map[string]interface{}{
+		resp := writeRole(t, b, storage, "scoped2", rotatedRole(map[string]any{
 			"scopes": "droplet:read",
 		}))
 		requireRoleRefused(t, resp, "scopes")
@@ -193,7 +192,7 @@ func TestRotatedSpacesRole_DisableAloneIsACompleteWrite(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/patchme",
 		Storage:   storage,
-		Data:      map[string]interface{}{"disabled": true},
+		Data:      map[string]any{"disabled": true},
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("disabling the role alone was refused: err=%v resp=%v", err, resp)

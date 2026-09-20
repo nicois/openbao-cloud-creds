@@ -52,7 +52,7 @@ func assertRevokeWithoutInternalDataReleases(t *testing.T, h Harness) {
 	// removing it would test the SDK rather than the plugin. What is left is a lease
 	// whose every plugin-written key a newer binary renamed.
 	stripped := *resp.Secret
-	stripped.InternalData = map[string]interface{}{
+	stripped.InternalData = map[string]any{
 		"secret_type": resp.Secret.InternalData["secret_type"],
 	}
 

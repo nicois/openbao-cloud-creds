@@ -25,13 +25,13 @@ func TestDOFake_CreateToken(t *testing.T) {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	token, ok := result["token"].(map[string]interface{})
+	token, ok := result["token"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected token object, got %v", result)
 	}
@@ -50,13 +50,13 @@ func TestDOFake_DeleteToken(t *testing.T) {
 	// Create first
 	body := `{"name":"cloud-creds-test-lease1","scopes":["read"]}`
 	resp, _ := http.Post(srv.URL+"/v2/tokens", "application/json", bytes.NewBufferString(body))
-	var createResult map[string]interface{}
+	var createResult map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &createResult); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 	resp.Body.Close()
-	tokenID := createResult["token"].(map[string]interface{})["id"].(string)
+	tokenID := createResult["token"].(map[string]any)["id"].(string)
 
 	// Delete
 	req, _ := http.NewRequest("DELETE", srv.URL+"/v2/tokens/"+tokenID, http.NoBody)

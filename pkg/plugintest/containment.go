@@ -274,7 +274,7 @@ func containPurgeDefaultsToDeleting(t *testing.T, h Harness) {
 		readOrFail(t, b, storage, h.IssuePath)
 	}
 
-	resp := TryWrite(t, b, storage, purgePath(h.RolePath), map[string]interface{}{})
+	resp := TryWrite(t, b, storage, purgePath(h.RolePath), map[string]any{})
 	if resp == nil || resp.IsError() {
 		t.Fatalf("%s with no mode was refused: %v", purgePath(h.RolePath), resp)
 	}
@@ -412,7 +412,7 @@ func containPurgeUnsupported(t *testing.T, h Harness) {
 	}
 	b, storage := newConfiguredBackend(t, h)
 
-	write := TryWrite(t, b, storage, purgePath(h.RolePath), map[string]interface{}{})
+	write := TryWrite(t, b, storage, purgePath(h.RolePath), map[string]any{})
 	assertCode(t, write, credenvelope.ErrUnsupported,
 		"revoking upstream where the cloud offers nothing to delete")
 	assertCode(t, Read(t, b, storage, purgePath(h.RolePath)), credenvelope.ErrUnsupported,
@@ -452,7 +452,7 @@ func purgePath(rolePath string) string {
 // purgeUpstream runs the endpoint in one mode and fails on anything but a report.
 func purgeUpstream(t *testing.T, b logical.Backend, storage logical.Storage, rolePath, mode string) *logical.Response {
 	t.Helper()
-	resp := TryWrite(t, b, storage, purgePath(rolePath), map[string]interface{}{purgeKeyMode: mode})
+	resp := TryWrite(t, b, storage, purgePath(rolePath), map[string]any{purgeKeyMode: mode})
 	if resp == nil {
 		t.Fatalf("%s in mode %s returned no response, so nothing reports what it did",
 			purgePath(rolePath), mode)
@@ -508,7 +508,7 @@ func trackingRecords(t *testing.T, storage logical.Storage, prefix string) int {
 // assertExactKeys holds a response to exactly the documented key set, in both directions:
 // a missing key breaks a reader, and an extra one is a field nothing documents and
 // everything starts depending on.
-func assertExactKeys(t *testing.T, data map[string]interface{}, want []string, what string) {
+func assertExactKeys(t *testing.T, data map[string]any, want []string, what string) {
 	t.Helper()
 	for _, key := range want {
 		if _, present := data[key]; !present {
@@ -525,14 +525,14 @@ func assertExactKeys(t *testing.T, data map[string]interface{}, want []string, w
 // disable writes just the flag to an existing role and fails on anything but success.
 func disable(t *testing.T, b logical.Backend, storage logical.Storage, rolePath string, disabled bool) {
 	t.Helper()
-	resp := TryWrite(t, b, storage, rolePath, map[string]interface{}{fieldDisabled: disabled})
+	resp := TryWrite(t, b, storage, rolePath, map[string]any{fieldDisabled: disabled})
 	if resp != nil && resp.IsError() {
 		t.Fatalf("writing %s=%v to %s was refused: %v", fieldDisabled, disabled, rolePath, resp.Error())
 	}
 }
 
 // roleDefinition reads a role and returns its data, failing if it is absent.
-func roleDefinition(t *testing.T, b logical.Backend, storage logical.Storage, rolePath string) map[string]interface{} {
+func roleDefinition(t *testing.T, b logical.Backend, storage logical.Storage, rolePath string) map[string]any {
 	t.Helper()
 	resp := Read(t, b, storage, rolePath)
 	if resp == nil {

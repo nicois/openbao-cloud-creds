@@ -23,15 +23,15 @@ func exoscaleCase(t *testing.T) e2eCase {
 	srv := fakes.NewExoscaleServer()
 	t.Cleanup(srv.Close)
 
-	minter := map[string]interface{}{
+	minter := map[string]any{
 		fieldID: liveMinterID, exoscaleKeyField: exoscaleMinterKey, fieldNeverExpires: true,
 	}
 
 	return e2eCase{
 		Cloud:     "exoscale",
-		Config:    map[string]interface{}{exoscaleAPIURLField: srv.URL},
+		Config:    map[string]any{exoscaleAPIURLField: srv.URL},
 		MinterSet: minterSet(minter),
-		Role: map[string]interface{}{
+		Role: map[string]any{
 			fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 			exoscaleRoleIDField: exoscaleRoleID, fieldMinterSet: defaultSet,
 		},

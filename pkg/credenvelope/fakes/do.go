@@ -3,6 +3,7 @@ package fakes
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -13,12 +14,12 @@ import (
 type DOServer struct {
 	*httptest.Server
 	mu     sync.Mutex
-	tokens map[string]map[string]interface{}
+	tokens map[string]map[string]any
 	// spacesKeys holds Spaces access keys, keyed by access_key. A SEPARATE store from
 	// tokens because they are a different credential type with a different id space, a
 	// different endpoint and — on real DigitalOcean — a different answer to whether a
 	// PAT may manage them at all (token management is fenced, Spaces keys are not).
-	spacesKeys         map[string]map[string]interface{}
+	spacesKeys         map[string]map[string]any
 	nextID             atomic.Int64
 	nextSpacesID       atomic.Int64
 	nextStatus         int
@@ -39,8 +40,8 @@ type DOServer struct {
 
 func NewDOServer() *DOServer {
 	s := &DOServer{
-		tokens:     make(map[string]map[string]interface{}),
-		spacesKeys: make(map[string]map[string]interface{}),
+		tokens:     make(map[string]map[string]any),
+		spacesKeys: make(map[string]map[string]any),
 	}
 	s.nextID.Store(fakeStartID)
 	s.nextSpacesID.Store(fakeStartCredID)
@@ -61,7 +62,7 @@ func (s *DOServer) ProvisionedCount() int {
 func (s *DOServer) AddRawToken(id, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tokens[id] = map[string]interface{}{
+	s.tokens[id] = map[string]any{
 		"id":        id,
 		jsonKeyName: name,
 	}
@@ -74,7 +75,7 @@ func (s *DOServer) AddRawToken(id, name string) {
 func (s *DOServer) AddRawTokenWithCreatedAt(id, name, createdAt string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tokens[id] = map[string]interface{}{
+	s.tokens[id] = map[string]any{
 		"id":             id,
 		jsonKeyName:      name,
 		jsonKeyCreatedAt: createdAt,
@@ -111,10 +112,10 @@ func (s *DOServer) AddRawSpacesKey(accessKey, name string) {
 func (s *DOServer) AddRawSpacesKeyWithCreatedAt(accessKey, name, createdAt string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.spacesKeys[accessKey] = map[string]interface{}{
+	s.spacesKeys[accessKey] = map[string]any{
 		jsonKeyName:      name,
 		jsonKeyAccessKey: accessKey,
-		jsonKeyGrants:    []interface{}{},
+		jsonKeyGrants:    []any{},
 		jsonKeyCreatedAt: createdAt,
 	}
 }
@@ -223,7 +224,7 @@ func (s *DOServer) fenced(w http.ResponseWriter) bool {
 	// distinguish the two reads the same signal here.
 	w.Header().Set("X-Response-From", "Edge-Gateway")
 	w.WriteHeader(http.StatusForbidden)
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		"id":           titleForbidden,
 		jsonKeyMessage: msgOperationNotAllow,
 	})
@@ -250,7 +251,7 @@ func (s *DOServer) checkInjectedError(w http.ResponseWriter) bool {
 
 	if status != 0 {
 		w.WriteHeader(status)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			"id":           injectedErrorValue,
 			jsonKeyMessage: fmt.Sprintf("injected %d", status),
 		})
@@ -279,7 +280,7 @@ func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 		// The capitalised "Forbidden" and the generic message are DO's, not a
 		// convenience for the test: a fake that invents friendlier errors is a
 		// fake whose error handling is untested.
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			"id":           titleForbidden,
 			jsonKeyMessage: msgOperationNotAllow,
 		})
@@ -296,7 +297,7 @@ func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := fmt.Sprintf("tok-%d", s.nextID.Add(1))
-	token := map[string]interface{}{
+	token := map[string]any{
 		"id":               id,
 		jsonKeyName:        req.Name,
 		"scopes":           grantedScopes(req.Scopes, forced, withheld),
@@ -309,7 +310,7 @@ func (s *DOServer) createToken(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, map[string]interface{}{"token": token})
+	writeJSON(w, map[string]any{"token": token})
 }
 
 func (s *DOServer) deleteToken(w http.ResponseWriter, r *http.Request) {
@@ -331,7 +332,7 @@ func (s *DOServer) listTokens(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	tokens := make([]map[string]interface{}, 0, len(s.tokens))
+	tokens := make([]map[string]any, 0, len(s.tokens))
 	for _, t := range s.tokens {
 		tokens = append(tokens, t)
 	}
@@ -343,7 +344,7 @@ func (s *DOServer) listTokens(w http.ResponseWriter, r *http.Request) {
 	// fenced at DO's edge gateway for every PAT, so this listing never runs against the real
 	// API. Inventing pagination here would put a shape in the fake that nothing verifies,
 	// which is the opposite of what a fake is for. Don't "fix" it for symmetry.
-	writeJSON(w, map[string]interface{}{"tokens": tokens})
+	writeJSON(w, map[string]any{"tokens": tokens})
 }
 
 // createSpacesKey mirrors POST /v2/spaces/keys: 201 with the full key object, and the
@@ -361,7 +362,7 @@ func (s *DOServer) createSpacesKey(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if forbid {
 		w.WriteHeader(http.StatusForbidden)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			"id":           titleForbidden,
 			jsonKeyMessage: msgOperationNotAllow,
 		})
@@ -369,8 +370,8 @@ func (s *DOServer) createSpacesKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name   string                   `json:"name"`
-		Grants []map[string]interface{} `json:"grants"`
+		Name   string           `json:"name"`
+		Grants []map[string]any `json:"grants"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -385,10 +386,10 @@ func (s *DOServer) createSpacesKey(w http.ResponseWriter, r *http.Request) {
 	accessKey := fmt.Sprintf("DO00FAKEACCESS%06d", n)
 	grants := req.Grants
 	if grants == nil {
-		grants = []map[string]interface{}{}
+		grants = []map[string]any{}
 	}
 
-	key := map[string]interface{}{
+	key := map[string]any{
 		jsonKeyName:      req.Name,
 		jsonKeyAccessKey: accessKey,
 		jsonKeyGrants:    grants,
@@ -400,14 +401,12 @@ func (s *DOServer) createSpacesKey(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	// The secret is added to the RESPONSE only, never to the stored record.
-	response := make(map[string]interface{}, len(key)+1)
-	for k, v := range key {
-		response[k] = v
-	}
+	response := make(map[string]any, len(key)+1)
+	maps.Copy(response, key)
 	response[jsonKeySecretKey] = fmt.Sprintf("fake-spaces-secret-%d", n)
 
 	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, map[string]interface{}{"key": response})
+	writeJSON(w, map[string]any{"key": response})
 }
 
 func (s *DOServer) deleteSpacesKey(w http.ResponseWriter, r *http.Request) {
@@ -423,7 +422,7 @@ func (s *DOServer) listSpacesKeys(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	keys := make([]map[string]interface{}, 0, len(s.spacesKeys))
+	keys := make([]map[string]any, 0, len(s.spacesKeys))
 	for _, k := range s.spacesKeys {
 		keys = append(keys, k)
 	}
@@ -447,8 +446,8 @@ func (s *DOServer) getAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, map[string]interface{}{
-		jsonKeyAccount: map[string]interface{}{
+	writeJSON(w, map[string]any{
+		jsonKeyAccount: map[string]any{
 			"uuid":   "fake-account-uuid",
 			"status": "active",
 		},

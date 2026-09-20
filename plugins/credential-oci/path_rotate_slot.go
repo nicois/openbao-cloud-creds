@@ -80,7 +80,7 @@ func (b *backend) pathRotateSlot(ctx context.Context, req *logical.Request, d *f
 	}
 
 	return &logical.Response{
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldRole:          roleName,
 			fieldSlotIndex:     slotIndex,
 			"rotated":          true,

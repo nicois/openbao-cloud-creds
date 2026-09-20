@@ -34,7 +34,7 @@ func TestRotatedSpacesState_FromANewerSchemaIsRefusedAndLeftIntact(t *testing.T)
 	if err != nil || entry == nil {
 		t.Fatalf("no shared-key record at %q: err=%v entry=%v", rotatedStateKey, err, entry)
 	}
-	var state map[string]interface{}
+	var state map[string]any
 	if err := json.Unmarshal(entry.Value, &state); err != nil {
 		t.Fatalf("the persisted record is not JSON: %v", err)
 	}

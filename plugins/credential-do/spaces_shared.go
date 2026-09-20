@@ -392,7 +392,7 @@ func (b *backend) rotateSharedSpacesKey(ctx context.Context, storage logical.Sto
 // this deployment (A12), and this is the event that explains why a client saw a new
 // credential and when the old one stops working.
 func (b *backend) logRotation(roleName, reason string, replaced, minted *sharedSpacesKey, overlap time.Duration) {
-	fields := []interface{}{
+	fields := []any{
 		fieldCloud, cloudName, fieldRole, roleName, "reason", reason,
 		"access_key", minted.AccessKey, "next_rotation", minted.RotateAt.UTC().Format(time.RFC3339),
 	}
@@ -426,7 +426,7 @@ func (b *backend) trackSpacesKey(ctx context.Context, storage logical.Storage, r
 	rec spacesKeyRecord,
 ) error {
 	entry, err := logical.StorageEntryJSON(spacesTrackingPrefix+rec.accessKey,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole:         rec.roleName,
 			trackFieldMinter:  rec.minterID,
 			trackFieldCreated: rec.createdAt.UTC().Format(time.RFC3339),

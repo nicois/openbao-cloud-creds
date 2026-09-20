@@ -143,7 +143,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			fieldUsername: client.username,
 			"password":    tokenResp.Token,
 		},
@@ -168,7 +168,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	// further — while the question an incident asks is which unit is compromised, and core
 	// handed us the answer.
 	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+tokenResp.ID,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole: roleName,
 			"minter":  minterID,
 			"created": now.UTC().Format(time.RFC3339),
@@ -186,7 +186,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		}
 	}
 
-	resp := b.Secret("upcloud_token").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret("upcloud_token").Response(env.ToMap(), map[string]any{
 		"upstream_token_id": tokenResp.ID,
 		fieldRole:           roleName,
 		fieldMinterSet:      setName,

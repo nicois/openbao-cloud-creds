@@ -75,7 +75,7 @@ func (s *OVHServer) checkInjectedError(w http.ResponseWriter) bool {
 	if status != 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyError:            injectedErrorValue,
 			jsonKeyErrorDescription: fmt.Sprintf("injected %d", status),
 		})
@@ -92,7 +92,7 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyError:            "invalid_request",
 			jsonKeyErrorDescription: "failed to parse form",
 		})
@@ -103,7 +103,7 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	if grantType != "client_credentials" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyError:            "unsupported_grant_type",
 			jsonKeyErrorDescription: fmt.Sprintf("unsupported grant_type: %s", grantType),
 		})
@@ -121,7 +121,7 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	if forbidMint {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyError:            "insufficient_scope",
 			jsonKeyErrorDescription: "this service account may not mint tokens",
 		})
@@ -131,7 +131,7 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	if !clientExists || clientSecret != expectedSecret {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyError:            "invalid_client",
 			jsonKeyErrorDescription: "invalid client_id or client_secret",
 		})
@@ -143,7 +143,7 @@ func (s *OVHServer) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		jsonKeyAccessToken: token,
 		"token_type":       "Bearer",
 		"expires_in":       fakeTokenExpirySeconds,

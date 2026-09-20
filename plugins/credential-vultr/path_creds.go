@@ -85,7 +85,7 @@ func (b *backend) recordIssuedUser(ctx context.Context, req *logical.Request,
 			"automatically reclaimable if it leaks", "cloud", cloudName, "id", u.userID, "error", err)
 	}
 	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+u.userID,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole: u.roleName,
 			"minter":  u.minterID,
 			"created": u.now.UTC().Format(time.RFC3339),
@@ -177,7 +177,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return errResp, nil
 	}
 
-	resp := b.Secret("vultr_user").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret("vultr_user").Response(env.ToMap(), map[string]any{
 		"upstream_user_id": userResp.User.ID,
 		fieldRole:          roleName,
 		fieldMinterSet:     setName,
@@ -467,7 +467,7 @@ func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
 	return credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  a.roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			"api_key": a.resp.User.APIKey,
 		},
 		ExpiresAt:    a.expiresAt,

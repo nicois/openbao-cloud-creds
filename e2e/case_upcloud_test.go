@@ -26,12 +26,12 @@ func upcloudCase(t *testing.T) e2eCase {
 
 	return e2eCase{
 		Cloud: "upcloud",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			upcloudUsernameField: upcloudUsername,
 			upcloudAPIURLField:   srv.URL,
 		},
 		MinterSet: minterSet(tokenMinter(upcloudMinterToken)),
-		Role: map[string]interface{}{
+		Role: map[string]any{
 			fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 			fieldScopes: upcloudScopes, fieldMinterSet: defaultSet,
 		},

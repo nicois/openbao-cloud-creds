@@ -29,7 +29,7 @@ func PrefillRoleWrite(
 	storage logical.Storage,
 	key string,
 	d *framework.FieldData,
-	render func(raw []byte) (map[string]interface{}, error),
+	render func(raw []byte) (map[string]any, error),
 ) error {
 	entry, err := storage.Get(ctx, key)
 	if err != nil {
@@ -54,9 +54,9 @@ func PrefillRoleWrite(
 
 // prefill copies stored values into the request body for the schema fields the
 // request did not carry.
-func prefill(d *framework.FieldData, stored map[string]interface{}) {
+func prefill(d *framework.FieldData, stored map[string]any) {
 	if d.Raw == nil {
-		d.Raw = make(map[string]interface{}, len(stored))
+		d.Raw = make(map[string]any, len(stored))
 	}
 	for name, value := range stored {
 		if _, supplied := d.Raw[name]; supplied {

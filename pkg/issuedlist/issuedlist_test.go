@@ -17,7 +17,7 @@ const testPrefix = "active-tokens/"
 // API. Without the filter, a field added to a record — a token, a password, a pre-signed URL —
 // becomes public in a diff that mentions no endpoint at all.
 func TestAnUnpublishedFieldIsDropped(t *testing.T) {
-	storage := seed(t, map[string]map[string]interface{}{
+	storage := seed(t, map[string]map[string]any{
 		"AKIAEXAMPLE": {
 			"role":              "executor",
 			"minter":            "aws_v1",
@@ -60,16 +60,16 @@ func TestAnUnreadableRecordStillCountsAsOutstanding(t *testing.T) {
 // TestPagingVisitsEveryEntryExactlyOnce covers a cursor's two failure modes — skipping an entry at a
 // page boundary and repeating one — at the page size that makes boundaries most frequent.
 func TestPagingVisitsEveryEntryExactlyOnce(t *testing.T) {
-	seeded := map[string]map[string]interface{}{}
+	seeded := map[string]map[string]any{}
 	for _, id := range []string{"a", "b", "c", "d", "e"} {
-		seeded[id] = map[string]interface{}{"role": "executor"}
+		seeded[id] = map[string]any{"role": "executor"}
 	}
 	storage := seed(t, seeded)
 
 	seen := map[string]int{}
 	after := ""
 	for range len(seeded) + 2 {
-		resp := list(t, storage, map[string]interface{}{FieldLimit: 2, FieldAfter: after})
+		resp := list(t, storage, map[string]any{FieldLimit: 2, FieldAfter: after})
 		keys, _ := resp.Data["keys"].([]string)
 		for _, key := range keys {
 			seen[key]++
@@ -93,11 +93,11 @@ func TestPagingVisitsEveryEntryExactlyOnce(t *testing.T) {
 // TestAFullPageReportsMore is the rule a client must not have to know: "a short page means the end"
 // is wrong the moment an entry is dropped mid-page, so the endpoint states it.
 func TestAFullPageReportsMore(t *testing.T) {
-	storage := seed(t, map[string]map[string]interface{}{
+	storage := seed(t, map[string]map[string]any{
 		"a": {"role": "r"}, "b": {"role": "r"},
 	})
 
-	full := list(t, storage, map[string]interface{}{FieldLimit: 2})
+	full := list(t, storage, map[string]any{FieldLimit: 2})
 	if more, _ := full.Data[FieldMore].(bool); !more {
 		t.Error("a page filled to the limit reported more=false, so a client stops early")
 	}
@@ -107,26 +107,26 @@ func TestAFullPageReportsMore(t *testing.T) {
 	if next == "" {
 		t.Fatalf("a full page reported no %s, so a client cannot continue", FieldNextAfter)
 	}
-	resumed := list(t, storage, map[string]interface{}{FieldAfter: next})
+	resumed := list(t, storage, map[string]any{FieldAfter: next})
 	if keys, _ := resumed.Data["keys"].([]string); len(keys) != 0 {
 		t.Errorf("resuming from the cursor after the last entry returned %v, want nothing", keys)
 	}
 
-	short := list(t, storage, map[string]interface{}{FieldLimit: 5})
+	short := list(t, storage, map[string]any{FieldLimit: 5})
 	if more, _ := short.Data[FieldMore].(bool); more {
 		t.Error("a page under the limit reported more=true, so a client loops forever")
 	}
 }
 
 func TestAnUnusablePageSizeIsRefused(t *testing.T) {
-	storage := seed(t, map[string]map[string]interface{}{"a": {"role": "r"}})
+	storage := seed(t, map[string]map[string]any{"a": {"role": "r"}})
 
 	for name, limit := range map[string]int{
 		"negative":     -1,
 		"over maximum": MaxLimit + 1,
 	} {
 		t.Run(name, func(t *testing.T) {
-			resp := list(t, storage, map[string]interface{}{FieldLimit: limit})
+			resp := list(t, storage, map[string]any{FieldLimit: limit})
 			if !resp.IsError() {
 				t.Fatalf("limit=%d was accepted", limit)
 			}
@@ -163,7 +163,7 @@ func TestRefusalCarriesTheCloudsOwnRemedy(t *testing.T) {
 	}
 }
 
-func seed(t *testing.T, records map[string]map[string]interface{}) logical.Storage {
+func seed(t *testing.T, records map[string]map[string]any) logical.Storage {
 	t.Helper()
 	storage := &logical.InmemStorage{}
 	for id, record := range records {
@@ -178,14 +178,14 @@ func seed(t *testing.T, records map[string]map[string]interface{}) logical.Stora
 	return storage
 }
 
-func list(t *testing.T, storage logical.Storage, data map[string]interface{}) *logical.Response {
+func list(t *testing.T, storage logical.Storage, data map[string]any) *logical.Response {
 	t.Helper()
 	return listOver(t, storage, data, testPrefix)
 }
 
 // listOver drives the endpoint over the given prefixes, so the multi-prefix behaviour credential-do
 // needs is exercised by the same helper as the single-prefix case.
-func listOver(t *testing.T, storage logical.Storage, data map[string]interface{},
+func listOver(t *testing.T, storage logical.Storage, data map[string]any,
 	prefixes ...string,
 ) *logical.Response {
 	t.Helper()
@@ -202,7 +202,7 @@ func listOver(t *testing.T, storage logical.Storage, data map[string]interface{}
 	return resp
 }
 
-func soleEntry(t *testing.T, resp *logical.Response) map[string]interface{} {
+func soleEntry(t *testing.T, resp *logical.Response) map[string]any {
 	t.Helper()
 	if resp.IsError() {
 		t.Fatalf("listing was refused: %v", resp.Error())
@@ -211,18 +211,18 @@ func soleEntry(t *testing.T, resp *logical.Response) map[string]interface{} {
 	if len(keys) != 1 {
 		t.Fatalf("expected one entry, got %v", keys)
 	}
-	info, ok := resp.Data["key_info"].(map[string]interface{})
+	info, ok := resp.Data["key_info"].(map[string]any)
 	if !ok {
 		t.Fatalf("no key_info in %v", resp.Data)
 	}
-	entry, ok := info[keys[0]].(map[string]interface{})
+	entry, ok := info[keys[0]].(map[string]any)
 	if !ok {
 		// key_info values survive a JSON round trip in the real transport, so accept either.
 		raw, err := json.Marshal(info[keys[0]])
 		if err != nil {
 			t.Fatalf("key_info[%q] is %T: %v", keys[0], info[keys[0]], info[keys[0]])
 		}
-		entry = map[string]interface{}{}
+		entry = map[string]any{}
 		if err := json.Unmarshal(raw, &entry); err != nil {
 			t.Fatalf("key_info[%q] does not decode: %v", keys[0], err)
 		}
@@ -235,8 +235,8 @@ func soleEntry(t *testing.T, resp *logical.Response) map[string]interface{} {
 // inventory that reported the first keyspace and stopped would look exactly like a working one.
 func TestTwoKeyspacesAreOneInventory(t *testing.T) {
 	const second = "active-spaces-keys/"
-	storage := seed(t, map[string]map[string]interface{}{"tok-1": {"role": "executor"}})
-	entry, err := logical.StorageEntryJSON(second+"DO00KEY", map[string]interface{}{"role": "backups"})
+	storage := seed(t, map[string]map[string]any{"tok-1": {"role": "executor"}})
+	entry, err := logical.StorageEntryJSON(second+"DO00KEY", map[string]any{"role": "backups"})
 	if err != nil {
 		t.Fatalf("encoding failed: %v", err)
 	}
@@ -255,9 +255,9 @@ func TestTwoKeyspacesAreOneInventory(t *testing.T) {
 // once. A cursor that carried only a key would either restart in the wrong keyspace or skip one.
 func TestACursorCarriesWhichKeyspaceItIsIn(t *testing.T) {
 	const second = "active-spaces-keys/"
-	storage := seed(t, map[string]map[string]interface{}{"tok-1": {"role": "r"}, "tok-2": {"role": "r"}})
+	storage := seed(t, map[string]map[string]any{"tok-1": {"role": "r"}, "tok-2": {"role": "r"}})
 	for _, id := range []string{"DO00A", "DO00B"} {
-		entry, err := logical.StorageEntryJSON(second+id, map[string]interface{}{"role": "r"})
+		entry, err := logical.StorageEntryJSON(second+id, map[string]any{"role": "r"})
 		if err != nil {
 			t.Fatalf("encoding failed: %v", err)
 		}
@@ -269,7 +269,7 @@ func TestACursorCarriesWhichKeyspaceItIsIn(t *testing.T) {
 	seen := map[string]int{}
 	after := ""
 	for range 8 {
-		resp := listOver(t, storage, map[string]interface{}{FieldLimit: 1, FieldAfter: after},
+		resp := listOver(t, storage, map[string]any{FieldLimit: 1, FieldAfter: after},
 			testPrefix, second)
 		if resp.IsError() {
 			t.Fatalf("paging was refused: %v", resp.Error())
@@ -297,7 +297,7 @@ func TestACursorCarriesWhichKeyspaceItIsIn(t *testing.T) {
 // TestAMangledCursorIsRefused: a client looping on a cursor it damaged must be told, not silently
 // restarted at the beginning — which would page forever over the same entries.
 func TestAMangledCursorIsRefused(t *testing.T) {
-	storage := seed(t, map[string]map[string]interface{}{"a": {"role": "r"}})
+	storage := seed(t, map[string]map[string]any{"a": {"role": "r"}})
 
 	for name, cursor := range map[string]string{
 		"no separator":     "AKIAEXAMPLE",
@@ -305,7 +305,7 @@ func TestAMangledCursorIsRefused(t *testing.T) {
 		"not a number":     "x|AKIAEXAMPLE",
 	} {
 		t.Run(name, func(t *testing.T) {
-			resp := list(t, storage, map[string]interface{}{FieldAfter: cursor})
+			resp := list(t, storage, map[string]any{FieldAfter: cursor})
 			if !resp.IsError() {
 				t.Fatalf("cursor %q was accepted", cursor)
 			}

@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -173,8 +174,7 @@ func WithHint(hint string, err error) error {
 
 // HintFor returns the first operator hint in err's chain, or "" if there is none.
 func HintFor(err error) string {
-	var hint *operatorHint
-	if errors.As(err, &hint) {
+	if hint, ok := errors.AsType[*operatorHint](err); ok {
 		return hint.hint
 	}
 	return ""
@@ -260,13 +260,7 @@ func Dedupe(checks []Check) []Check {
 
 func appendMissing(dst, src []string) []string {
 	for _, s := range src {
-		found := false
-		for _, existing := range dst {
-			if existing == s {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(dst, s)
 		if !found {
 			dst = append(dst, s)
 		}

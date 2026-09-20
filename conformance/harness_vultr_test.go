@@ -24,8 +24,8 @@ const (
 	vultrOtherMintToken = "vultr_reseeded_key"
 )
 
-func vultrRoleFields() map[string]interface{} {
-	return map[string]interface{}{
+func vultrRoleFields() map[string]any {
+	return map[string]any{
 		fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 		vultrACLsField: vultrACLs, vultrEmailDomainKey: vultrEmailDomain,
 		fieldMinterSet: defaultSet,
@@ -40,7 +40,7 @@ func vultrHarness(t *testing.T) plugintest.Harness {
 		Cloud:   "vultr",
 		Factory: credentialvultr.Factory,
 		Configure: func(t *testing.T, b logical.Backend, storage logical.Storage) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{vultrAPIURLField: srv.URL})
+			plugintest.Write(t, b, storage, configPath, map[string]any{vultrAPIURLField: srv.URL})
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, vultrMinterToken)))
 			plugintest.Write(t, b, storage, rolePath, vultrRoleFields())
 		},
@@ -63,7 +63,7 @@ func vultrHarness(t *testing.T) plugintest.Harness {
 		TrackingPrefix:           "active-users/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
+			plugintest.Write(t, b, storage, configPath, map[string]any{
 				vultrAPIURLField: srv.URL, fieldVerifyCapability: verify,
 			})
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, vultrMinterToken)))
@@ -77,7 +77,7 @@ func vultrHarness(t *testing.T) plugintest.Harness {
 				minterSet(tokenMinter(minterID, vultrMinterToken)))
 		},
 		WriteSetWithMinters: func(t *testing.T, b logical.Backend, storage logical.Storage, ids ...string) *logical.Response {
-			minters := make([]map[string]interface{}, 0, len(ids))
+			minters := make([]map[string]any, 0, len(ids))
 			for _, id := range ids {
 				// The same credential under different ids. Affinity is about WHICH minter is
 				// chosen, not about the credentials differing, so one token keeps the fake simple

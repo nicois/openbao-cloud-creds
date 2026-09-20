@@ -21,31 +21,31 @@ const (
 // selfGrants builds a self-report with one content api at READ-ONLY, the
 // Identity-Management api at READ-ONLY (so the copy has to upgrade it), and one
 // group.
-func selfGrants(identityAPIID int) (apiAccess, groupAccess interface{}) {
-	return map[string]interface{}{
+func selfGrants(identityAPIID int) (apiAccess, groupAccess any) {
+	return map[string]any{
 			"allAccessibleApis": false,
-			jsonKeyAPIs: []map[string]interface{}{
+			jsonKeyAPIs: []map[string]any{
 				{"apiId": selfContentAPIID, "apiName": "CCU APIs", "accessLevel": accessReadOnly},
 				{"apiId": identityAPIID, "apiName": identityManagementAPIName, "accessLevel": accessReadOnly},
 			},
 		},
-		map[string]interface{}{jsonKeyGroups: []map[string]interface{}{{"groupId": selfGroupID}}}
+		map[string]any{jsonKeyGroups: []map[string]any{{"groupId": selfGroupID}}}
 }
 
 // grantedLevels flattens a recorded apiAccess body into apiId -> accessLevel.
-func grantedLevels(t *testing.T, apiAccess interface{}) map[int]string {
+func grantedLevels(t *testing.T, apiAccess any) map[int]string {
 	t.Helper()
-	access, ok := apiAccess.(map[string]interface{})
+	access, ok := apiAccess.(map[string]any)
 	if !ok {
 		t.Fatalf("apiAccess is %T, want an object", apiAccess)
 	}
-	apis, ok := access[jsonKeyAPIs].([]interface{})
+	apis, ok := access[jsonKeyAPIs].([]any)
 	if !ok {
 		t.Fatalf("apiAccess.apis is %T, want an array", access[jsonKeyAPIs])
 	}
 	out := make(map[int]string, len(apis))
 	for _, entry := range apis {
-		api, ok := entry.(map[string]interface{})
+		api, ok := entry.(map[string]any)
 		if !ok {
 			t.Fatalf("apiAccess.apis entry is %T, want an object", entry)
 		}
@@ -65,14 +65,14 @@ func grantedLevels(t *testing.T, apiAccess interface{}) map[int]string {
 // could rotate but could not mint any role's credential — a difference no health
 // check can see, because the successor authenticates perfectly.
 func TestMinterRotation_SuccessorInheritsIncumbentGrants(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", minter1Token),
 	})
 	srv.SetSelfGrants(selfGrants(srv.IdentityManagementAPIID()))
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-1"},
+		Data: map[string]any{fieldMinterID: "minter-1"},
 	})
 	if err != nil || (resp == nil || resp.IsError()) {
 		t.Fatalf("rotate: err=%v resp=%v", err, resp)
@@ -103,15 +103,15 @@ func TestMinterRotation_SuccessorInheritsIncumbentGrants(t *testing.T) {
 		t.Fatalf("successor's Identity-Management grant is %q, want %s", got, accessLevelReadWrite)
 	}
 
-	groups, ok := groupAccess.(map[string]interface{})
+	groups, ok := groupAccess.(map[string]any)
 	if !ok {
 		t.Fatalf("groupAccess is %T, want the incumbent's object", groupAccess)
 	}
-	list, ok := groups[jsonKeyGroups].([]interface{})
+	list, ok := groups[jsonKeyGroups].([]any)
 	if !ok || len(list) != 1 {
 		t.Fatalf("successor groupAccess did not replicate the incumbent's groups: %v", groups)
 	}
-	first, _ := list[0].(map[string]interface{})
+	first, _ := list[0].(map[string]any)
 	if id, _ := first[jsonKeyGroupID].(float64); int(id) != selfGroupID {
 		t.Fatalf("successor groupAccess group is %v, want %d", first, selfGroupID)
 	}
@@ -122,7 +122,7 @@ func TestMinterRotation_SuccessorInheritsIncumbentGrants(t *testing.T) {
 // to a narrower one. Called on the client directly so the outcome does not depend
 // on which minter the selection logic would pick.
 func TestMinterRotation_AbortsWhenIncumbentGrantsUnreadable(t *testing.T) {
-	_, srv, _ := newRotationBackend(t, []interface{}{
+	_, srv, _ := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", minter1Token),
 	})
 	srv.SetFailHealthForTokenPrefix("ct-1")

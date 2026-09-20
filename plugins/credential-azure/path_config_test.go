@@ -24,7 +24,7 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	t.Cleanup(srv.Close)
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: config.StorageView,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"tenant_id": "test-tenant-id", "graph_endpoint": srv.URL, "login_endpoint": srv.URL,
 		},
 	})
@@ -42,7 +42,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"tenant_id": "test-tenant-id",
 		},
 	}
@@ -75,7 +75,7 @@ func TestConfigWrite_MissingTenantID(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data:      map[string]interface{}{},
+		Data:      map[string]any{},
 	}
 
 	resp, err := b.HandleRequest(t.Context(), req)

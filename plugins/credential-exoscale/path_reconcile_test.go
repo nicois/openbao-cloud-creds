@@ -28,7 +28,7 @@ func TestReconcile_NeverDeletesForeignEntity(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
-		Data: map[string]interface{}{"mode": "normal"},
+		Data: map[string]any{"mode": "normal"},
 	})
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
@@ -62,7 +62,7 @@ func TestPathReconcile_FloorsSubMinHold(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
-		Data: map[string]interface{}{"mode": "normal", "confirmation_hold": 0},
+		Data: map[string]any{"mode": "normal", "confirmation_hold": 0},
 	})
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
@@ -92,7 +92,7 @@ func TestPathReconcile_DefaultHoldSurfaced(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
-		Data: map[string]interface{}{"mode": "normal"},
+		Data: map[string]any{"mode": "normal"},
 	})
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
@@ -119,7 +119,7 @@ func TestReconcileEndpoint_DryRun(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "reconcile",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"mode": "dry_run",
 		},
 	}

@@ -76,7 +76,7 @@ func (b *backend) trackIssuedCredential(ctx context.Context, req *logical.Reques
 	a trackArgs,
 ) *logical.Response {
 	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+a.keyID,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole:        a.roleName,
 			"minter":         a.minterID,
 			fieldAppObjectID: a.role.AppObjectID,
@@ -170,7 +170,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return errResp, nil
 	}
 
-	resp := b.Secret("azure_client_secret").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret("azure_client_secret").Response(env.ToMap(), map[string]any{
 		"upstream_key_id": pwResp.KeyID,
 		fieldRole:         roleName,
 		fieldMinterSet:    setName,
@@ -210,7 +210,7 @@ func (b *backend) buildEnvelope(a envelopeArgs) *credenvelope.Envelope {
 	// few seconds due to Entra directory replication lag — see
 	// docs/known-issues.md (KI-003). Self-heals; clients should retry a
 	// transient 401 immediately after issuance.
-	credential := map[string]interface{}{
+	credential := map[string]any{
 		fieldClientID:   a.role.ClientID,
 		"client_secret": a.pwResp.SecretText,
 		fieldTenantID:   b.getTenantID(),

@@ -126,13 +126,11 @@ func TestRunnerStopsBeforeMintingWhenThrottled(t *testing.T) {
 	if ran != 0 {
 		t.Errorf("the probe ran %d times despite an open cooldown", ran)
 	}
-	var throttled *Throttled
-	if !errors.As(err, &throttled) {
+	if _, ok := errors.AsType[*Throttled](err); !ok {
 		t.Fatalf("want a Throttled, got %#v — a throttled write must not be reported as \"this "+
 			"minter cannot mint\", which is a verdict nobody has established", err)
 	}
-	var failure *Failure
-	if errors.As(err, &failure) {
+	if _, ok := errors.AsType[*Failure](err); ok {
 		t.Error("a throttled pass was rendered as a capability failure")
 	}
 }

@@ -27,7 +27,7 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 	// config: operational settings only
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
-		Data: map[string]interface{}{"region": "eu"},
+		Data: map[string]any{"region": "eu"},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
@@ -36,10 +36,10 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 	// minter set with TWO minters so there's a sibling to fall to
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", minterClientIDKey: "cid-1", minterClientSecretKey: "sec-1", "never_expires": true},
-				map[string]interface{}{"id": "minter-2", minterClientIDKey: "cid-2", minterClientSecretKey: "sec-2", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", minterClientIDKey: "cid-1", minterClientSecretKey: "sec-1", "never_expires": true},
+				map[string]any{"id": "minter-2", minterClientIDKey: "cid-2", minterClientSecretKey: "sec-2", "never_expires": true},
 			},
 		},
 	}

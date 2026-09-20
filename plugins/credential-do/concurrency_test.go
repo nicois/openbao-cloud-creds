@@ -28,10 +28,10 @@ func TestConcurrent_IssueDuringWorkerActivity(t *testing.T) {
 
 	// Issuers: each repeatedly issues creds/test-role with its own request.
 	wg.Add(issuers)
-	for i := 0; i < issuers; i++ {
+	for range issuers {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < issuesPerGoroutine; j++ {
+			for range issuesPerGoroutine {
 				req := &logical.Request{
 					Operation: logical.ReadOperation,
 					Path:      "creds/test-role",
@@ -55,10 +55,10 @@ func TestConcurrent_IssueDuringWorkerActivity(t *testing.T) {
 	// the test is concurrent reads racing worker activity, and this is the read-side
 	// surface that exists.
 	wg.Add(readers)
-	for i := 0; i < readers; i++ {
+	for range readers {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < issuesPerGoroutine; j++ {
+			for range issuesPerGoroutine {
 				req := &logical.Request{
 					Operation: logical.ReadOperation,
 					Path:      "minter-sets/default",

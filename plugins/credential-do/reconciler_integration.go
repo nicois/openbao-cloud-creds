@@ -197,7 +197,7 @@ func (l *doCloudLister) DeleteEntity(ctx context.Context, id string) error {
 	return nil
 }
 
-func (l *doCloudLister) warn(msg string, args ...interface{}) {
+func (l *doCloudLister) warn(msg string, args ...any) {
 	if l.logger != nil {
 		l.logger.Warn(msg, args...)
 	}

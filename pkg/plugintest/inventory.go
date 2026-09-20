@@ -202,7 +202,7 @@ func invLimitIsBounded(t *testing.T, h Harness) {
 	requireInventory(t, h)
 	b, storage := newConfiguredBackend(t, h)
 
-	resp := listWith(t, b, storage, map[string]interface{}{
+	resp := listWith(t, b, storage, map[string]any{
 		issuedlist.FieldLimit: issuedlist.MaxLimit + 1,
 	})
 	assertCode(t, resp, credenvelope.ErrConfigInvalid,
@@ -231,7 +231,7 @@ func requireInventory(t *testing.T, h Harness) {
 }
 
 func listWith(t *testing.T, b logical.Backend, storage logical.Storage,
-	data map[string]interface{},
+	data map[string]any,
 ) *logical.Response {
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
@@ -254,7 +254,7 @@ func inventoryResponse(t *testing.T, b logical.Backend, storage logical.Storage,
 	limit int, after string,
 ) *logical.Response {
 	t.Helper()
-	data := map[string]interface{}{}
+	data := map[string]any{}
 	if limit > 0 {
 		data[issuedlist.FieldLimit] = limit
 	}
@@ -290,19 +290,19 @@ func listedKeys(t *testing.T, resp *logical.Response) []string {
 
 // soleInventoryEntry returns the key_info of the one listed credential.
 func soleInventoryEntry(t *testing.T, b logical.Backend, storage logical.Storage,
-) map[string]interface{} {
+) map[string]any {
 	t.Helper()
 	resp := inventoryResponse(t, b, storage, 0, "")
 	keys := listedKeys(t, resp)
 	if len(keys) != 1 {
 		t.Fatalf("expected one listed credential, got %v", keys)
 	}
-	info, ok := resp.Data["key_info"].(map[string]interface{})
+	info, ok := resp.Data["key_info"].(map[string]any)
 	if !ok {
 		t.Fatalf("the inventory carries no key_info, so an entry says nothing but an id: %v",
 			resp.Data)
 	}
-	entry, ok := info[keys[0]].(map[string]interface{})
+	entry, ok := info[keys[0]].(map[string]any)
 	if !ok {
 		t.Fatalf("key_info has no object for %q: %v", keys[0], info)
 	}
@@ -321,9 +321,9 @@ func issueOrFail(t *testing.T, b logical.Backend, storage logical.Storage,
 }
 
 // credentialBlock returns the envelope's credential block: the material the client was handed.
-func credentialBlock(t *testing.T, resp *logical.Response) map[string]interface{} {
+func credentialBlock(t *testing.T, resp *logical.Response) map[string]any {
 	t.Helper()
-	block, ok := resp.Data["credential"].(map[string]interface{})
+	block, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("the issuance response carries no credential block: %v", resp.Data)
 	}

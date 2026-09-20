@@ -101,7 +101,7 @@ type Record struct {
 	Role    string
 	Minter  string
 	Created time.Time
-	Fields  map[string]interface{}
+	Fields  map[string]any
 }
 
 // Deleter deletes one credential upstream. A credential the cloud says is already gone is a
@@ -181,7 +181,7 @@ func Scan(ctx context.Context, storage logical.Storage, prefix, role string, cut
 		if entry == nil {
 			continue
 		}
-		var fields map[string]interface{}
+		var fields map[string]any
 		if err := json.Unmarshal(entry.Value, &fields); err != nil {
 			// Unreadable, so there is no role to match and no way to know it is this one's.
 			// Deleting it would be deleting a credential belonging to who-knows-which role.
@@ -208,7 +208,7 @@ func Scan(ctx context.Context, storage logical.Storage, prefix, role string, cut
 
 // recordCreated reads a record's creation time, returning the zero time when it is absent
 // or unparseable — which Scan reads as "in scope".
-func recordCreated(fields map[string]interface{}) time.Time {
+func recordCreated(fields map[string]any) time.Time {
 	raw, _ := fields[FieldCreated].(string)
 	if raw == "" {
 		return time.Time{}
@@ -318,8 +318,8 @@ const KeyMode = "mode"
 // Report renders an intent's progress. remaining is passed in rather than stored because it
 // is derived: a completed purge whose role has since issued more credentials still has
 // nothing remaining IN SCOPE, and that is the number an operator is asking about.
-func (i *Intent) Report(remaining int) map[string]interface{} {
-	return map[string]interface{}{
+func (i *Intent) Report(remaining int) map[string]any {
+	return map[string]any{
 		keyRole:  i.Role,
 		keyArmed: !i.Complete,
 		// Formatted rather than left as a time, because this crosses the plugin RPC boundary
@@ -336,8 +336,8 @@ func (i *Intent) Report(remaining int) map[string]interface{} {
 // NoIntentReport is the progress of a role nobody has purged. It reports the same keys as
 // every other answer, so a reader never has to handle an absence specially — and an empty
 // cutoff is what says no purge covers anything.
-func NoIntentReport(role string) map[string]interface{} {
-	return map[string]interface{}{
+func NoIntentReport(role string) map[string]any {
+	return map[string]any{
 		keyRole:      role,
 		keyArmed:     false,
 		keyCutoff:    "",
@@ -352,8 +352,8 @@ func NoIntentReport(role string) map[string]interface{} {
 // DryRunReport is what a dry run answers: how big the incident is, having changed nothing.
 // It arms nothing, so `armed` is false — otherwise the background worker would finish a
 // purge the operator was only asking about.
-func DryRunReport(role string, cutoff time.Time, tracked int) map[string]interface{} {
-	return map[string]interface{}{
+func DryRunReport(role string, cutoff time.Time, tracked int) map[string]any {
+	return map[string]any{
 		keyRole:      role,
 		keyArmed:     false,
 		keyCutoff:    cutoff.UTC().Format(time.RFC3339),

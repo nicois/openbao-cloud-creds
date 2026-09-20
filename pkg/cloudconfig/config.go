@@ -88,7 +88,7 @@ func (c *PluginConfig) CapabilityCacheDuration() time.Duration {
 
 func DefaultConfig(cloud string) *PluginConfig {
 	return &PluginConfig{
-		Versioned:         Versioned{Schema: SchemaVersion},
+		Schema:            SchemaVersion,
 		Cloud:             cloud,
 		ReconcileCadence:  defaultReconcileCadence,
 		BootstrapDelay:    defaultBootstrapDelay,

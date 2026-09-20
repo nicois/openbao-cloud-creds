@@ -12,7 +12,7 @@ import (
 )
 
 // createSpacesKey posts a create request and returns the decoded `key` object.
-func createSpacesKey(t *testing.T, srv *fakes.DOServer, body string) map[string]interface{} {
+func createSpacesKey(t *testing.T, srv *fakes.DOServer, body string) map[string]any {
 	t.Helper()
 	resp, err := http.Post(srv.URL+"/v2/spaces/keys", "application/json", bytes.NewBufferString(body))
 	if err != nil {
@@ -24,7 +24,7 @@ func createSpacesKey(t *testing.T, srv *fakes.DOServer, body string) map[string]
 		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, data)
 	}
 	var result struct {
-		Key map[string]interface{} `json:"key"`
+		Key map[string]any `json:"key"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decoding the create response failed: %v", err)
@@ -47,11 +47,11 @@ func TestDOFake_CreateSpacesKey(t *testing.T) {
 	if key["name"] != "cloud-creds-test-lease1" {
 		t.Errorf("name round-trip failed: got %v", key["name"])
 	}
-	grants, ok := key["grants"].([]interface{})
+	grants, ok := key["grants"].([]any)
 	if !ok || len(grants) != 1 {
 		t.Fatalf("grants did not round-trip: got %v", key["grants"])
 	}
-	grant := grants[0].(map[string]interface{})
+	grant := grants[0].(map[string]any)
 	if grant["bucket"] != "backups" || grant["permission"] != "read" {
 		t.Errorf("the grant round-trip lost a field: got %v", grant)
 	}
@@ -75,7 +75,7 @@ func TestDOFake_SpacesKeySecretIsReturnedOnlyOnCreate(t *testing.T) {
 		t.Fatalf("expected 200 from list, got %d", resp.StatusCode)
 	}
 	var listed struct {
-		Keys []map[string]interface{} `json:"keys"`
+		Keys []map[string]any `json:"keys"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
 		t.Fatalf("decoding the list response failed: %v", err)
@@ -197,7 +197,7 @@ func TestDOFake_ForbidSpacesKeyCreateLeavesTheHealthCheckWorking(t *testing.T) {
 
 // listSpacesKeys performs a raw listing and returns the decoded envelope, so a test can
 // assert on the pagination fields the typed client discards.
-func listSpacesKeys(t *testing.T, srv *fakes.DOServer, query string) map[string]interface{} {
+func listSpacesKeys(t *testing.T, srv *fakes.DOServer, query string) map[string]any {
 	t.Helper()
 	resp, err := http.Get(srv.URL + "/v2/spaces/keys" + query)
 	if err != nil {
@@ -208,16 +208,16 @@ func listSpacesKeys(t *testing.T, srv *fakes.DOServer, query string) map[string]
 		data, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, data)
 	}
-	var envelope map[string]interface{}
+	var envelope map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decoding the list response failed: %v", err)
 	}
 	return envelope
 }
 
-func listedKeyCount(t *testing.T, envelope map[string]interface{}) int {
+func listedKeyCount(t *testing.T, envelope map[string]any) int {
 	t.Helper()
-	keys, ok := envelope["keys"].([]interface{})
+	keys, ok := envelope["keys"].([]any)
 	if !ok {
 		t.Fatalf("the listing has no `keys` array: %v", envelope)
 	}
@@ -236,7 +236,7 @@ func TestDOFake_SpacesKeyListingIsPaginatedLikeTheRealAPI(t *testing.T) {
 	defer srv.Close()
 
 	const total = 45
-	for i := 0; i < total; i++ {
+	for i := range total {
 		createSpacesKey(t, srv, `{"name":"cloud-creds-test-`+strconv.Itoa(i)+`","grants":[]}`)
 	}
 
@@ -250,7 +250,7 @@ func TestDOFake_SpacesKeyListingIsPaginatedLikeTheRealAPI(t *testing.T) {
 
 	t.Run("meta.total reports the account's whole holding", func(t *testing.T) {
 		envelope := listSpacesKeys(t, srv, "")
-		meta, ok := envelope["meta"].(map[string]interface{})
+		meta, ok := envelope["meta"].(map[string]any)
 		if !ok {
 			t.Fatalf("no `meta` object; DO's spec marks meta REQUIRED on this response: %v", envelope)
 		}
@@ -287,8 +287,8 @@ func TestDOFake_SpacesKeyListingIsPaginatedLikeTheRealAPI(t *testing.T) {
 		seen := map[string]bool{}
 		for page := 1; page <= 3; page++ {
 			envelope := listSpacesKeys(t, srv, "?per_page=20&page="+strconv.Itoa(page))
-			for _, entry := range envelope["keys"].([]interface{}) {
-				accessKey, _ := entry.(map[string]interface{})["access_key"].(string)
+			for _, entry := range envelope["keys"].([]any) {
+				accessKey, _ := entry.(map[string]any)["access_key"].(string)
 				if seen[accessKey] {
 					t.Errorf("access key %q appeared on two pages; a paging client would double-count",
 						accessKey)
@@ -305,14 +305,14 @@ func TestDOFake_SpacesKeyListingIsPaginatedLikeTheRealAPI(t *testing.T) {
 // nextPageLink digs out links.pages.next, tolerating each level being absent — DO's spec
 // types `pages` as an anyOf that includes the empty object, which is what a single-page
 // listing answers with.
-func nextPageLink(t *testing.T, envelope map[string]interface{}) string {
+func nextPageLink(t *testing.T, envelope map[string]any) string {
 	t.Helper()
-	links, ok := envelope["links"].(map[string]interface{})
+	links, ok := envelope["links"].(map[string]any)
 	if !ok {
 		t.Fatalf("no `links` object in the listing; DO sends one (empty when there is no next "+
 			"page), and a shape comparison against a real recording fails without it: %v", envelope)
 	}
-	pages, ok := links["pages"].(map[string]interface{})
+	pages, ok := links["pages"].(map[string]any)
 	if !ok {
 		return ""
 	}

@@ -12,7 +12,7 @@ func TestNewEnvelope(t *testing.T) {
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud:        "do",
 		Role:         "snapshot-rw",
-		Credential:   map[string]interface{}{"token": "dop_v1_abc", "scopes": []string{"read", "write"}},
+		Credential:   map[string]any{"token": "dop_v1_abc", "scopes": []string{"read", "write"}},
 		ExpiresAt:    expiresAt,
 		TTLSeconds:   900,
 		Renewable:    true,
@@ -40,7 +40,7 @@ func TestEnvelopeToMap(t *testing.T) {
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud:        "do",
 		Role:         "snapshot-rw",
-		Credential:   map[string]interface{}{"token": "dop_v1_abc"},
+		Credential:   map[string]any{"token": "dop_v1_abc"},
 		ExpiresAt:    expiresAt,
 		TTLSeconds:   900,
 		Renewable:    true,
@@ -56,7 +56,7 @@ func TestEnvelopeToMap(t *testing.T) {
 	if m["expires_at"] != "2026-05-29T14:30:00Z" {
 		t.Fatalf("unexpected expires_at: %v", m["expires_at"])
 	}
-	meta, ok := m["metadata"].(map[string]interface{})
+	meta, ok := m["metadata"].(map[string]any)
 	if !ok {
 		t.Fatalf("metadata not a map")
 	}

@@ -94,7 +94,7 @@ func (b *backend) pathSharedSpacesRotate(ctx context.Context, req *logical.Reque
 	// One schema whether or not there was a key to replace: an operator scripting this reads the
 	// same fields either way, and an absent key is reported as an empty name rather than by the
 	// field going missing.
-	data := map[string]interface{}{
+	data := map[string]any{
 		fieldRole:                  roleName,
 		rotateKeyAccessKey:         rotated.Current.AccessKey,
 		rotateKeyReplacedAccessKey: "",

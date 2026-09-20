@@ -78,7 +78,7 @@ func (r *capSTSRecorder) setDenyKeyPart(part string) {
 // capBackend builds a rotation-capable backend whose STS AssumeRole is recorded
 // (and deniable) while GetCallerIdentity keeps succeeding — the "healthy but
 // cannot mint" shape.
-func capBackend(t *testing.T, store *fakeIAMStore, minters []interface{}) (*backend, *capSTSRecorder, logical.Storage) {
+func capBackend(t *testing.T, store *fakeIAMStore, minters []any) (*backend, *capSTSRecorder, logical.Storage) {
 	t.Helper()
 	bk, storage := newRotationBackend(t, store, minters)
 	rec := &capSTSRecorder{}
@@ -93,10 +93,10 @@ func capWriteRole(t *testing.T, bk *backend, storage logical.Storage) *logical.R
 	t.Helper()
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldDefaultTTL: capRoleTTL, fieldMaxTTL: capRoleMaxTTL,
 			"iam_role_arn": capRoleARN, "external_id": capExternalID,
-			"session_tags": map[string]interface{}{capTagKey: capTagValue},
+			"session_tags": map[string]any{capTagKey: capTagValue},
 			fieldMinterSet: defaultSetName,
 		},
 	})
@@ -110,7 +110,7 @@ func capWriteRole(t *testing.T, bk *backend, storage logical.Storage) *logical.R
 // policy to allow it — so a minter denied sts:AssumeRole on a role's ARN is
 // reported healthy forever. The role must not bind to it.
 func TestCapability_RoleWriteRejectedWhenAssumeRoleDenied(t *testing.T) {
-	bk, rec, storage := capBackend(t, newFakeIAMStore("AKIA1"), []interface{}{
+	bk, rec, storage := capBackend(t, newFakeIAMStore("AKIA1"), []any{
 		neverExpiresMinter(rotMinter1ID, "AKIA1", "secret1"),
 	})
 	rec.setDenyAll(true)
@@ -138,7 +138,7 @@ func TestCapability_RoleWriteRejectedWhenAssumeRoleDenied(t *testing.T) {
 // AccessDenied) while pinning the session it leaves behind to AWS's 900s floor:
 // STS credentials cannot be revoked, so the probe's duration is the only bound.
 func TestCapability_ProbeUsesRoleShapeAndMinimumDuration(t *testing.T) {
-	bk, rec, storage := capBackend(t, newFakeIAMStore("AKIA1"), []interface{}{
+	bk, rec, storage := capBackend(t, newFakeIAMStore("AKIA1"), []any{
 		neverExpiresMinter(rotMinter1ID, "AKIA1", "secret1"),
 	})
 
@@ -173,7 +173,7 @@ func TestCapability_ProbeUsesRoleShapeAndMinimumDuration(t *testing.T) {
 // leave neither the set nor the IAM user's key set changed.
 func TestCapability_RotationRejectedWhenSuccessorCannotAssume(t *testing.T) {
 	store := newFakeIAMStore("AKIA1")
-	bk, rec, storage := capBackend(t, store, []interface{}{
+	bk, rec, storage := capBackend(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, "AKIA1", "secret1"),
 		neverExpiresMinter(rotMinter2ID, "AKIA2", "secret2"),
 	})
@@ -186,7 +186,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotAssume(t *testing.T) {
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil {
 		t.Fatalf("rotate errored: %v", err)
@@ -213,12 +213,12 @@ func TestCapability_RotationRejectedWhenSuccessorCannotAssume(t *testing.T) {
 // role write. Operators who cannot accept a probe session (STS has no revoke)
 // have this escape hatch.
 func TestCapability_DisabledSkipsProbe(t *testing.T) {
-	bk, rec, storage := capBackend(t, newFakeIAMStore("AKIA1"), []interface{}{
+	bk, rec, storage := capBackend(t, newFakeIAMStore("AKIA1"), []any{
 		neverExpiresMinter(rotMinter1ID, "AKIA1", "secret1"),
 	})
 	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			configRegionKey: defaultRegion, fieldVerifyCapability: false,
 		},
 	}); err != nil || (resp != nil && resp.IsError()) {

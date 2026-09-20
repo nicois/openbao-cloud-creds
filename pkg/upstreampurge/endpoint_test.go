@@ -71,7 +71,7 @@ func newPurgeBackend(t *testing.T, paths ...*framework.Path) (logical.Backend, l
 	return b, storage
 }
 
-func request(t *testing.T, b logical.Backend, storage logical.Storage, op logical.Operation, data map[string]interface{}) *logical.Response {
+func request(t *testing.T, b logical.Backend, storage logical.Storage, op logical.Operation, data map[string]any) *logical.Response {
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: op,
@@ -137,7 +137,7 @@ func TestWriteInDryRunModeChangesNothing(t *testing.T) {
 	b, storage := newPurgeBackend(t, Path(p.endpoint))
 	track(t, storage, "a", testRole, time.Now().Add(-time.Minute), nil)
 
-	resp := request(t, b, storage, logical.UpdateOperation, map[string]interface{}{KeyMode: ModeDryRun})
+	resp := request(t, b, storage, logical.UpdateOperation, map[string]any{KeyMode: ModeDryRun})
 	if resp.IsError() {
 		t.Fatalf("the dry run was refused: %v", resp.Error())
 	}
@@ -166,7 +166,7 @@ func TestWriteRefusesAnUnknownMode(t *testing.T) {
 	b, storage := newPurgeBackend(t, Path(p.endpoint))
 	track(t, storage, "a", testRole, time.Now().Add(-time.Minute), nil)
 
-	resp := request(t, b, storage, logical.UpdateOperation, map[string]interface{}{KeyMode: "maybe"})
+	resp := request(t, b, storage, logical.UpdateOperation, map[string]any{KeyMode: "maybe"})
 	if !resp.IsError() {
 		t.Fatalf("an unknown mode was accepted: %v", resp.Data)
 	}

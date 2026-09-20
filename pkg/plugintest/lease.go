@@ -72,7 +72,7 @@ func assertCredentialKind(t *testing.T, h Harness) {
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
 	}
-	metadata, ok := resp.Data["metadata"].(map[string]interface{})
+	metadata, ok := resp.Data["metadata"].(map[string]any)
 	if !ok {
 		t.Fatalf("envelope metadata is %T, want an object", resp.Data["metadata"])
 	}
@@ -130,7 +130,7 @@ func issueWithKind(t *testing.T, b logical.Backend, storage logical.Storage, pat
 		Operation: logical.ReadOperation,
 		Path:      path,
 		Storage:   storage,
-		Data:      map[string]interface{}{"credential_kind": kind},
+		Data:      map[string]any{"credential_kind": kind},
 	})
 	if err != nil {
 		t.Fatalf("credential read with credential_kind=%q errored: %v", kind, err)
@@ -160,7 +160,7 @@ func assertCredentialBlock(t *testing.T, h Harness) {
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
 	}
-	credential, ok := resp.Data["credential"].(map[string]interface{})
+	credential, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("envelope credential is %T, want an object", resp.Data["credential"])
 	}
@@ -205,7 +205,7 @@ func assertScopeKind(t *testing.T, h Harness) {
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("issue failed: err=%v resp=%v", err, resp)
 	}
-	metadata, ok := resp.Data["metadata"].(map[string]interface{})
+	metadata, ok := resp.Data["metadata"].(map[string]any)
 	if !ok {
 		t.Fatalf("envelope metadata is %T, want an object", resp.Data["metadata"])
 	}
@@ -275,7 +275,7 @@ func assertLeaseIdentifiersAreDeclared(t *testing.T, h Harness) {
 	}
 }
 
-func keysOf(data map[string]interface{}) []string {
+func keysOf(data map[string]any) []string {
 	keys := make([]string, 0, len(data))
 	for k := range data {
 		keys = append(keys, k)
@@ -303,11 +303,11 @@ func assertEnvelopeShape(t *testing.T, h Harness) {
 	reference := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{}).ToMap()
 	assertSameKeys(t, "envelope", reference, resp.Data)
 
-	refMeta, ok := reference["metadata"].(map[string]interface{})
+	refMeta, ok := reference["metadata"].(map[string]any)
 	if !ok {
 		t.Fatalf("reference envelope metadata is %T, want map", reference["metadata"])
 	}
-	gotMeta, ok := resp.Data["metadata"].(map[string]interface{})
+	gotMeta, ok := resp.Data["metadata"].(map[string]any)
 	if !ok {
 		t.Fatalf("envelope metadata is %T, want map[string]interface{} — clients read "+
 			"api_version out of it", resp.Data["metadata"])
@@ -321,7 +321,7 @@ func assertEnvelopeShape(t *testing.T, h Harness) {
 }
 
 // assertSameKeys compares two maps by key set only, in both directions.
-func assertSameKeys(t *testing.T, what string, want, got map[string]interface{}) {
+func assertSameKeys(t *testing.T, what string, want, got map[string]any) {
 	t.Helper()
 	for key := range want {
 		if _, present := got[key]; !present {
@@ -370,7 +370,7 @@ func assertEnvelopeAgreesWithLease(t *testing.T, h Harness) {
 
 // assertExpiresAt checks the envelope's own expiry field against its TTL — the
 // field a client schedules its refresh from, which is not the lease.
-func assertExpiresAt(t *testing.T, data map[string]interface{}, ttl int) {
+func assertExpiresAt(t *testing.T, data map[string]any, ttl int) {
 	t.Helper()
 	expiresAt, err := time.Parse(time.RFC3339, str(t, data, "expires_at"))
 	if err != nil {
@@ -421,7 +421,7 @@ func assertInternalDataSurvivesRPC(t *testing.T, h Harness) {
 	if err != nil {
 		t.Fatalf("internal_data is not JSON-encodable, so revoke could never read it: %v", err)
 	}
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("internal_data does not decode: %v", err)
 	}
@@ -455,7 +455,7 @@ func mustIssue(t *testing.T, b logical.Backend, storage logical.Storage, path st
 
 // str reads a string field out of a response, failing with the field name rather
 // than panicking on a type assertion.
-func str(t *testing.T, data map[string]interface{}, key string) string {
+func str(t *testing.T, data map[string]any, key string) string {
 	t.Helper()
 	value, ok := data[key].(string)
 	if !ok {
@@ -538,7 +538,7 @@ func minterServing(t *testing.T, b logical.Backend, storage logical.Storage, h H
 		Operation: logical.ReadOperation,
 		Path:      h.IssuePath,
 		Storage:   storage,
-		Data:      map[string]interface{}{"shard_key": shardKey},
+		Data:      map[string]any{"shard_key": shardKey},
 		ID:        "req-" + shardKey,
 	})
 	if err != nil {
@@ -547,7 +547,7 @@ func minterServing(t *testing.T, b logical.Backend, storage logical.Storage, h H
 	if resp == nil || resp.IsError() {
 		t.Fatalf("issuing with shard_key=%q was refused: %v", shardKey, resp)
 	}
-	metadata, ok := resp.Data["metadata"].(map[string]interface{})
+	metadata, ok := resp.Data["metadata"].(map[string]any)
 	if !ok {
 		t.Fatalf("the response carries no metadata: %#v", resp.Data)
 	}

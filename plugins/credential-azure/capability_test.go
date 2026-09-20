@@ -17,7 +17,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage, appObjectID
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldDefaultTTL: 3600, fieldMaxTTL: 86400,
 			fieldAppObjectID: appObjectID, fieldClientID: "client-id-456",
 			fieldMinterSet: defaultSetName,
@@ -33,7 +33,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage, appObjectID
 // app registration the role names. Authenticating — and even reading that
 // application — is not the same right.
 func TestCapability_RoleWriteRejectedWhenMinterCannotMintForItsApp(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "cid1:secret1"),
 	})
 	srv.SetAddPasswordForbidden(capOtherApp, true)
@@ -56,7 +56,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotMintForItsApp(t *testing.T)
 
 // A successful probe leaves nothing upstream: it adds a password and removes it.
 func TestCapability_ProbeLeavesNoPasswordBehind(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "cid1:secret1"),
 	})
 	if resp := capWriteRole(t, bk, storage, testAppObjectID); resp != nil && resp.IsError() {
@@ -73,7 +73,7 @@ func TestCapability_ProbeLeavesNoPasswordBehind(t *testing.T) {
 // to mint for a bound role — so rotation must probe it against every bound role
 // and refuse to commit if it cannot serve them.
 func TestCapability_RotationRejectedWhenSuccessorCannotMintForABoundRole(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "cid1:secret1"),
 		neverExpiresMinter("minter-2", "cid2:secret2"),
 	})
@@ -86,7 +86,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMintForABoundRole(t *test
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-1"},
+		Data: map[string]any{fieldMinterID: "minter-1"},
 	})
 	if err != nil {
 		t.Fatalf("rotate errored: %v", err)
@@ -113,7 +113,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMintForABoundRole(t *test
 
 // Rotation still commits when the successor can mint for every bound role.
 func TestCapability_RotationCommitsWhenSuccessorIsCapable(t *testing.T) {
-	bk, _, storage := newRotationBackend(t, []interface{}{
+	bk, _, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "cid1:secret1"),
 		neverExpiresMinter("minter-2", "cid2:secret2"),
 	})
@@ -123,7 +123,7 @@ func TestCapability_RotationCommitsWhenSuccessorIsCapable(t *testing.T) {
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-1"},
+		Data: map[string]any{fieldMinterID: "minter-1"},
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("rotation failed: err=%v resp=%v", err, resp)
@@ -135,7 +135,7 @@ func TestCapability_RotationCommitsWhenSuccessorIsCapable(t *testing.T) {
 
 // Replacing a set's minters re-probes every role already bound to it.
 func TestCapability_SetRewriteRejectedWhenReplacementCannotMint(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "cid1:secret1"),
 	})
 	if resp := capWriteRole(t, bk, storage, capOtherApp); resp != nil && resp.IsError() {
@@ -145,7 +145,7 @@ func TestCapability_SetRewriteRejectedWhenReplacementCannotMint(t *testing.T) {
 	srv.SetAddPasswordForbidden(capOtherApp, true)
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
-		Data: map[string]interface{}{fieldMintersKey: []interface{}{
+		Data: map[string]any{fieldMintersKey: []any{
 			neverExpiresMinter("minter-replacement", "cid9:secret9"),
 		}},
 	})
@@ -163,12 +163,12 @@ func TestCapability_SetRewriteRejectedWhenReplacementCannotMint(t *testing.T) {
 
 // The probe is skippable for operators who cannot accept a probe mint.
 func TestCapability_DisabledSkipsProbe(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "cid1:secret1"),
 	})
 	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldTenantID: "test-tenant", fieldGraphEndpoint: srv.URL, fieldLoginEndpoint: srv.URL,
 			fieldVerifyCapability: false,
 		},

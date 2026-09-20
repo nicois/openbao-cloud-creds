@@ -204,7 +204,7 @@ type Observation struct {
 	// Extra carries facts a later credential-free test must read back out of the recording
 	// rather than re-derive. Scrubbed like everything else: a caller cannot smuggle a secret
 	// past the gate by choosing its own field name.
-	Extra map[string]interface{}
+	Extra map[string]any
 }
 
 // RecordObservation is Record plus caller-supplied fields, for facts a later credential-free
@@ -221,7 +221,7 @@ func (r *Recorder) RecordObservation(o Observation) {
 	r.t.Helper()
 	name := o.Name
 
-	entry := map[string]interface{}{
+	entry := map[string]any{
 		"question": name,
 		"status":   o.Status,
 		"request":  r.scrub(o.Request),

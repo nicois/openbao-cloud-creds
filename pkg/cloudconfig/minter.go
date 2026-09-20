@@ -13,13 +13,13 @@ const MinMinterGap = 7 * 24 * time.Hour
 type Minter struct {
 	ID            string    `json:"id"`
 	Token         string    `json:"token"`
-	ExpiresAt     time.Time `json:"expires_at,omitempty"`
+	ExpiresAt     time.Time `json:"expires_at"`
 	ExpiresSource string    `json:"expires_at_source,omitempty"`
 	NeverExpires  bool      `json:"never_expires,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 
 	Retired        bool              `json:"retired,omitempty"`
-	RetiredAt      time.Time         `json:"retired_at,omitempty"`
+	RetiredAt      time.Time         `json:"retired_at"`
 	RotationParams map[string]string `json:"rotation_params,omitempty"`
 }
 
@@ -120,7 +120,7 @@ const MinterKeyRotationParams = "rotation_params"
 // Rejecting is right rather than pedantic: the whole point of a minter set is that
 // the operator's intent is enforceable, and a key nobody reads is intent that was
 // silently discarded.
-func ValidateMinterKeys(minterID string, raw map[string]interface{}, allowed ...string) error {
+func ValidateMinterKeys(minterID string, raw map[string]any, allowed ...string) error {
 	permitted := make(map[string]bool, len(allowed))
 	for _, key := range allowed {
 		permitted[key] = true

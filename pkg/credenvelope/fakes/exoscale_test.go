@@ -29,7 +29,7 @@ func TestExoscaleFake_CreateAPIKey(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -59,7 +59,7 @@ func TestExoscaleFake_DeleteAPIKey(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer test-api-key")
 	resp, _ := http.DefaultClient.Do(req)
-	var createResult map[string]interface{}
+	var createResult map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &createResult); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -104,13 +104,13 @@ func TestExoscaleFake_ListAPIKeys(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp2.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp2.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	keys, ok := result["api-keys"].([]interface{})
+	keys, ok := result["api-keys"].([]any)
 	if !ok {
 		t.Fatalf("expected api-keys array, got %T", result["api-keys"])
 	}

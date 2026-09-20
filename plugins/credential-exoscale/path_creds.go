@@ -121,7 +121,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			"key":    keyResp.Key,
 			"secret": keyResp.Secret,
 		},
@@ -149,7 +149,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return errResp, nil
 	}
 
-	resp := b.Secret("exoscale_api_key").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret("exoscale_api_key").Response(env.ToMap(), map[string]any{
 		"upstream_key_id": keyResp.KeyID,
 		fieldRole:         roleName,
 		fieldMinterSet:    setName,
@@ -187,7 +187,7 @@ func (b *backend) trackActiveKey(ctx context.Context, req *logical.Request, a tr
 			"automatically reclaimable if it leaks", "cloud", cloudName, "id", a.keyID, "error", err)
 	}
 	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+a.keyID,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole: a.roleName,
 			"minter":  a.minterID,
 			"created": a.now.UTC().Format(time.RFC3339),

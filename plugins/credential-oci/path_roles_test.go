@@ -15,9 +15,9 @@ func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Stor
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", "token": "tenancy:user:fingerprint:key", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", "token": "tenancy:user:fingerprint:key", "never_expires": true},
 			},
 		},
 	}
@@ -36,7 +36,7 @@ func TestRoleCRUD(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-user",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"user_ocid":       "ocid1.user.oc1..testuser",
 			"slot_count":      2,
 			"rotation_period": 604800, // 7 days
@@ -118,7 +118,7 @@ func TestRoleValidation_MissingUserOCID(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"slot_count":      2,
 			"rotation_period": 604800,
 			"default_ttl":     302400,
@@ -141,7 +141,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/orphan",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"user_ocid":       "ocid1.user.oc1..testuser",
 			"slot_count":      2,
 			"rotation_period": 604800,
@@ -168,7 +168,7 @@ func TestRoleValidation_TTLExceedsRotationInterval(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-ttl",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"user_ocid":       "ocid1.user.oc1..testuser",
 			"slot_count":      2,
 			"rotation_period": 604800, // 7 days
@@ -194,7 +194,7 @@ func TestRoleValidation_SlotCountExceedsMax(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-slots",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"user_ocid":       "ocid1.user.oc1..testuser",
 			"slot_count":      3,
 			"rotation_period": 604800,
@@ -220,7 +220,7 @@ func TestRoleValidation_DefaultTTLGtMaxTTL(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-ttl2",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"user_ocid":       "ocid1.user.oc1..testuser",
 			"slot_count":      2,
 			"rotation_period": 604800,

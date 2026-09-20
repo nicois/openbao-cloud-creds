@@ -78,18 +78,18 @@ const noSharedCredential = "every credential read mints one credential for the l
 	"and a lease's own end is what bounds what it holds"
 
 // minterSet wraps minter maps in the "minters" field every minter-set write takes.
-func minterSet(m ...map[string]interface{}) map[string]interface{} {
-	list := make([]interface{}, 0, len(m))
+func minterSet(m ...map[string]any) map[string]any {
+	list := make([]any, 0, len(m))
 	for _, one := range m {
 		list = append(list, one)
 	}
-	return map[string]interface{}{fieldMinters: list}
+	return map[string]any{fieldMinters: list}
 }
 
 // tokenMinter builds the id/token/never_expires minter the token-style clouds
 // take (DO, UpCloud, Azure, Vultr, Akamai, OCI).
-func tokenMinter(id, token string) map[string]interface{} {
-	return map[string]interface{}{fieldID: id, fieldToken: token, fieldNeverExpires: true}
+func tokenMinter(id, token string) map[string]any {
+	return map[string]any{fieldID: id, fieldToken: token, fieldNeverExpires: true}
 }
 
 // Aged seeding constants for the reconciler-safety suite's reclamation case.

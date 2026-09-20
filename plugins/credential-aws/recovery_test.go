@@ -47,7 +47,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			// The injected STS client fails on purpose, so the role-write capability
 			// probe would (correctly) reject the role. This test exercises
 			// issuance-time failure/recovery, not configuration-time verification.
@@ -64,9 +64,9 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":                "minter-1",
 					"access_key_id":     "AKIAIOSFODNN7EXAMPLE",
 					"secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
@@ -85,7 +85,7 @@ func TestMinterFailureAndRecovery(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",

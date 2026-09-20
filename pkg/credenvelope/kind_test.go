@@ -1,6 +1,7 @@
 package credenvelope_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -85,10 +86,8 @@ func TestRequireCredentialKind(t *testing.T) {
 // The code has to be in AllCodes, or the error-taxonomy conformance suite — which
 // requires every client-visible code to be in that list — would reject it.
 func TestCredentialKindCodeIsInTheVocabulary(t *testing.T) {
-	for _, code := range credenvelope.AllCodes() {
-		if code == credenvelope.ErrCredentialKindUnsupported {
-			return
-		}
+	if slices.Contains(credenvelope.AllCodes(), credenvelope.ErrCredentialKindUnsupported) {
+		return
 	}
 	t.Fatal("ErrCredentialKindUnsupported is not in AllCodes(), so the error-taxonomy suite would " +
 		"reject a response carrying it")

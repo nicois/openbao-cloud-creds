@@ -10,7 +10,7 @@ import (
 )
 
 // runReconcile drives the manual reconcile path and returns the response.
-func runReconcile(t *testing.T, b logical.Backend, storage logical.Storage, data map[string]interface{}) *logical.Response {
+func runReconcile(t *testing.T, b logical.Backend, storage logical.Storage, data map[string]any) *logical.Response {
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage, Data: data,
@@ -35,7 +35,7 @@ func TestPathReconcile_FloorsSubMinHold(t *testing.T) {
 	b, storage := setupConfiguredBackend(t, srv.URL)
 	srv.AddRawTokenWithCreatedAt("orphan-1", ownertag.CredentialName(ownerInstanceForTest(t, storage), "role-x", "seed"), time.Now().Add(-1*time.Minute).UTC().Format(time.RFC3339))
 
-	resp := runReconcile(t, b, storage, map[string]interface{}{"mode": "normal", "confirmation_hold": 0})
+	resp := runReconcile(t, b, storage, map[string]any{"mode": "normal", "confirmation_hold": 0})
 
 	if got := resp.Data["deleted"].(int); got != 0 {
 		t.Fatalf("expected 0 deleted (floored hold protects recent orphan), got %d", got)
@@ -58,7 +58,7 @@ func TestPathReconcile_DeletesOldOrphanAboveFloor(t *testing.T) {
 	b, storage := setupConfiguredBackend(t, srv.URL)
 	srv.AddRawTokenWithCreatedAt("orphan-1", ownertag.CredentialName(ownerInstanceForTest(t, storage), "role-x", "seed"), time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
 
-	resp := runReconcile(t, b, storage, map[string]interface{}{"mode": "normal", "confirmation_hold": 0})
+	resp := runReconcile(t, b, storage, map[string]any{"mode": "normal", "confirmation_hold": 0})
 
 	if got := resp.Data["deleted"].(int); got != 1 {
 		t.Fatalf("expected 1 deleted (orphan older than 5m floor), got %d", got)
@@ -78,7 +78,7 @@ func TestPathReconcile_DefaultHoldIsOneHour(t *testing.T) {
 	b, storage := setupConfiguredBackend(t, srv.URL)
 	srv.AddRawTokenWithCreatedAt("orphan-1", ownertag.CredentialName(ownerInstanceForTest(t, storage), "role-x", "seed"), time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
 
-	resp := runReconcile(t, b, storage, map[string]interface{}{"mode": "normal"})
+	resp := runReconcile(t, b, storage, map[string]any{"mode": "normal"})
 
 	if got := resp.Data["deleted"].(int); got != 0 {
 		t.Fatalf("expected 0 deleted (default 1h hold protects 10m orphan), got %d", got)
@@ -113,7 +113,7 @@ func TestReconcile_NeverDeletesForeignEntity(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "reconcile", Storage: storage,
-		Data: map[string]interface{}{"mode": "normal"},
+		Data: map[string]any{"mode": "normal"},
 	})
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
@@ -140,7 +140,7 @@ func TestReconcileEndpoint_DryRun(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "reconcile",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"mode": "dry_run",
 		},
 	}

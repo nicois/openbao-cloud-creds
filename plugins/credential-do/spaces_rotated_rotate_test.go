@@ -167,7 +167,7 @@ func TestRotatedSpacesRotate_RefusesADisabledRole(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/" + rotatedRoleName, Storage: storage,
-		Data: map[string]interface{}{"disabled": true},
+		Data: map[string]any{"disabled": true},
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("disabling the role failed: err=%v resp=%v", err, resp)

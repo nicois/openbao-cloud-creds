@@ -19,7 +19,7 @@ func setupConfiguredBackend(t *testing.T, azureURL string) (logical.Backend, log
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"tenant_id":      "test-tenant-id",
 			"graph_endpoint": azureURL,
 			"login_endpoint": azureURL,
@@ -35,9 +35,9 @@ func setupConfiguredBackend(t *testing.T, azureURL string) (logical.Backend, log
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":            "minter-1",
 					"token":         "fake-client-id:fake-client-secret",
 					"never_expires": true,
@@ -55,7 +55,7 @@ func setupConfiguredBackend(t *testing.T, azureURL string) (logical.Backend, log
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":   3600,
 			"max_ttl":       86400,
 			"app_object_id": "fake-app-object-id",
@@ -100,7 +100,7 @@ func TestCredsIssue(t *testing.T) {
 		t.Fatal("expected credential_id")
 	}
 
-	cred, ok := resp.Data["credential"].(map[string]interface{})
+	cred, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected credential map, got %T", resp.Data["credential"])
 	}
@@ -132,7 +132,7 @@ func TestCredsIssue(t *testing.T) {
 	}
 
 	// Provenance in the envelope metadata.
-	meta := resp.Data["metadata"].(map[string]interface{})
+	meta := resp.Data["metadata"].(map[string]any)
 	if meta["minter_set"] != "default" {
 		t.Fatalf("expected metadata.minter_set=default, got %v", meta["minter_set"])
 	}
@@ -157,8 +157,8 @@ func TestMinterSetIsolation(t *testing.T) {
 	// Second, independent set with a DIFFERENT client_id:client_secret.
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/secondary", Storage: storage,
-		Data: map[string]interface{}{"minters": []interface{}{
-			map[string]interface{}{"id": "minter-2", "token": "other-client-id:other-client-secret", "never_expires": true},
+		Data: map[string]any{"minters": []any{
+			map[string]any{"id": "minter-2", "token": "other-client-id:other-client-secret", "never_expires": true},
 		}},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
@@ -166,7 +166,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	}
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/role2", Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600, "max_ttl": 86400,
 			"app_object_id": "fake-app-object-id", "client_id": "fake-app-client-id", "minter_set": "secondary",
 		},
@@ -181,7 +181,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("role2 issue failed: err=%v resp=%v", err, resp)
 	}
-	meta := resp.Data["metadata"].(map[string]interface{})
+	meta := resp.Data["metadata"].(map[string]any)
 	if meta["minter_set"] != "secondary" || meta["minter_id"] != "minter-2" {
 		t.Fatalf("role2 used wrong minter: set=%v id=%v", meta["minter_set"], meta["minter_id"])
 	}

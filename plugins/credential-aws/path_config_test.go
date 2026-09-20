@@ -32,7 +32,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"region": "eu-west-1",
 		},
 	}

@@ -87,7 +87,7 @@ func saveSlot(ctx context.Context, storage logical.Storage, roleName string, s *
 // loadAllSlots loads all slots for a role.
 func loadAllSlots(ctx context.Context, storage logical.Storage, roleName string, slotCount int) ([]*slot, error) {
 	slots := make([]*slot, 0, slotCount)
-	for i := 0; i < slotCount; i++ {
+	for i := range slotCount {
 		s, err := loadSlot(ctx, storage, roleName, i)
 		if err != nil {
 			return nil, err
@@ -101,7 +101,7 @@ func loadAllSlots(ctx context.Context, storage logical.Storage, roleName string,
 
 // deleteSlots removes all slot data for a role from storage.
 func deleteSlots(ctx context.Context, storage logical.Storage, roleName string, slotCount int) error {
-	for i := 0; i < slotCount; i++ {
+	for i := range slotCount {
 		if err := storage.Delete(ctx, storageKeyForSlot(roleName, i)); err != nil {
 			return err
 		}

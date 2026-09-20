@@ -34,12 +34,12 @@ type storedRole struct {
 
 // render is the plugin's read-endpoint shape: seconds, not nanoseconds, plus a field
 // the write schema does not accept.
-func renderStoredRole(raw []byte) (map[string]interface{}, error) {
+func renderStoredRole(raw []byte) (map[string]any, error) {
 	var role storedRole
 	if err := json.Unmarshal(raw, &role); err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"name":        role.Name,
 		"minter_set":  role.MinterSet,
 		"default_ttl": int(role.DefaultTTL / 1e9),
@@ -60,7 +60,7 @@ func putStoredRole(t *testing.T, storage logical.Storage, key string, role store
 	}
 }
 
-func fieldData(raw map[string]interface{}) *framework.FieldData {
+func fieldData(raw map[string]any) *framework.FieldData {
 	return &framework.FieldData{Raw: raw, Schema: testRoleSchema()}
 }
 
@@ -72,7 +72,7 @@ func TestPrefillRoleWriteFillsInWhatTheRequestOmitted(t *testing.T) {
 		Name: "backups", MinterSet: "prod", DefaultTTL: 1800e9, Scopes: []string{"droplet:create"},
 	})
 
-	d := fieldData(map[string]interface{}{"name": "backups", "disabled": true})
+	d := fieldData(map[string]any{"name": "backups", "disabled": true})
 	if err := PrefillRoleWrite(t.Context(), storage, "roles/backups", d, renderStoredRole); err != nil {
 		t.Fatalf("prefill failed: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestPrefillRoleWriteKeepsWhatTheRequestSupplied(t *testing.T) {
 		Name: "backups", MinterSet: "prod", DefaultTTL: 1800e9, Disabled: true,
 	})
 
-	d := fieldData(map[string]interface{}{"name": "backups", "minter_set": "staging", "disabled": false})
+	d := fieldData(map[string]any{"name": "backups", "minter_set": "staging", "disabled": false})
 	if err := PrefillRoleWrite(t.Context(), storage, "roles/backups", d, renderStoredRole); err != nil {
 		t.Fatalf("prefill failed: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestPrefillRoleWriteKeepsWhatTheRequestSupplied(t *testing.T) {
 // A create is untouched: the defaults apply and a required field is still absent, so
 // the handler's own validation still refuses an incomplete role.
 func TestPrefillRoleWriteLeavesACreateAlone(t *testing.T) {
-	d := fieldData(map[string]interface{}{"name": "backups"})
+	d := fieldData(map[string]any{"name": "backups"})
 	if err := PrefillRoleWrite(t.Context(), &logical.InmemStorage{}, "roles/backups", d, renderStoredRole); err != nil {
 		t.Fatalf("prefill failed: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestPrefillRoleWriteIgnoresFieldsOutsideTheSchema(t *testing.T) {
 	storage := &logical.InmemStorage{}
 	putStoredRole(t, storage, "roles/backups", storedRole{Name: "backups", MinterSet: "prod", DefaultTTL: 900e9})
 
-	d := fieldData(map[string]interface{}{"name": "backups", "disabled": true})
+	d := fieldData(map[string]any{"name": "backups", "disabled": true})
 	if err := PrefillRoleWrite(t.Context(), storage, "roles/backups", d, renderStoredRole); err != nil {
 		t.Fatalf("prefill failed: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestPrefillRoleWriteToleratesAnUnparseableStoredRole(t *testing.T) {
 		t.Fatalf("storing the corrupt entry: %v", err)
 	}
 
-	d := fieldData(map[string]interface{}{"name": "backups", "minter_set": "prod"})
+	d := fieldData(map[string]any{"name": "backups", "minter_set": "prod"})
 	if err := PrefillRoleWrite(t.Context(), storage, "roles/backups", d, renderStoredRole); err != nil {
 		t.Fatalf("an unparseable stored role must not fail the write: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestPrefillRoleWriteToleratesAnUnparseableStoredRole(t *testing.T) {
 // nobody read, and silently rebuild the role from defaults.
 func TestPrefillRoleWriteReportsAStorageFailure(t *testing.T) {
 	want := errors.New("quorum lost")
-	d := fieldData(map[string]interface{}{"name": "backups"})
+	d := fieldData(map[string]any{"name": "backups"})
 	err := PrefillRoleWrite(t.Context(), failingReads{err: want}, "roles/backups", d, renderStoredRole)
 	if !errors.Is(err, want) {
 		t.Fatalf("prefill returned %v, want the storage error", err)

@@ -51,14 +51,14 @@ func TestValidateMinterKeys(t *testing.T) {
 	fixed := []string{"id", "expires_at", "never_expires", "token"}
 
 	t.Run("accepts a known shape", func(t *testing.T) {
-		raw := map[string]interface{}{"id": "m1", "token": "t", "never_expires": true}
+		raw := map[string]any{"id": "m1", "token": "t", "never_expires": true}
 		if err := cloudconfig.ValidateMinterKeys("m1", raw, fixed...); err != nil {
 			t.Fatalf("a valid minter was rejected: %v", err)
 		}
 	})
 
 	t.Run("rotation_params is refused where nothing can rotate, and says why", func(t *testing.T) {
-		raw := map[string]interface{}{"id": "m1", "token": "t", cloudconfig.MinterKeyRotationParams: map[string]interface{}{}}
+		raw := map[string]any{"id": "m1", "token": "t", cloudconfig.MinterKeyRotationParams: map[string]any{}}
 		err := cloudconfig.ValidateMinterKeys("m1", raw, fixed...)
 		if err == nil {
 			t.Fatal("rotation_params was accepted on a cloud that cannot rotate a minter, so the " +
@@ -70,7 +70,7 @@ func TestValidateMinterKeys(t *testing.T) {
 	})
 
 	t.Run("rotation_params is accepted where rotation exists", func(t *testing.T) {
-		raw := map[string]interface{}{"id": "m1", "token": "t", cloudconfig.MinterKeyRotationParams: map[string]interface{}{}}
+		raw := map[string]any{"id": "m1", "token": "t", cloudconfig.MinterKeyRotationParams: map[string]any{}}
 		if err := cloudconfig.ValidateMinterKeys("m1", raw, rotatable...); err != nil {
 			t.Fatalf("rotation_params was refused on a cloud that rotates: %v", err)
 		}
@@ -80,7 +80,7 @@ func TestValidateMinterKeys(t *testing.T) {
 		// The dangerous one: never_expire (singular) silently means "this minter
 		// expires", and RSK-005 exists because a set that has quietly become
 		// single-minter is the failure nobody notices until the minter dies.
-		raw := map[string]interface{}{"id": "m1", "token": "t", "never_expire": true}
+		raw := map[string]any{"id": "m1", "token": "t", "never_expire": true}
 		err := cloudconfig.ValidateMinterKeys("m1", raw, fixed...)
 		if err == nil {
 			t.Fatal("a mistyped key was accepted as though it had been understood")

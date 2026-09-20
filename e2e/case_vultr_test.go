@@ -26,9 +26,9 @@ func vultrCase(t *testing.T) e2eCase {
 
 	return e2eCase{
 		Cloud:     "vultr",
-		Config:    map[string]interface{}{vultrAPIURLField: srv.URL},
+		Config:    map[string]any{vultrAPIURLField: srv.URL},
 		MinterSet: minterSet(tokenMinter(vultrMinterToken)),
-		Role: map[string]interface{}{
+		Role: map[string]any{
 			fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 			vultrACLsField: vultrACLs, vultrEmailDomainKey: vultrEmailDomain,
 			fieldMinterSet: defaultSet,

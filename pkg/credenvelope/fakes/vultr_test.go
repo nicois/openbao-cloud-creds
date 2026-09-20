@@ -29,13 +29,13 @@ func TestVultrFake_CreateUser(t *testing.T) {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	user, ok := result["user"].(map[string]interface{})
+	user, ok := result["user"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected user object, got %v", result)
 	}
@@ -61,13 +61,13 @@ func TestVultrFake_DeleteUser(t *testing.T) {
 	createReq.Header.Set("Authorization", "Bearer test-token")
 
 	resp, _ := http.DefaultClient.Do(createReq)
-	var createResult map[string]interface{}
+	var createResult map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &createResult); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 	resp.Body.Close()
-	userID := createResult["user"].(map[string]interface{})["id"].(string)
+	userID := createResult["user"].(map[string]any)["id"].(string)
 
 	// Delete
 	req, _ := http.NewRequest("DELETE", srv.URL+"/v2/users/"+userID, http.NoBody)
@@ -106,13 +106,13 @@ func TestVultrFake_ListUsers(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp2.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp2.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	users, ok := result["users"].([]interface{})
+	users, ok := result["users"].([]any)
 	if !ok {
 		t.Fatalf("expected users array, got %v", result)
 	}
@@ -121,7 +121,7 @@ func TestVultrFake_ListUsers(t *testing.T) {
 	}
 
 	// List should NOT return api_key
-	user := users[0].(map[string]interface{})
+	user := users[0].(map[string]any)
 	if user["api_key"] != nil {
 		t.Fatal("list should not return api_key")
 	}

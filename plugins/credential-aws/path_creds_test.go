@@ -47,7 +47,7 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"region": "us-east-1",
 		},
 	}
@@ -61,9 +61,9 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":                "minter-1",
 					"access_key_id":     "AKIAIOSFODNN7EXAMPLE",
 					"secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
@@ -82,12 +82,12 @@ func setupConfiguredBackend(t *testing.T) (logical.Backend, logical.Storage) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",
 			"minter_set":   "default",
-			"session_tags": map[string]interface{}{
+			"session_tags": map[string]any{
 				"owner": "cloud-creds",
 			},
 		},
@@ -129,7 +129,7 @@ func TestCredsIssue(t *testing.T) {
 		t.Fatal("expected credential_id")
 	}
 
-	cred, ok := resp.Data["credential"].(map[string]interface{})
+	cred, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected credential map, got %T", resp.Data["credential"])
 	}
@@ -158,7 +158,7 @@ func TestCredsIssue(t *testing.T) {
 	}
 
 	// Verify provenance in the envelope metadata
-	meta := resp.Data["metadata"].(map[string]interface{})
+	meta := resp.Data["metadata"].(map[string]any)
 	if meta["minter_set"] != "default" {
 		t.Fatalf("expected minter_set=default, got %v", meta["minter_set"])
 	}
@@ -269,7 +269,7 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			// The injected STS client fails on purpose, so the role-write capability
 			// probe would (correctly) reject the role. This test exercises
 			// issuance-time failure/recovery, not configuration-time verification.
@@ -286,9 +286,9 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":                "minter-1",
 					"access_key_id":     "AKIAIOSFODNN7EXAMPLE",
 					"secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
@@ -307,7 +307,7 @@ func TestCredsIssue_UpstreamError(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/test-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/test",
@@ -400,7 +400,7 @@ func TestCredsIssue_SessionTags(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data:      map[string]interface{}{},
+		Data:      map[string]any{},
 	}
 	resp, err := b.HandleRequest(t.Context(), req)
 	if err != nil || (resp != nil && resp.IsError()) {
@@ -412,9 +412,9 @@ func TestCredsIssue_SessionTags(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":                "minter-1",
 					"access_key_id":     "AKIAIOSFODNN7EXAMPLE",
 					"secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
@@ -433,12 +433,12 @@ func TestCredsIssue_SessionTags(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/tagged-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":  900,
 			"max_ttl":      3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/tagged",
 			"minter_set":   "default",
-			"session_tags": map[string]interface{}{
+			"session_tags": map[string]any{
 				"team":  "platform",
 				"owner": "cloud-creds",
 			},
@@ -489,7 +489,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	// config
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
-		Data: map[string]interface{}{},
+		Data: map[string]any{},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
@@ -498,8 +498,8 @@ func TestMinterSetIsolation(t *testing.T) {
 	// default set + role
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
-		Data: map[string]interface{}{"minters": []interface{}{
-			map[string]interface{}{"id": "minter-1", "access_key_id": "AKIADEFAULT", "secret_access_key": "s1", "never_expires": true},
+		Data: map[string]any{"minters": []any{
+			map[string]any{"id": "minter-1", "access_key_id": "AKIADEFAULT", "secret_access_key": "s1", "never_expires": true},
 		}},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
@@ -509,8 +509,8 @@ func TestMinterSetIsolation(t *testing.T) {
 	// secondary set + role
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/secondary", Storage: storage,
-		Data: map[string]interface{}{"minters": []interface{}{
-			map[string]interface{}{"id": "minter-2", "access_key_id": "AKIASECONDARY", "secret_access_key": "s2", "never_expires": true},
+		Data: map[string]any{"minters": []any{
+			map[string]any{"id": "minter-2", "access_key_id": "AKIASECONDARY", "secret_access_key": "s2", "never_expires": true},
 		}},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
@@ -518,7 +518,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	}
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/role2", Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 900, "max_ttl": 3600,
 			"iam_role_arn": "arn:aws:iam::123456789012:role/role2", "minter_set": "secondary",
 		},
@@ -533,7 +533,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("role2 issue failed: err=%v resp=%v", err, resp)
 	}
-	meta := resp.Data["metadata"].(map[string]interface{})
+	meta := resp.Data["metadata"].(map[string]any)
 	if meta["minter_set"] != "secondary" || meta["minter_id"] != "minter-2" {
 		t.Fatalf("role2 used wrong minter: set=%v id=%v", meta["minter_set"], meta["minter_id"])
 	}

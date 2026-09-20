@@ -18,7 +18,7 @@ func purgeRotatedRole(t *testing.T, b logical.Backend, storage logical.Storage) 
 		Operation: logical.UpdateOperation,
 		Path:      "roles/" + rotatedRoleName + "/revoke-upstream",
 		Storage:   storage,
-		Data:      map[string]interface{}{"mode": "normal"},
+		Data:      map[string]any{"mode": "normal"},
 	})
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("revoke-upstream failed: err=%v resp=%v", err, resp)

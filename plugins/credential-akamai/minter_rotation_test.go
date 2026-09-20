@@ -34,7 +34,7 @@ const (
 // Identity-Management server, with config written and the given minter-set
 // written through the API. It returns the backend, the fake server, and the
 // storage view.
-func newRotationBackend(t *testing.T, minters []interface{}) (*backend, *fakes.AkamaiServer, logical.Storage) {
+func newRotationBackend(t *testing.T, minters []any) (*backend, *fakes.AkamaiServer, logical.Storage) {
 	t.Helper()
 	srv := fakes.NewAkamaiServer()
 	t.Cleanup(srv.Close)
@@ -51,7 +51,7 @@ func newRotationBackend(t *testing.T, minters []interface{}) (*backend, *fakes.A
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldHost:   testHost,
 			fieldAPIURL: srv.URL,
 		},
@@ -61,7 +61,7 @@ func newRotationBackend(t *testing.T, minters []interface{}) (*backend, *fakes.A
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
-		Data: map[string]interface{}{fieldMintersKey: minters},
+		Data: map[string]any{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write: err=%v resp=%v", err, resp)
 	}
@@ -87,10 +87,10 @@ func loadSetFromStorage(t *testing.T, storage logical.Storage) cloudconfig.Minte
 
 // neverExpiresMinter builds a never-expiring minter map for the minter-set API,
 // carrying the username rotation param the rotation flow needs.
-func neverExpiresMinter(id, token string) map[string]interface{} {
-	return map[string]interface{}{
+func neverExpiresMinter(id, token string) map[string]any {
+	return map[string]any{
 		idKey: id, minterTokenKey: token, neverExpiresKey: true,
-		rotationParamsKey: map[string]interface{}{usernameKey: testUsername},
+		rotationParamsKey: map[string]any{usernameKey: testUsername},
 	}
 }
 
@@ -99,14 +99,14 @@ func neverExpiresMinter(id, token string) map[string]interface{} {
 // READ-WRITE on it, validates the successor, swaps it in (3 minters: 2 active +
 // 1 retired), and the retired minter is never selected while the successor is.
 func TestMinterRotation_HappyPath(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", minter1Token),
 		neverExpiresMinter("minter-2", minter2Token),
 	})
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-1"},
+		Data: map[string]any{fieldMinterID: "minter-1"},
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("rotate: err=%v resp=%v", err, resp)
@@ -193,13 +193,13 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 	// out (far from minter-1, so the original set validates).
 	nearSuccessor := time.Now().Add(minterSecretLifetime - 3*24*time.Hour).UTC().Format(time.RFC3339)
 	later := time.Now().Add(40 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	expiringMinter := func(id, token, exp string) map[string]interface{} {
-		return map[string]interface{}{
+	expiringMinter := func(id, token, exp string) map[string]any {
+		return map[string]any{
 			idKey: id, minterTokenKey: token, fieldExpiresAt: exp,
-			rotationParamsKey: map[string]interface{}{usernameKey: testUsername},
+			rotationParamsKey: map[string]any{usernameKey: testUsername},
 		}
 	}
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		expiringMinter("minter-1", minter1Token, nearSuccessor),
 		expiringMinter("minter-2", minter2Token, later),
 	})
@@ -207,7 +207,7 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-2"},
+		Data: map[string]any{fieldMinterID: "minter-2"},
 	})
 	if err != nil {
 		t.Fatalf("rotate err: %v", err)
@@ -237,7 +237,7 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 // but its health-check (authenticating AS the successor) fails; the successor's
 // just-created upstream client must be cleaned up and the set left unchanged.
 func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", minter1Token),
 		neverExpiresMinter("minter-2", minter2Token),
 	})
@@ -250,7 +250,7 @@ func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-1"},
+		Data: map[string]any{fieldMinterID: "minter-1"},
 	})
 	if err != nil {
 		t.Fatalf("rotate err: %v", err)
@@ -278,14 +278,14 @@ func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
 // TestRotateConfig_MinterRetireGraceRoundTrip writes minter_retire_grace and
 // reads it back.
 func TestRotateConfig_MinterRetireGraceRoundTrip(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", minter1Token),
 		neverExpiresMinter("minter-2", minter2Token),
 	})
 
 	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldHost:              testHost,
 			fieldAPIURL:            srv.URL,
 			fieldMinterRetireGrace: 86400,
@@ -309,7 +309,7 @@ func TestRotateConfig_MinterRetireGraceRoundTrip(t *testing.T) {
 // (past the 7d grace) is swept (upstream client deleted + dropped from set); a
 // minter retired 1h ago is kept.
 func TestRetireSweep_DropsAfterGraceKeepsBeforeGrace(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("active-1", minter1Token),
 		neverExpiresMinter("old-expired", minter2Token),
 		neverExpiresMinter("recent", "ct-3:at-3:cs-3"),

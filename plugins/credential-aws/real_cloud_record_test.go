@@ -150,7 +150,7 @@ func actionOf(req *http.Request) string {
 
 // write assembles the recording and refuses to write a file that still leaks.
 func (rt *recordingTransport) write(action string, resp *http.Response, body []byte) {
-	recording := map[string]interface{}{
+	recording := map[string]any{
 		"request":      map[string]string{"action": action},
 		"status":       resp.StatusCode,
 		"content_type": resp.Header.Get("Content-Type"),

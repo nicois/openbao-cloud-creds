@@ -23,6 +23,7 @@ package requester
 
 import (
 	"fmt"
+	"maps"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -49,8 +50,8 @@ const (
 // token at all — so this returns what is known rather than failing. A record with neither field is
 // still honest: it says the credential was issued without a resolvable caller, which is itself worth
 // seeing in a report.
-func Identity(req *logical.Request) map[string]interface{} {
-	out := map[string]interface{}{}
+func Identity(req *logical.Request) map[string]any {
+	out := map[string]any{}
 	if req == nil {
 		return out
 	}
@@ -68,10 +69,8 @@ func Identity(req *logical.Request) map[string]interface{} {
 // Takes the record rather than returning a new map so a plugin cannot accidentally build its record
 // from provenance alone and lose its own fields, and so the call reads as one line at the site where
 // the record is assembled.
-func Stamp(record map[string]interface{}, req *logical.Request) map[string]interface{} {
-	for key, value := range Identity(req) {
-		record[key] = value
-	}
+func Stamp(record map[string]any, req *logical.Request) map[string]any {
+	maps.Copy(record, Identity(req))
 	return record
 }
 

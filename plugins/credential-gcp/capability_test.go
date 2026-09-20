@@ -83,7 +83,7 @@ func (r *capMintRecorder) setDenyJSONPart(part string) {
 // capBackend builds a rotation-capable backend whose impersonation client records
 // (and can refuse) generateAccessToken while TestConnection keeps succeeding —
 // the "healthy but cannot mint" shape.
-func capBackend(t *testing.T, store *fakeSAKeyStore, minters []interface{}) (*backend, *capMintRecorder, logical.Storage) {
+func capBackend(t *testing.T, store *fakeSAKeyStore, minters []any) (*backend, *capMintRecorder, logical.Storage) {
 	t.Helper()
 	bk, storage := newRotationBackend(t, store, minters)
 	rec := &capMintRecorder{}
@@ -98,7 +98,7 @@ func capWriteRole(t *testing.T, bk *backend, storage logical.Storage) *logical.R
 	t.Helper()
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldDefaultTTL: capRoleTTL, fieldMaxTTL: capRoleTTL,
 			"service_account_email": capTargetSA,
 			"scopes":                []string{capScope},
@@ -115,7 +115,7 @@ func capWriteRole(t *testing.T, bk *backend, storage logical.Storage) *logical.R
 // roles/iam.serviceAccountTokenCreator on the TARGET service account, per target.
 // A minter without it is healthy forever, so the role must not bind to it.
 func TestCapability_RoleWriteRejectedWhenImpersonationDenied(t *testing.T) {
-	bk, rec, storage := capBackend(t, newFakeSAKeyStore(), []interface{}{
+	bk, rec, storage := capBackend(t, newFakeSAKeyStore(), []any{
 		neverExpiresMinter(rotMinter1ID, capMinterJSON),
 	})
 	rec.setDenyAll(true)
@@ -143,7 +143,7 @@ func TestCapability_RoleWriteRejectedWhenImpersonationDenied(t *testing.T) {
 // cannot be revoked, so the lifetime asked for is the only bound on what the probe
 // leaves behind.
 func TestCapability_ProbeUsesRoleTargetAndShortLifetime(t *testing.T) {
-	bk, rec, storage := capBackend(t, newFakeSAKeyStore(), []interface{}{
+	bk, rec, storage := capBackend(t, newFakeSAKeyStore(), []any{
 		neverExpiresMinter(rotMinter1ID, capMinterJSON),
 	})
 
@@ -170,7 +170,7 @@ func TestCapability_ProbeUsesRoleTargetAndShortLifetime(t *testing.T) {
 // pre-commit probe must, leaving neither the set nor the SA's key set changed.
 func TestCapability_RotationRejectedWhenSuccessorCannotImpersonate(t *testing.T) {
 	store := newFakeSAKeyStore()
-	bk, rec, storage := capBackend(t, store, []interface{}{
+	bk, rec, storage := capBackend(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, capMinterJSON),
 		neverExpiresMinter(rotMinter2ID, "{\"k\":\"minter-2\"}"),
 	})
@@ -183,7 +183,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotImpersonate(t *testing.T)
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil {
 		t.Fatalf("rotate errored: %v", err)
@@ -210,12 +210,12 @@ func TestCapability_RotationRejectedWhenSuccessorCannotImpersonate(t *testing.T)
 // attempted at role write. Operators who cannot accept a probe token (GCP has no
 // revoke) have this escape hatch.
 func TestCapability_DisabledSkipsProbe(t *testing.T) {
-	bk, rec, storage := capBackend(t, newFakeSAKeyStore(), []interface{}{
+	bk, rec, storage := capBackend(t, newFakeSAKeyStore(), []any{
 		neverExpiresMinter(rotMinter1ID, capMinterJSON),
 	})
 	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{fieldVerifyCapability: false},
+		Data: map[string]any{fieldVerifyCapability: false},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}

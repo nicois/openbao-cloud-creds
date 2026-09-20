@@ -27,7 +27,7 @@ func setupRotatedBackend(t *testing.T, srv *fakes.DOServer) (logical.Backend, lo
 	b, storage := setupSpacesBackend(t, srv)
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/" + rotatedRoleName, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":     rotatedDefaultTTL,
 			"max_ttl":         rotatedMaxTTL,
 			"credential_type": "spaces_key_rotated",
@@ -50,7 +50,7 @@ func accessKeyOf(t *testing.T, resp *logical.Response) string {
 	if resp == nil || resp.IsError() {
 		t.Fatalf("credential read failed: %v", resp)
 	}
-	cred, ok := resp.Data["credential"].(map[string]interface{})
+	cred, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected a credential object, got %T", resp.Data["credential"])
 	}
@@ -97,9 +97,7 @@ func TestRotatedSpacesCreds_ConcurrentFirstReadsMintOnce(t *testing.T) {
 	keys := make([]string, readers)
 	var wg sync.WaitGroup
 	for i := range readers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			resp, err := b.HandleRequest(t.Context(), &logical.Request{
 				Operation: logical.ReadOperation,
 				Path:      "creds/" + rotatedRoleName,
@@ -108,10 +106,10 @@ func TestRotatedSpacesCreds_ConcurrentFirstReadsMintOnce(t *testing.T) {
 			if err != nil || resp == nil || resp.IsError() {
 				return
 			}
-			if cred, ok := resp.Data["credential"].(map[string]interface{}); ok {
+			if cred, ok := resp.Data["credential"].(map[string]any); ok {
 				keys[i], _ = cred["access_key_id"].(string)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -314,7 +312,7 @@ func TestRotatedSpacesCreds_ChangingGrantsRotatesAtOnce(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/" + rotatedRoleName, Storage: storage,
-		Data: map[string]interface{}{"grants": "archive:read"},
+		Data: map[string]any{"grants": "archive:read"},
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("narrowing the grants was refused: err=%v resp=%v", err, resp)
@@ -342,7 +340,7 @@ func TestRotatedSpacesCreds_DisabledRoleNeitherServesNorMints(t *testing.T) {
 
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/" + rotatedRoleName, Storage: storage,
-		Data: map[string]interface{}{"disabled": true},
+		Data: map[string]any{"disabled": true},
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("disabling the role failed: err=%v resp=%v", err, resp)

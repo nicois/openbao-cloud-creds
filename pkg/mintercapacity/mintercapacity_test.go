@@ -15,7 +15,7 @@ const prefix = "active-tokens/"
 // track writes a tracking record shaped like the ones the plugins write.
 func track(t *testing.T, storage logical.Storage, id, minterID string) {
 	t.Helper()
-	entry, err := logical.StorageEntryJSON(prefix+id, map[string]interface{}{
+	entry, err := logical.StorageEntryJSON(prefix+id, map[string]any{
 		"role": "reader", mintercapacity.FieldMinter: minterID, "created": "2026-09-03T00:00:00Z",
 	})
 	if err != nil {
@@ -183,7 +183,7 @@ func TestDescribeNamesCountsAndTheCap(t *testing.T) {
 // must not be silently credited to a real minter.
 func TestARecordWithNoMinterIsAttributedToNobody(t *testing.T) {
 	storage := &logical.InmemStorage{}
-	raw, err := json.Marshal(map[string]interface{}{"role": "reader"})
+	raw, err := json.Marshal(map[string]any{"role": "reader"})
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}

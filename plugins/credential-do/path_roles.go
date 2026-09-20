@@ -3,6 +3,7 @@ package credentialdo
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"time"
 
@@ -152,12 +153,8 @@ func roleFields() map[string]*framework.FieldSchema {
 			Description: requester.RoleFieldDescription(),
 		},
 	}
-	for name, field := range spacesRoleFields() {
-		fields[name] = field
-	}
-	for name, field := range rotationRoleFields() {
-		fields[name] = field
-	}
+	maps.Copy(fields, spacesRoleFields())
+	maps.Copy(fields, rotationRoleFields())
 	return fields
 }
 
@@ -273,7 +270,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		Cloud:      cloudName,
 		DefaultTTL: defaultTTL,
 		MaxTTL:     maxTTL,
-		CloudConfig: map[string]interface{}{
+		CloudConfig: map[string]any{
 			fieldScopes: scopes,
 		},
 	}
@@ -519,7 +516,7 @@ func readLifecycleFields(d *framework.FieldData) lifecycleFields {
 // names (techrfc OBC-002) — and every client gets its full TTL, which is what keeps the
 // clamp in the read path defensive rather than load-bearing.
 func (l lifecycleFields) apply(fields *credentialTypeFields, maxTTL time.Duration) *logical.Response {
-	refuse := func(format string, args ...interface{}) *logical.Response {
+	refuse := func(format string, args ...any) *logical.Response {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, format, args...)
 	}
 	if !l.periodSet || l.period <= 0 {
@@ -598,8 +595,8 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // roleData renders a role for its read endpoint, in the same field names and units the
 // write schema accepts. That is what lets a write to an existing role prefill from it
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
-func roleData(role *doRole) map[string]interface{} {
-	data := map[string]interface{}{
+func roleData(role *doRole) map[string]any {
+	data := map[string]any{
 		fieldName:                  role.Name,
 		"default_ttl":              int(role.DefaultTTL.Seconds()),
 		"max_ttl":                  int(role.MaxTTL.Seconds()),
@@ -626,7 +623,7 @@ func roleData(role *doRole) map[string]interface{} {
 }
 
 // storedRoleData renders a STORED role the same way, for a write that is patching one.
-func storedRoleData(raw []byte) (map[string]interface{}, error) {
+func storedRoleData(raw []byte) (map[string]any, error) {
 	var role doRole
 	if err := json.Unmarshal(raw, &role); err != nil {
 		return nil, err

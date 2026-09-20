@@ -3,6 +3,7 @@ package conformance
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -75,13 +76,7 @@ func TestEveryPluginIsRegistered(t *testing.T) {
 		}
 	}
 	for _, p := range registry {
-		found := false
-		for _, cloud := range onDisk {
-			if cloud == p.Cloud {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(onDisk, p.Cloud)
 		if !found {
 			t.Errorf("conformance registry names %q but %s/%s%s does not exist", p.Cloud, pluginsDir, pluginPrefix, p.Cloud)
 		}

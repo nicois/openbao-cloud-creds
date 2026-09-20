@@ -99,7 +99,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			"access_token": accessToken,
 			"token_type":   "Bearer",
 		},
@@ -118,7 +118,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	// Track active credential for metrics (no upstream entity to clean up)
 	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+credentialID,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole:    roleName,
 			"minter":     minterID,
 			"created":    now.UTC().Format(time.RFC3339),
@@ -136,7 +136,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		}
 	}
 
-	resp := b.Secret("gcp_access_token").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret("gcp_access_token").Response(env.ToMap(), map[string]any{
 		"credential_id": credentialID,
 		fieldRole:       roleName,
 		fieldMinterSet:  setName,

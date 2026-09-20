@@ -9,7 +9,7 @@ import (
 // which is the point, since the schema is what is being discovered. Numbers are returned as
 // strings, because a probe cares whether a field was present far more than what type it had.
 func FirstStringField(body, field string) string {
-	var parsed interface{}
+	var parsed any
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 		return ""
 	}
@@ -17,9 +17,9 @@ func FirstStringField(body, field string) string {
 }
 
 // findField walks the decoded document depth-first and returns the first match.
-func findField(value interface{}, field string) string {
+func findField(value any, field string) string {
 	switch typed := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if found, ok := typed[field]; ok {
 			if got := scalarString(found); got != "" {
 				return got
@@ -30,7 +30,7 @@ func findField(value interface{}, field string) string {
 				return got
 			}
 		}
-	case []interface{}:
+	case []any:
 		for _, nested := range typed {
 			if got := findField(nested, field); got != "" {
 				return got
@@ -42,7 +42,7 @@ func findField(value interface{}, field string) string {
 
 // scalarString renders the leaf types a probe cares about, and nothing else: an object or an
 // array under the requested name means the value is nested deeper, so the walk continues.
-func scalarString(value interface{}) string {
+func scalarString(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return typed

@@ -23,9 +23,9 @@ func doCase(t *testing.T) e2eCase {
 
 	return e2eCase{
 		Cloud:     "do",
-		Config:    map[string]interface{}{doAPIURLField: srv.URL},
+		Config:    map[string]any{doAPIURLField: srv.URL},
 		MinterSet: minterSet(tokenMinter(doMinterToken)),
-		Role: map[string]interface{}{
+		Role: map[string]any{
 			fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 			fieldScopes: doScopes, fieldMinterSet: defaultSet,
 		},

@@ -24,7 +24,7 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 	// config: operational settings only
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
-		Data: map[string]interface{}{"username": "testuser"},
+		Data: map[string]any{"username": "testuser"},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
@@ -33,10 +33,10 @@ func TestSelectMinter_SkipsCooldownMinter(t *testing.T) {
 	// minter set with TWO minters so there's a sibling to fall to
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", minterTokenKey: "ucat_v1_test1", "never_expires": true},
-				map[string]interface{}{"id": "minter-2", minterTokenKey: "ucat_v1_test2", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", minterTokenKey: "ucat_v1_test1", "never_expires": true},
+				map[string]any{"id": "minter-2", minterTokenKey: "ucat_v1_test2", "never_expires": true},
 			},
 		},
 	}

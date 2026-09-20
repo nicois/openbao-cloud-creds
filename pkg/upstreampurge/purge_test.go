@@ -3,6 +3,7 @@ package upstreampurge
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"testing"
 	"time"
@@ -24,16 +25,14 @@ func newInmemStorage() logical.Storage {
 
 // track writes a tracking record the way every plugin writes one: at the upstream id,
 // carrying the role, the minter and a creation timestamp.
-func track(t *testing.T, storage logical.Storage, id, role string, created time.Time, extra map[string]interface{}) {
+func track(t *testing.T, storage logical.Storage, id, role string, created time.Time, extra map[string]any) {
 	t.Helper()
-	record := map[string]interface{}{
+	record := map[string]any{
 		FieldRole:    role,
 		FieldMinter:  "minter-1",
 		FieldCreated: created.UTC().Format(time.RFC3339),
 	}
-	for k, v := range extra {
-		record[k] = v
-	}
+	maps.Copy(record, extra)
 	entry, err := logical.StorageEntryJSON(testPrefix+id, record)
 	if err != nil {
 		t.Fatalf("encoding the tracking record: %v", err)
@@ -91,7 +90,7 @@ func TestScanTakesOneRolesRecordsUpToTheCutoff(t *testing.T) {
 // operator was told had been destroyed.
 func TestScanIncludesARecordWithNoReadableTimestamp(t *testing.T) {
 	storage := newInmemStorage()
-	entry, err := logical.StorageEntryJSON(testPrefix+"undated", map[string]interface{}{
+	entry, err := logical.StorageEntryJSON(testPrefix+"undated", map[string]any{
 		FieldRole: testRole, FieldCreated: "not a timestamp",
 	})
 	if err != nil {
@@ -115,7 +114,7 @@ func TestScanIncludesARecordWithNoReadableTimestamp(t *testing.T) {
 func TestScanKeepsTheRecordsOtherFields(t *testing.T) {
 	storage := newInmemStorage()
 	track(t, storage, "key-1", testRole, time.Now().Add(-time.Minute),
-		map[string]interface{}{"app_object_id": "app-7"})
+		map[string]any{"app_object_id": "app-7"})
 
 	records, err := Scan(t.Context(), storage, testPrefix, testRole, time.Now())
 	if err != nil {

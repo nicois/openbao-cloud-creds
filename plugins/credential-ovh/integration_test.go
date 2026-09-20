@@ -32,7 +32,7 @@ func TestFullLifecycle(t *testing.T) {
 	if issueResp.Data["expires_at"] == nil {
 		t.Fatal("missing expires_at")
 	}
-	meta, ok := issueResp.Data["metadata"].(map[string]interface{})
+	meta, ok := issueResp.Data["metadata"].(map[string]any)
 	if !ok || meta["api_version"] != credenvelope.APIVersion {
 		t.Fatalf("bad metadata: %v", issueResp.Data["metadata"])
 	}
@@ -53,7 +53,7 @@ func TestFullLifecycle(t *testing.T) {
 	}
 
 	// Verify credential structure
-	cred, ok := issueResp.Data["credential"].(map[string]interface{})
+	cred, ok := issueResp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected credential map, got %T", issueResp.Data["credential"])
 	}
@@ -109,7 +109,7 @@ func TestFullLifecycle(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "reconcile",
 		Storage:   storage,
-		Data:      map[string]interface{}{"mode": "dry_run"},
+		Data:      map[string]any{"mode": "dry_run"},
 	}
 	reconcileResp, err := b.HandleRequest(t.Context(), reconcileReq)
 	if err != nil || (reconcileResp != nil && reconcileResp.IsError()) {

@@ -1,6 +1,10 @@
 package credenvelope
 
-import "github.com/openbao/openbao/sdk/v2/logical"
+import (
+	"slices"
+
+	"github.com/openbao/openbao/sdk/v2/logical"
+)
 
 // CredentialKind names the SHAPE of the `credential` block — which keys are in it
 // and what a client must do with them.
@@ -127,12 +131,7 @@ func AllCredentialKinds() []CredentialKind {
 
 // ValidCredentialKind reports whether kind is in the closed vocabulary.
 func ValidCredentialKind(kind CredentialKind) bool {
-	for _, k := range AllCredentialKinds() {
-		if k == kind {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(AllCredentialKinds(), kind)
 }
 
 // RequireCredentialKind enforces a client's pin against what this role actually

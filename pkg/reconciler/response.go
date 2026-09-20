@@ -69,8 +69,8 @@ type ResponseData struct {
 }
 
 // Map renders the response for logical.Response.Data.
-func (r ResponseData) Map() map[string]interface{} {
-	return map[string]interface{}{
+func (r ResponseData) Map() map[string]any {
+	return map[string]any{
 		"mode":              r.Mode,
 		"dry_run":           r.DryRun,
 		"target":            r.Target,

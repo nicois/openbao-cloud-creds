@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -33,10 +34,10 @@ type akamaiClient struct {
 }
 
 type createClientRequest struct {
-	ClientName      string      `json:"clientName"`
-	AuthorizedUsers []string    `json:"authorizedUsers"`
-	APIAccess       interface{} `json:"apiAccess,omitempty"`
-	GroupAccess     interface{} `json:"groupAccess,omitempty"`
+	ClientName      string   `json:"clientName"`
+	AuthorizedUsers []string `json:"authorizedUsers"`
+	APIAccess       any      `json:"apiAccess,omitempty"`
+	GroupAccess     any      `json:"groupAccess,omitempty"`
 }
 
 type credentialEntry struct {
@@ -69,7 +70,7 @@ func newAkamaiClient(baseURL string, cred *edgeGridCredential) *akamaiClient {
 	}
 }
 
-func (c *akamaiClient) CreateClient(ctx context.Context, name string, apiAccess, groupAccess interface{}) (*createClientResponse, int, error) {
+func (c *akamaiClient) CreateClient(ctx context.Context, name string, apiAccess, groupAccess any) (*createClientResponse, int, error) {
 	body, _ := json.Marshal(createClientRequest{
 		ClientName:      name,
 		AuthorizedUsers: []string{},
@@ -140,10 +141,8 @@ func (c *akamaiClient) resolveIdentityManagementAPIID(ctx context.Context, usern
 		if apis[i].APIName != identityManagementAPIName {
 			continue
 		}
-		for _, lvl := range apis[i].AccessLevels {
-			if lvl == accessLevelReadWrite {
-				return apis[i].APIID, nil
-			}
+		if slices.Contains(apis[i].AccessLevels, accessLevelReadWrite) {
+			return apis[i].APIID, nil
 		}
 		return 0, fmt.Errorf("user %q is not granted %s on the Identity-Management API", username, accessLevelReadWrite)
 	}
@@ -206,8 +205,8 @@ func (c *akamaiClient) GetSelf(ctx context.Context) (*selfClient, int, error) {
 // not mint the credentials any role asks for, a difference no health check sees.
 // allAccessibleApis is carried through: when the incumbent holds it, the apis
 // list is irrelevant upstream and the successor gets the same blanket grant.
-func successorGrants(self *selfClient, identityAPIID int) (apiAccess, groupAccess interface{}) {
-	apis := make([]interface{}, 0, len(self.APIAccess.APIs)+1)
+func successorGrants(self *selfClient, identityAPIID int) (apiAccess, groupAccess any) {
+	apis := make([]any, 0, len(self.APIAccess.APIs)+1)
 	haveIdentityRW := false
 	for i := range self.APIAccess.APIs {
 		api := self.APIAccess.APIs[i]
@@ -218,13 +217,13 @@ func successorGrants(self *selfClient, identityAPIID int) (apiAccess, groupAcces
 			level = accessLevelReadWrite
 			haveIdentityRW = true
 		}
-		apis = append(apis, map[string]interface{}{jsonKeyAPIID: api.APIID, jsonKeyAccessLevel: level})
+		apis = append(apis, map[string]any{jsonKeyAPIID: api.APIID, jsonKeyAccessLevel: level})
 	}
 	if !haveIdentityRW {
-		apis = append(apis, map[string]interface{}{jsonKeyAPIID: identityAPIID, jsonKeyAccessLevel: accessLevelReadWrite})
+		apis = append(apis, map[string]any{jsonKeyAPIID: identityAPIID, jsonKeyAccessLevel: accessLevelReadWrite})
 	}
 
-	apiAccess = map[string]interface{}{
+	apiAccess = map[string]any{
 		"allAccessibleApis": self.APIAccess.AllAccessibleAPIs,
 		jsonKeyAPIs:         apis,
 	}
@@ -233,9 +232,9 @@ func successorGrants(self *selfClient, identityAPIID int) (apiAccess, groupAcces
 
 // groupAccessFromSelf returns the incumbent's groupAccess verbatim, or an empty
 // grant when it reported none.
-func groupAccessFromSelf(self *selfClient) interface{} {
+func groupAccessFromSelf(self *selfClient) any {
 	if len(self.GroupAccess) == 0 || string(self.GroupAccess) == "null" {
-		return map[string]interface{}{jsonKeyGroups: []interface{}{}}
+		return map[string]any{jsonKeyGroups: []any{}}
 	}
 	return self.GroupAccess
 }
@@ -281,8 +280,8 @@ func (c *akamaiClient) RotateMinter(ctx context.Context, old cloudconfig.Minter)
 	// incumbent reports no group access of its own.
 	if gid := old.RotationParams[fieldGroupIDParam]; gid != "" && len(self.GroupAccess) == 0 {
 		if n, perr := strconv.Atoi(gid); perr == nil {
-			groupAccess = map[string]interface{}{
-				jsonKeyGroups: []interface{}{map[string]interface{}{jsonKeyGroupID: n}},
+			groupAccess = map[string]any{
+				jsonKeyGroups: []any{map[string]any{jsonKeyGroupID: n}},
 			}
 		}
 	}
@@ -323,8 +322,8 @@ func (c *akamaiClient) RotateMinter(ctx context.Context, old cloudconfig.Minter)
 // createRotationClient POSTs a service (CLIENT-type) API client authorized for
 // the given user, requesting credentials. It differs from CreateClient in that
 // it sets clientType and authorizedUsers, as a rotation successor must.
-func (c *akamaiClient) createRotationClient(ctx context.Context, name, username string, apiAccess, groupAccess interface{}) (*createClientResponse, int, error) {
-	body, _ := json.Marshal(map[string]interface{}{
+func (c *akamaiClient) createRotationClient(ctx context.Context, name, username string, apiAccess, groupAccess any) (*createClientResponse, int, error) {
+	body, _ := json.Marshal(map[string]any{
 		"clientName":      name,
 		"clientType":      clientTypeClient,
 		"authorizedUsers": []string{username},

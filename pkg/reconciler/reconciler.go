@@ -304,14 +304,14 @@ func (r *reconciler) summarise(result *Result) {
 	}
 }
 
-func (r *reconciler) info(msg string, args ...interface{}) {
+func (r *reconciler) info(msg string, args ...any) {
 	if r.logger != nil {
-		r.logger.Info(msg, append([]interface{}{"cloud", r.cloudName}, args...)...)
+		r.logger.Info(msg, append([]any{"cloud", r.cloudName}, args...)...)
 	}
 }
 
-func (r *reconciler) warn(msg string, args ...interface{}) {
+func (r *reconciler) warn(msg string, args ...any) {
 	if r.logger != nil {
-		r.logger.Warn(msg, append([]interface{}{"cloud", r.cloudName}, args...)...)
+		r.logger.Warn(msg, append([]any{"cloud", r.cloudName}, args...)...)
 	}
 }

@@ -16,7 +16,7 @@ const jsonKeyEmail = "email"
 type VultrServer struct {
 	*httptest.Server
 	mu         sync.Mutex
-	users      map[string]map[string]interface{}
+	users      map[string]map[string]any
 	nextID     atomic.Int64
 	nextStatus int
 	// ungrantableACL, when non-empty, makes POST /v2/users return 403 for any
@@ -28,7 +28,7 @@ type VultrServer struct {
 
 func NewVultrServer() *VultrServer {
 	s := &VultrServer{
-		users: make(map[string]map[string]interface{}),
+		users: make(map[string]map[string]any),
 	}
 	s.nextID.Store(fakeStartID)
 	s.Server = httptest.NewServer(s.handler())
@@ -48,7 +48,7 @@ func (s *VultrServer) ProvisionedCount() int {
 func (s *VultrServer) AddRawUser(id, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.users[id] = map[string]interface{}{
+	s.users[id] = map[string]any{
 		"id":        id,
 		jsonKeyName: name,
 	}
@@ -95,7 +95,7 @@ func (s *VultrServer) checkInjectedError(w http.ResponseWriter) bool {
 
 	if status != 0 {
 		w.WriteHeader(status)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyError:   injectedErrorValue,
 			jsonKeyMessage: fmt.Sprintf("injected %d", status),
 		})
@@ -108,7 +108,7 @@ func (s *VultrServer) checkBearerAuth(w http.ResponseWriter, r *http.Request) bo
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") || len(auth) <= 7 {
 		w.WriteHeader(http.StatusUnauthorized)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyError:   "unauthorized",
 			jsonKeyMessage: "missing or invalid bearer token",
 		})
@@ -141,7 +141,7 @@ func (s *VultrServer) createUser(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if forbidden != "" && slices.Contains(req.ACLs, forbidden) {
 		w.WriteHeader(http.StatusForbidden)
-		writeJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]any{
 			jsonKeyError: fmt.Sprintf("your API key does not hold the %q ACL, so it cannot grant it", forbidden),
 		})
 		return
@@ -150,7 +150,7 @@ func (s *VultrServer) createUser(w http.ResponseWriter, r *http.Request) {
 	id := fmt.Sprintf("vultr-user-%d", s.nextID.Add(1))
 	apiKey := fmt.Sprintf("vultr_fake_key_%s", id)
 
-	user := map[string]interface{}{
+	user := map[string]any{
 		"id":          id,
 		jsonKeyName:   req.Name,
 		jsonKeyEmail:  req.Email,
@@ -164,7 +164,7 @@ func (s *VultrServer) createUser(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, map[string]interface{}{"user": user})
+	writeJSON(w, map[string]any{"user": user})
 }
 
 func (s *VultrServer) deleteUser(w http.ResponseWriter, r *http.Request) {
@@ -186,10 +186,10 @@ func (s *VultrServer) listUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	users := make([]map[string]interface{}, 0, len(s.users))
+	users := make([]map[string]any, 0, len(s.users))
 	for _, u := range s.users {
 		// List does not return api_key
-		users = append(users, map[string]interface{}{
+		users = append(users, map[string]any{
 			"id":          u["id"],
 			jsonKeyName:   u[jsonKeyName],
 			jsonKeyEmail:  u[jsonKeyEmail],
@@ -199,9 +199,9 @@ func (s *VultrServer) listUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		"users": users,
-		"meta": map[string]interface{}{
+		"meta": map[string]any{
 			"total": len(users),
 		},
 	})
@@ -217,8 +217,8 @@ func (s *VultrServer) getAccount(w http.ResponseWriter, r *http.Request) {
 	// fakeAccountBalance is an arbitrary negative balance for the test account.
 	const fakeAccountBalance = -100.00
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, map[string]interface{}{
-		jsonKeyAccount: map[string]interface{}{
+	writeJSON(w, map[string]any{
+		jsonKeyAccount: map[string]any{
 			jsonKeyName:  "fake-vultr-account",
 			jsonKeyEmail: "admin@example.com",
 			"balance":    fakeAccountBalance,

@@ -57,13 +57,13 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 	if raw == nil {
 		return nil, fmt.Errorf("minters is required")
 	}
-	slice, ok := raw.([]interface{})
+	slice, ok := raw.([]any)
 	if !ok {
 		return nil, fmt.Errorf("minters must be an array")
 	}
 	var minters []cloudconfig.Minter
 	for _, m := range slice {
-		mMap, ok := m.(map[string]interface{})
+		mMap, ok := m.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("each minter must be an object")
 		}
@@ -79,7 +79,7 @@ func parseMinters(d *framework.FieldData) ([]cloudconfig.Minter, error) {
 // parseMinter reads one minter object. Split out from parseMinters so the two
 // concerns — the shape of the list and the shape of an element — stay separately
 // readable, and so the key validation has an obvious home.
-func parseMinter(mMap map[string]interface{}) (cloudconfig.Minter, error) {
+func parseMinter(mMap map[string]any) (cloudconfig.Minter, error) {
 	// Reject a key this cloud does not read, rather than discarding the
 	// operator's intent in silence (A28).
 	if err := cloudconfig.ValidateMinterKeys(fmt.Sprintf("%v", mMap["id"]), mMap,
@@ -101,7 +101,7 @@ func parseMinter(mMap map[string]interface{}) (cloudconfig.Minter, error) {
 		}
 		minter.ExpiresAt = t
 	}
-	if rp, ok := mMap[fieldRotationParams].(map[string]interface{}); ok {
+	if rp, ok := mMap[fieldRotationParams].(map[string]any); ok {
 		params := make(map[string]string, len(rp))
 		for k, v := range rp {
 			params[k] = fmt.Sprintf("%v", v)
@@ -137,9 +137,9 @@ func (b *backend) pathMinterSetWrite(ctx context.Context, req *logical.Request, 
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "invalid minter set: %v", err), nil
 	}
 	set := &cloudconfig.MinterSet{
-		Versioned: cloudconfig.Versioned{Schema: cloudconfig.SchemaVersion},
-		Name:      name,
-		Minters:   minters,
+		Schema:  cloudconfig.SchemaVersion,
+		Name:    name,
+		Minters: minters,
 	}
 	// Prove the candidate minters can mint for the roles already bound to this
 	// set before persisting them (see capability.go). The validation above only
@@ -335,7 +335,7 @@ func (b *backend) pathMinterSetRotate(ctx context.Context, req *logical.Request,
 		"cloud", cloudName, "minter_set", name,
 		"retired_minter_id", minterID, "successor_id", successor.ID)
 
-	return &logical.Response{Data: map[string]interface{}{
+	return &logical.Response{Data: map[string]any{
 		"successor_id":      successor.ID,
 		"retired_minter_id": minterID,
 		"retired_at":        retiredAt,
@@ -406,7 +406,7 @@ func (b *backend) pathMinterSetRead(ctx context.Context, req *logical.Request, d
 	for i := range set.Minters {
 		ids = append(ids, set.Minters[i].ID)
 	}
-	return &logical.Response{Data: map[string]interface{}{
+	return &logical.Response{Data: map[string]any{
 		"name": set.Name, "minter_count": len(set.Minters), "minter_ids": ids,
 		// Per-minter lifecycle and health. All of this was in this process and none
 		// of it was observable, so an operator could not see which minter was
@@ -542,16 +542,16 @@ func (b *backend) loadStoredSet(ctx context.Context, storage logical.Storage, na
 // minterStatus renders each minter's lifecycle and health for the read endpoint.
 // Secrets are structurally absent: only ids, timestamps, flags and the recovery
 // snapshot are emitted, never Token or RotationParams.
-func (b *backend) minterStatus(set *cloudconfig.MinterSet) []map[string]interface{} {
+func (b *backend) minterStatus(set *cloudconfig.MinterSet) []map[string]any {
 	now := time.Now()
 	b.mu.RLock()
 	states := b.minterSets[set.Name]
 	b.mu.RUnlock()
 
-	out := make([]map[string]interface{}, 0, len(set.Minters))
+	out := make([]map[string]any, 0, len(set.Minters))
 	for i := range set.Minters {
 		m := set.Minters[i]
-		entry := map[string]interface{}{
+		entry := map[string]any{
 			"id":            m.ID,
 			neverExpiresKey: m.NeverExpires,
 			"retired":       m.Retired,

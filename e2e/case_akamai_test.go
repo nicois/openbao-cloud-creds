@@ -32,12 +32,12 @@ func akamaiCase(t *testing.T) e2eCase {
 
 	return e2eCase{
 		Cloud: "akamai",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			akamaiHostField:   akamaiHost,
 			akamaiAPIURLField: srv.URL,
 		},
 		MinterSet: minterSet(tokenMinter(akamaiMinterToken)),
-		Role: map[string]interface{}{
+		Role: map[string]any{
 			fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 			akamaiGroupIDField: akamaiGroupID, akamaiAPIAccessKey: apiAccess,
 			fieldMinterSet: defaultSet,

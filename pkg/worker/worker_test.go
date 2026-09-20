@@ -178,13 +178,13 @@ func TestWorker_PanicRecoveredAndReported(t *testing.T) {
 }
 
 func TestWorker_NilHandlerStillRecoversPanic(t *testing.T) {
-	var ticks int32
+	var ticks atomic.Int32
 	m := worker.New() // no handler
 	m.Register("panicker", 5*time.Millisecond, worker.Opts{}, func(ctx context.Context) error {
 		panic("kaboom")
 	})
 	m.Register("counter", 5*time.Millisecond, worker.Opts{}, func(ctx context.Context) error {
-		atomic.AddInt32(&ticks, 1)
+		ticks.Add(1)
 		return nil
 	})
 	ctx, cancel := context.WithCancel(t.Context())
@@ -192,7 +192,7 @@ func TestWorker_NilHandlerStillRecoversPanic(t *testing.T) {
 	time.Sleep(40 * time.Millisecond)
 	cancel()
 	m.Wait()
-	if atomic.LoadInt32(&ticks) == 0 {
+	if ticks.Load() == 0 {
 		t.Fatal("counter should keep ticking despite sibling panic")
 	}
 }
@@ -203,17 +203,15 @@ func TestWorker_NilHandlerStillRecoversPanic(t *testing.T) {
 // Run with -race to catch WaitGroup Add/Wait interleaving regressions.
 func TestConcurrentStartWaitCycles(t *testing.T) {
 	var wgOuter sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wgOuter.Add(1)
-		go func() {
-			defer wgOuter.Done()
+	for range 50 {
+		wgOuter.Go(func() {
 			m := worker.New()
 			m.Register("noop", time.Hour, worker.Opts{}, func(ctx context.Context) error { return nil })
 			ctx, cancel := context.WithCancel(t.Context())
 			m.Start(ctx)
 			cancel()
 			m.Wait()
-		}()
+		})
 	}
 	wgOuter.Wait()
 }

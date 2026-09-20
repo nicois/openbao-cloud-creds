@@ -145,7 +145,7 @@ func NewError(code ErrorCode, statusCode int, msg string) *PluginError {
 // message (resp.Error()) to clients on error responses — Data side-channels are
 // dropped. Clients parse the "<code>: " prefix; the codes are the stable
 // constants in this package.
-func ErrorResponse(code ErrorCode, msg string, args ...interface{}) *logical.Response {
+func ErrorResponse(code ErrorCode, msg string, args ...any) *logical.Response {
 	if len(args) > 0 {
 		msg = fmt.Sprintf(msg, args...)
 	}
@@ -212,8 +212,7 @@ func classifyTransport(err error) ErrorCode {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return ErrUpstreamTimeout
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if netErr, ok := errors.AsType[net.Error](err); ok {
 		if netErr.Timeout() {
 			return ErrUpstreamTimeout
 		}
@@ -281,8 +280,7 @@ func ResponseFor(err error) *logical.Response {
 	if err == nil {
 		return ErrorResponse(ErrInternal, "no error")
 	}
-	var pluginErr *PluginError
-	if errors.As(err, &pluginErr) {
+	if pluginErr, ok := errors.AsType[*PluginError](err); ok {
 		return ErrorResponse(pluginErr.Code, "%s", pluginErr.Message)
 	}
 	return ErrorResponse(ErrInternal, "%s", err.Error())
@@ -299,7 +297,7 @@ func ResponseFor(err error) *logical.Response {
 //
 // The upstream detail goes to the caller only as a class, never verbatim: the
 // operator's log gets the error, per the same split as the capability gate (A4).
-func InternalResponse(logger func(msg string, args ...interface{}), what string, err error,
+func InternalResponse(logger func(msg string, args ...any), what string, err error,
 ) *logical.Response {
 	if logger != nil {
 		logger("plugin-internal failure", "operation", what, "error", err)

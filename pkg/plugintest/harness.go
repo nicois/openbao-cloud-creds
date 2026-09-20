@@ -382,7 +382,7 @@ func issue(t *testing.T, b logical.Backend, storage logical.Storage, path string
 
 // Write performs an update at path and fails the test if it does not succeed.
 // Exported so harness constructors don't each re-declare it.
-func Write(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]interface{}) {
+func Write(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]any) {
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
@@ -395,7 +395,7 @@ func Write(t *testing.T, b logical.Backend, storage logical.Storage, path string
 // TryWrite performs an update at path and returns the response. A transport-level
 // error still fails the test; an error RESPONSE is returned to the caller, which
 // is the outcome the capability suite asserts on.
-func TryWrite(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]interface{}) *logical.Response {
+func TryWrite(t *testing.T, b logical.Backend, storage logical.Storage, path string, data map[string]any) *logical.Response {
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,

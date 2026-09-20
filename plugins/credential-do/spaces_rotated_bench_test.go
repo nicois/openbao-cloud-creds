@@ -99,9 +99,9 @@ func benchBackend(tb testing.TB) (*backend, logical.Storage) {
 		tb.Fatalf("factory failed: %v", err)
 	}
 	storage := cfg.StorageView
-	for path, data := range map[string]map[string]interface{}{
+	for path, data := range map[string]map[string]any{
 		"config": {fieldDOAPIURLKey: "http://127.0.0.1:1", fieldVerifyCapability: false},
-		"minter-sets/default": {fieldMintersKey: []interface{}{map[string]interface{}{
+		"minter-sets/default": {fieldMintersKey: []any{map[string]any{
 			"id": benchMinterID, minterTokenKey: "dop_v1_bench", neverExpiresKey: true,
 		}}},
 	} {

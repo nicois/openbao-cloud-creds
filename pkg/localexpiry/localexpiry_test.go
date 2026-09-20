@@ -12,7 +12,7 @@ import (
 
 func put(t *testing.T, s logical.Storage, key, expiresAt string) {
 	t.Helper()
-	e, err := logical.StorageEntryJSON("active-tokens/"+key, map[string]interface{}{"expires_at": expiresAt})
+	e, err := logical.StorageEntryJSON("active-tokens/"+key, map[string]any{"expires_at": expiresAt})
 	if err != nil {
 		t.Fatal(err)
 	}

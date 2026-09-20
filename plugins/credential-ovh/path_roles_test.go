@@ -14,9 +14,9 @@ func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Stor
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", "client_id": "cid", "client_secret": "csec", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", "client_id": "cid", "client_secret": "csec", "never_expires": true},
 			},
 		},
 	}
@@ -35,7 +35,7 @@ func TestRoleCRUD(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/deploy-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600,
 			"max_ttl":     3600,
 			"minter_set":  "default",
@@ -114,7 +114,7 @@ func TestRoleValidation_TTLTooHigh(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600,
 			"max_ttl":     7200, // exceeds 3600s OVH limit
 		},
@@ -135,7 +135,7 @@ func TestRoleValidation_DefaultTTLTooHigh(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 7200, // exceeds 3600s OVH limit
 			"max_ttl":     3600,
 		},
@@ -170,7 +170,7 @@ func TestRoleValidation_TTLTooLow(t *testing.T) {
 				Operation: logical.UpdateOperation,
 				Path:      "roles/short-role",
 				Storage:   storage,
-				Data: map[string]interface{}{
+				Data: map[string]any{
 					"default_ttl": tc.defaultTTL,
 					"max_ttl":     tc.maxTTL,
 					"minter_set":  "default",
@@ -199,7 +199,7 @@ func TestRoleValidation_DefaultExceedsMax(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600,
 			"max_ttl":     1800,
 			"minter_set":  "default",

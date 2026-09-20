@@ -66,7 +66,7 @@ func isExpired(ctx context.Context, storage logical.Storage, fullKey string, now
 	if err != nil || entry == nil {
 		return false
 	}
-	var data map[string]interface{}
+	var data map[string]any
 	if err := entry.DecodeJSON(&data); err != nil {
 		return false
 	}

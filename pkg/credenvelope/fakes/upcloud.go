@@ -19,7 +19,7 @@ const jsonKeyCanCreateTokens = "can_create_tokens"
 type UpCloudServer struct {
 	*httptest.Server
 	mu         sync.Mutex
-	tokens     map[string]map[string]interface{}
+	tokens     map[string]map[string]any
 	nextID     atomic.Int64
 	nextStatus int
 	// failHealthPrefix, when non-empty, makes GET /1.3/account return 500 for any
@@ -37,7 +37,7 @@ type UpCloudServer struct {
 
 func NewUpCloudServer() *UpCloudServer {
 	s := &UpCloudServer{
-		tokens: make(map[string]map[string]interface{}),
+		tokens: make(map[string]map[string]any),
 	}
 	s.nextID.Store(fakeStartID)
 	s.Server = httptest.NewServer(s.handler())
@@ -57,7 +57,7 @@ func (s *UpCloudServer) ProvisionedCount() int {
 func (s *UpCloudServer) AddRawToken(id, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tokens[id] = map[string]interface{}{
+	s.tokens[id] = map[string]any{
 		"id":        id,
 		jsonKeyName: name,
 	}
@@ -70,7 +70,7 @@ func (s *UpCloudServer) AddRawToken(id, name string) {
 func (s *UpCloudServer) AddRawTokenWithCreatedAt(id, name, created string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tokens[id] = map[string]interface{}{
+	s.tokens[id] = map[string]any{
 		"id":        id,
 		jsonKeyName: name,
 		"created":   created,
@@ -145,8 +145,8 @@ func (s *UpCloudServer) checkInjectedError(w http.ResponseWriter) bool {
 
 	if status != 0 {
 		w.WriteHeader(status)
-		writeJSON(w, map[string]interface{}{
-			jsonKeyError: map[string]interface{}{
+		writeJSON(w, map[string]any{
+			jsonKeyError: map[string]any{
 				jsonKeyErrorCode:    errCodeServerError,
 				jsonKeyErrorMessage: fmt.Sprintf("injected %d", status),
 			},
@@ -160,8 +160,8 @@ func (s *UpCloudServer) checkBasicAuth(w http.ResponseWriter, r *http.Request) b
 	username, password, ok := r.BasicAuth()
 	if !ok || username == "" || password == "" {
 		w.WriteHeader(http.StatusUnauthorized)
-		writeJSON(w, map[string]interface{}{
-			jsonKeyError: map[string]interface{}{
+		writeJSON(w, map[string]any{
+			jsonKeyError: map[string]any{
 				jsonKeyErrorCode:    "AUTHENTICATION_FAILED",
 				jsonKeyErrorMessage: "missing or invalid credentials",
 			},
@@ -185,8 +185,8 @@ func (s *UpCloudServer) createToken(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if noMint != "" && strings.HasPrefix(password, noMint) {
 		w.WriteHeader(http.StatusForbidden)
-		writeJSON(w, map[string]interface{}{
-			jsonKeyError: map[string]interface{}{
+		writeJSON(w, map[string]any{
+			jsonKeyError: map[string]any{
 				"error_code":    "FORBIDDEN",
 				"error_message": "this token is not permitted to create tokens",
 			},
@@ -215,7 +215,7 @@ func (s *UpCloudServer) createToken(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	token := map[string]interface{}{
+	token := map[string]any{
 		"id":                   id,
 		jsonKeyName:            req.Name,
 		"token":                fmt.Sprintf("ucat_fake_%s", id),
@@ -251,7 +251,7 @@ func (s *UpCloudServer) listTokens(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	tokens := make([]map[string]interface{}, 0, len(s.tokens))
+	tokens := make([]map[string]any, 0, len(s.tokens))
 	for _, t := range s.tokens {
 		tokens = append(tokens, t)
 	}
@@ -279,8 +279,8 @@ func (s *UpCloudServer) getAccount(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if failPrefix != "" && strings.HasPrefix(password, failPrefix) {
 		w.WriteHeader(http.StatusInternalServerError)
-		writeJSON(w, map[string]interface{}{
-			jsonKeyError: map[string]interface{}{
+		writeJSON(w, map[string]any{
+			jsonKeyError: map[string]any{
 				jsonKeyErrorCode:    errCodeServerError,
 				jsonKeyErrorMessage: msgHealthCheckDisabledByKnob,
 			},
@@ -290,8 +290,8 @@ func (s *UpCloudServer) getAccount(w http.ResponseWriter, r *http.Request) {
 	// fakeAccountCredits is an arbitrary non-zero balance for the test account.
 	const fakeAccountCredits = 100.0
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, map[string]interface{}{
-		jsonKeyAccount: map[string]interface{}{
+	writeJSON(w, map[string]any{
+		jsonKeyAccount: map[string]any{
 			"username": "test-user",
 			"credits":  fakeAccountCredits,
 		},

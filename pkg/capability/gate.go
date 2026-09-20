@@ -190,8 +190,7 @@ func (g Gate) run(ctx context.Context, storage logical.Storage, checks []Check) 
 // three cases are deliberately distinct: a cooldown is "ask again", a *Failure is a
 // verdict on the minter, and anything else is ours.
 func (g Gate) renderFailure(err error) *logical.Response {
-	var throttled *Throttled
-	if errors.As(err, &throttled) {
+	if throttled, ok := errors.AsType[*Throttled](err); ok {
 		if g.Logger != nil {
 			g.Logger.Warn("capability verification deferred by a rate-limit cooldown",
 				"cloud", g.Cloud, "minter_id", throttled.Minter, "retry_in", throttled.RetryIn)
@@ -204,8 +203,7 @@ func (g Gate) renderFailure(err error) *logical.Response {
 	if g.Logger != nil {
 		g.Logger.Warn("minter capability verification failed", "cloud", g.Cloud, "error", err)
 	}
-	var failure *Failure
-	if errors.As(err, &failure) {
+	if failure, ok := errors.AsType[*Failure](err); ok {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
 			"minter capability verification failed: %s"+skipHint, failure.ClientMessage())
 	}
@@ -255,7 +253,7 @@ func LoadMinterSet(ctx context.Context, storage logical.Storage, name string) (*
 // RoleJSON marshals a plugin's role value into the stored representation that
 // ChecksFunc receives, so the role-write path can verify the exact shape it is
 // about to persist.
-func RoleJSON(role interface{}) []byte {
+func RoleJSON(role any) []byte {
 	raw, err := json.Marshal(role)
 	if err != nil {
 		return nil

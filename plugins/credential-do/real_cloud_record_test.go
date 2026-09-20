@@ -242,7 +242,7 @@ func (rt *recordingTransport) emit(recording withheldRecording) error {
 	secrets := append([]string(nil), rt.secrets...)
 	rt.mu.Unlock()
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"request": map[string]string{
 			"method": recording.method,
 			// The COLLAPSED path, not the raw one. A DELETE addresses a credential by id —
@@ -308,27 +308,27 @@ func (rt *recordingTransport) emit(recording withheldRecording) error {
 // scrubBody redacts credentials structurally where the body is JSON, and by
 // substring where it is not. The secrets are passed in rather than read off the
 // transport because release can extend them while a call is in flight.
-func scrubBody(body []byte, secrets []string) interface{} {
+func scrubBody(body []byte, secrets []string) any {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil
 	}
-	var parsed interface{}
+	var parsed any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return redactIdentifiers(scrubSecrets(string(body), secrets...))
 	}
 	return scrubValue(parsed, "", secrets)
 }
 
-func scrubValue(value interface{}, key string, secrets []string) interface{} {
+func scrubValue(value any, key string, secrets []string) any {
 	switch typed := value.(type) {
-	case map[string]interface{}:
-		out := make(map[string]interface{}, len(typed))
+	case map[string]any:
+		out := make(map[string]any, len(typed))
 		for k, v := range typed {
 			out[k] = scrubValue(v, k, secrets)
 		}
 		return out
-	case []interface{}:
-		out := make([]interface{}, len(typed))
+	case []any:
+		out := make([]any, len(typed))
 		for i, v := range typed {
 			out[i] = scrubValue(v, key, secrets)
 		}

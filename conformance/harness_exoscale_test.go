@@ -25,12 +25,12 @@ const (
 	exoscaleOtherKey        = exoscaleMinterKeyPrefix + "2"
 )
 
-func exoscaleMinter(id, key string) map[string]interface{} {
-	return map[string]interface{}{fieldID: id, exoscaleKeyField: key, fieldNeverExpires: true}
+func exoscaleMinter(id, key string) map[string]any {
+	return map[string]any{fieldID: id, exoscaleKeyField: key, fieldNeverExpires: true}
 }
 
-func exoscaleRoleFields() map[string]interface{} {
-	return map[string]interface{}{
+func exoscaleRoleFields() map[string]any {
+	return map[string]any{
 		fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 		exoscaleRoleIDField: exoscaleRoleID, fieldMinterSet: defaultSet,
 	}
@@ -45,7 +45,7 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 		Factory: credentialexoscale.Factory,
 		Configure: func(t *testing.T, b logical.Backend, storage logical.Storage) {
 			plugintest.Write(t, b, storage, configPath,
-				map[string]interface{}{exoscaleAPIURLField: srv.URL})
+				map[string]any{exoscaleAPIURLField: srv.URL})
 			plugintest.Write(t, b, storage, setPath,
 				minterSet(exoscaleMinter(liveMinterID, exoscaleLiveKey)))
 			plugintest.Write(t, b, storage, rolePath, exoscaleRoleFields())
@@ -69,7 +69,7 @@ func exoscaleHarness(t *testing.T) plugintest.Harness {
 		TrackingPrefix:           "active-tokens/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
+			plugintest.Write(t, b, storage, configPath, map[string]any{
 				exoscaleAPIURLField: srv.URL, fieldVerifyCapability: verify,
 			})
 			plugintest.Write(t, b, storage, setPath,

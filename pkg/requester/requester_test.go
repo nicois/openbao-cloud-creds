@@ -17,7 +17,7 @@ func TestACallerCannotNameItself(t *testing.T) {
 		EntityID:            "real-entity",
 		// A caller putting these in its request body must have no effect: Identity reads the request
 		// fields core populates from the presented token, and never the data.
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			FieldTokenAccessor: "forged-accessor",
 			FieldEntityID:      "forged-entity",
 			"shard_key":        "forged-shard",
@@ -57,7 +57,7 @@ func TestAbsentFieldsAreOmittedRatherThanEmpty(t *testing.T) {
 // survive, because a record rebuilt from provenance alone would lose the role and minter that make it
 // useful.
 func TestStampPreservesTheRecord(t *testing.T) {
-	record := map[string]interface{}{"role": "executor", "minter": "do_v1"}
+	record := map[string]any{"role": "executor", "minter": "do_v1"}
 	Stamp(record, &logical.Request{ClientTokenAccessor: "acc"})
 
 	if record["role"] != "executor" || record["minter"] != "do_v1" {
@@ -71,7 +71,7 @@ func TestStampPreservesTheRecord(t *testing.T) {
 // TestStampOnARequestWithNoIdentityLeavesTheRecordAlone: issuance must not fail or gain empty keys
 // just because nothing identified the caller.
 func TestStampOnARequestWithNoIdentityLeavesTheRecordAlone(t *testing.T) {
-	record := map[string]interface{}{"role": "executor"}
+	record := map[string]any{"role": "executor"}
 	Stamp(record, &logical.Request{})
 	if len(record) != 1 {
 		t.Errorf("record gained provenance keys with nothing to put in them: %v", record)

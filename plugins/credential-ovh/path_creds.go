@@ -150,7 +150,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			"access_token": accessToken,
 			"token_type":   "Bearer",
 		},
@@ -171,7 +171,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 
 	// Track active credential for metrics (no upstream entity to clean up)
 	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+credentialID,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole:    roleName,
 			"minter":     minterID,
 			"created":    now.UTC().Format(time.RFC3339),
@@ -189,7 +189,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		}
 	}
 
-	resp := b.Secret("ovh_access_token").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret("ovh_access_token").Response(env.ToMap(), map[string]any{
 		"credential_id": credentialID,
 		fieldRole:       roleName,
 		fieldMinterSet:  setName,

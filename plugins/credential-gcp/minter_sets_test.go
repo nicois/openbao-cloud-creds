@@ -15,9 +15,9 @@ func TestMinterSetCRUD(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/backup",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "m1", "credentials_json": testCredentialsJSON, "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "m1", "credentials_json": testCredentialsJSON, "never_expires": true},
 			},
 		},
 	}
@@ -54,9 +54,9 @@ func TestMinterSetValidationRejectsSingleExpiring(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/bad",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "m1", "credentials_json": testCredentialsJSON, "expires_at": "2027-01-01T00:00:00Z"},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "m1", "credentials_json": testCredentialsJSON, "expires_at": "2027-01-01T00:00:00Z"},
 			},
 		},
 	}
@@ -75,9 +75,9 @@ func TestMinterSetMissingCredentialsJSON(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/bad",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "m1", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "m1", "never_expires": true},
 			},
 		},
 	}
@@ -100,7 +100,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/no-set",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "sa@test-project.iam.gserviceaccount.com",
@@ -120,7 +120,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/ghost-set",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":           3600,
 			"max_ttl":               3600,
 			"service_account_email": "sa@test-project.iam.gserviceaccount.com",
@@ -155,7 +155,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	// config
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
-		Data: map[string]interface{}{},
+		Data: map[string]any{},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
@@ -164,8 +164,8 @@ func TestMinterSetIsolation(t *testing.T) {
 	// default set
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
-		Data: map[string]interface{}{"minters": []interface{}{
-			map[string]interface{}{"id": "minter-1", "credentials_json": testCredentialsJSON, "never_expires": true},
+		Data: map[string]any{"minters": []any{
+			map[string]any{"id": "minter-1", "credentials_json": testCredentialsJSON, "never_expires": true},
 		}},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
@@ -175,8 +175,8 @@ func TestMinterSetIsolation(t *testing.T) {
 	// secondary set + role
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/secondary", Storage: storage,
-		Data: map[string]interface{}{"minters": []interface{}{
-			map[string]interface{}{"id": "minter-2", "credentials_json": secondaryCredentialsJSON, "never_expires": true},
+		Data: map[string]any{"minters": []any{
+			map[string]any{"id": "minter-2", "credentials_json": secondaryCredentialsJSON, "never_expires": true},
 		}},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
@@ -184,7 +184,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	}
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/role2", Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600, "max_ttl": 3600,
 			"service_account_email": "target-sa@test-project.iam.gserviceaccount.com",
 			"scopes":                testRoleScope,
@@ -201,7 +201,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("role2 issue failed: err=%v resp=%v", err, resp)
 	}
-	meta := resp.Data["metadata"].(map[string]interface{})
+	meta := resp.Data["metadata"].(map[string]any)
 	if meta["minter_set"] != "secondary" || meta["minter_id"] != "minter-2" {
 		t.Fatalf("role2 used wrong minter: set=%v id=%v", meta["minter_set"], meta["minter_id"])
 	}

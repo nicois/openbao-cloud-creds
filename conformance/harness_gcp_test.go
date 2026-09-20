@@ -34,14 +34,14 @@ const (
 	gcpTrackingPrefix = "active-tokens/"
 )
 
-func gcpMinter(id string) map[string]interface{} {
-	return map[string]interface{}{
+func gcpMinter(id string) map[string]any {
+	return map[string]any{
 		fieldID: id, gcpCredentialsJSONField: gcpCredentialsJSON, fieldNeverExpires: true,
 	}
 }
 
-func gcpRoleFields() map[string]interface{} {
-	return map[string]interface{}{
+func gcpRoleFields() map[string]any {
+	return map[string]any{
 		fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 		gcpSAField: gcpTargetSA, fieldScopes: []string{gcpScope},
 		fieldMinterSet: defaultSet,
@@ -70,7 +70,7 @@ func gcpHarness(t *testing.T) plugintest.Harness {
 			})
 		},
 		Configure: func(t *testing.T, b logical.Backend, storage logical.Storage) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{gcpProjectField: gcpProject})
+			plugintest.Write(t, b, storage, configPath, map[string]any{gcpProjectField: gcpProject})
 			plugintest.Write(t, b, storage, setPath, minterSet(gcpMinter(liveMinterID)))
 			plugintest.Write(t, b, storage, rolePath, gcpRoleFields())
 		},
@@ -94,7 +94,7 @@ func gcpHarness(t *testing.T) plugintest.Harness {
 		TrackingPrefix: gcpTrackingPrefix,
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
+			plugintest.Write(t, b, storage, configPath, map[string]any{
 				gcpProjectField: gcpProject, fieldVerifyCapability: verify,
 			})
 			plugintest.Write(t, b, storage, setPath, minterSet(gcpMinter(liveMinterID)))

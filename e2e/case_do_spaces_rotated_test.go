@@ -42,10 +42,10 @@ func doSpacesRotatedCase(t *testing.T) e2eCase {
 
 	return e2eCase{
 		Cloud:     "do",
-		Config:    map[string]interface{}{doAPIURLField: srv.URL},
+		Config:    map[string]any{doAPIURLField: srv.URL},
 		MinterSet: minterSet(tokenMinter(doMinterToken)),
 		RoleName:  doSpacesRotatedRoleName,
-		Role: map[string]interface{}{
+		Role: map[string]any{
 			// max_ttl within the overlap, which the role write requires: a lease outliving the
 			// grace a replaced key gets would name a credential that had been deleted.
 			fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,

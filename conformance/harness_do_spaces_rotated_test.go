@@ -35,8 +35,8 @@ const (
 	doSpacesRotationOverlap = 48 * time.Hour
 )
 
-func doSpacesRotatedRoleFields() map[string]interface{} {
-	return map[string]interface{}{
+func doSpacesRotatedRoleFields() map[string]any {
+	return map[string]any{
 		// max_ttl is inside the overlap, which the role write requires: a lease longer than the
 		// grace a replaced key gets would name a credential that had been deleted.
 		fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
@@ -54,15 +54,15 @@ func doSpacesRotatedHarness(t *testing.T) plugintest.Harness {
 	srv := fakes.NewDOServer()
 	t.Cleanup(srv.Close)
 
-	config := func(verify bool) map[string]interface{} {
-		return map[string]interface{}{doAPIURLField: srv.URL, fieldVerifyCapability: verify}
+	config := func(verify bool) map[string]any {
+		return map[string]any{doAPIURLField: srv.URL, fieldVerifyCapability: verify}
 	}
 
 	return plugintest.Harness{
 		Cloud:   "do (spaces_key_rotated)",
 		Factory: credentialdo.Factory,
 		Configure: func(t *testing.T, b logical.Backend, storage logical.Storage) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{doAPIURLField: srv.URL})
+			plugintest.Write(t, b, storage, configPath, map[string]any{doAPIURLField: srv.URL})
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, doMinterToken)))
 			plugintest.Write(t, b, storage, rolePath, doSpacesRotatedRoleFields())
 		},
@@ -116,7 +116,7 @@ func doSpacesRotatedHarness(t *testing.T) plugintest.Harness {
 				minterSet(tokenMinter(minterID, doMinterToken)))
 		},
 		WriteSetWithMinters: func(t *testing.T, b logical.Backend, storage logical.Storage, ids ...string) *logical.Response {
-			minters := make([]map[string]interface{}, 0, len(ids))
+			minters := make([]map[string]any, 0, len(ids))
 			for _, id := range ids {
 				minters = append(minters, tokenMinter(id, doMinterToken))
 			}

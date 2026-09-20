@@ -23,7 +23,7 @@ func TestRotateSlot_ChangesCredential(t *testing.T) {
 		t.Fatalf("first read failed: err=%v resp=%v", err, resp1)
 	}
 	origCredID := resp1.Data["credential_id"].(string)
-	origCred := resp1.Data["credential"].(map[string]interface{})
+	origCred := resp1.Data["credential"].(map[string]any)
 	origToken := origCred["auth_token"].(string)
 
 	// Rotate slot 0
@@ -43,7 +43,7 @@ func TestRotateSlot_ChangesCredential(t *testing.T) {
 		t.Fatalf("second read failed: err=%v resp=%v", err, resp2)
 	}
 	newCredID := resp2.Data["credential_id"].(string)
-	newCred := resp2.Data["credential"].(map[string]interface{})
+	newCred := resp2.Data["credential"].(map[string]any)
 	newToken := newCred["auth_token"].(string)
 
 	// Credential should have changed after rotation
@@ -103,7 +103,7 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data:      map[string]interface{}{},
+		Data:      map[string]any{},
 	}
 	resp, err := b.HandleRequest(t.Context(), configReq)
 	if err != nil || (resp != nil && resp.IsError()) {
@@ -115,9 +115,9 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{
 					"id":            "minter-1",
 					"token":         "tenancy:user:fingerprint:key",
 					"never_expires": true,
@@ -134,7 +134,7 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/init-test",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"user_ocid":       "ocid1.user.oc1..inituser",
 			"slot_count":      2,
 			"rotation_period": 604800,
@@ -159,7 +159,7 @@ func TestSlotInitialization_CreatesTokens(t *testing.T) {
 		t.Fatalf("role read failed: err=%v resp=%v", err, resp)
 	}
 
-	slots, ok := resp.Data["slots"].([]map[string]interface{})
+	slots, ok := resp.Data["slots"].([]map[string]any)
 	if !ok {
 		t.Fatalf("expected slots array, got %T", resp.Data["slots"])
 	}

@@ -32,7 +32,7 @@ func TestAzureFake_TokenEndpoint(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -65,7 +65,7 @@ func TestAzureFake_AddPassword(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -92,7 +92,7 @@ func TestAzureFake_RemovePassword(t *testing.T) {
 	addReq.Header.Set("Content-Type", "application/json")
 	addReq.Header.Set("Authorization", "Bearer fake-token")
 	addResp, _ := http.DefaultClient.Do(addReq)
-	var addResult map[string]interface{}
+	var addResult map[string]any
 	data, _ := io.ReadAll(addResp.Body)
 	if err := json.Unmarshal(data, &addResult); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
@@ -142,13 +142,13 @@ func TestAzureFake_GetApplication(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	data, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	creds, ok := result["passwordCredentials"].([]interface{})
+	creds, ok := result["passwordCredentials"].([]any)
 	if !ok {
 		t.Fatalf("expected passwordCredentials array, got %T", result["passwordCredentials"])
 	}
@@ -156,7 +156,7 @@ func TestAzureFake_GetApplication(t *testing.T) {
 		t.Fatalf("expected 1 password credential, got %d", len(creds))
 	}
 
-	cred := creds[0].(map[string]interface{})
+	cred := creds[0].(map[string]any)
 	if cred["displayName"] != "cloud-creds-test-lease1" {
 		t.Fatalf("expected displayName cloud-creds-test-lease1, got %v", cred["displayName"])
 	}

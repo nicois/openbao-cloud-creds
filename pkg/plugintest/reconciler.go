@@ -218,7 +218,7 @@ func reconcile(t *testing.T, b logical.Backend, storage logical.Storage, mode st
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: reconcilePath, Storage: storage,
-		Data: map[string]interface{}{fieldMode: mode},
+		Data: map[string]any{fieldMode: mode},
 	})
 	if err != nil {
 		t.Fatalf("reconcile (%s) errored: %v", mode, err)

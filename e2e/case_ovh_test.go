@@ -30,19 +30,19 @@ func ovhCase(t *testing.T) e2eCase {
 	srv := fakes.NewOVHServer()
 	t.Cleanup(srv.Close)
 
-	minter := map[string]interface{}{
+	minter := map[string]any{
 		fieldID: liveMinterID, ovhClientIDField: ovhClientID,
 		ovhClientSecretField: ovhClientSecret, fieldNeverExpires: true,
 	}
 
 	return e2eCase{
 		Cloud: "ovh",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			ovhRegionField:        ovhRegion,
 			ovhTokenEndpointField: srv.TokenEndpointURL(),
 		},
 		MinterSet: minterSet(minter),
-		Role: map[string]interface{}{
+		Role: map[string]any{
 			fieldDefaultTTL: hourTTL, fieldMaxTTL: hourTTL, fieldMinterSet: defaultSet,
 		},
 		TTLSeconds:              hourTTL,

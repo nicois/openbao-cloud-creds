@@ -141,7 +141,7 @@ func (c *doClient) ListTokens(ctx context.Context) ([]tokenInfo, error) {
 // in path, envelope and the noun in the error, so the transport handling lives here once:
 // a listing is the reconciler's only view of what exists upstream, and two copies of it
 // could drift into treating a failure differently on one class than the other.
-func (c *doClient) listJSON(ctx context.Context, path, operation string, out interface{}) error {
+func (c *doClient) listJSON(ctx context.Context, path, operation string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, http.NoBody)
 	if err != nil {
 		return err

@@ -184,7 +184,7 @@ func minterIDs(t *testing.T, h Harness, b logical.Backend, storage logical.Stora
 	switch v := resp.Data["minter_ids"].(type) {
 	case []string:
 		return v
-	case []interface{}:
+	case []any:
 		out := make([]string, 0, len(v))
 		for _, e := range v {
 			s, ok := e.(string)

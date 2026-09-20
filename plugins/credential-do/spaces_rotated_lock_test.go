@@ -106,7 +106,7 @@ func setupTwoRotatedRoles(t *testing.T, doURL string) (logical.Backend, logical.
 	for _, name := range []string{"role-blocked", "role-free"} {
 		resp, err := b.HandleRequest(t.Context(), &logical.Request{
 			Operation: logical.UpdateOperation, Path: "roles/" + name, Storage: storage,
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"default_ttl":     rotatedDefaultTTL,
 				"max_ttl":         rotatedMaxTTL,
 				"credential_type": "spaces_key_rotated",

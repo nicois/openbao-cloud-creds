@@ -252,13 +252,13 @@ func (e Endpoint) logged(role string, del Deleter) Deleter {
 	}
 }
 
-func (e Endpoint) info(msg string, args ...interface{}) {
+func (e Endpoint) info(msg string, args ...any) {
 	if e.Logger != nil {
 		e.Logger.Info(msg, args...)
 	}
 }
 
-func (e Endpoint) warn(msg string, args ...interface{}) {
+func (e Endpoint) warn(msg string, args ...any) {
 	if e.Logger != nil {
 		e.Logger.Warn(msg, args...)
 	}

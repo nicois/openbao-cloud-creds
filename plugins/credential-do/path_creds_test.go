@@ -18,7 +18,7 @@ func setupConfiguredBackend(t *testing.T, doURL string) (logical.Backend, logica
 	// config: operational settings only
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
-		Data: map[string]interface{}{"do_api_url": doURL},
+		Data: map[string]any{"do_api_url": doURL},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
@@ -27,9 +27,9 @@ func setupConfiguredBackend(t *testing.T, doURL string) (logical.Backend, logica
 	// minter set
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/default", Storage: storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", "token": "dop_v1_test", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", "token": "dop_v1_test", "never_expires": true},
 			},
 		},
 	}
@@ -40,7 +40,7 @@ func setupConfiguredBackend(t *testing.T, doURL string) (logical.Backend, logica
 	// role bound to the set
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/test-role", Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 900, "max_ttl": 3600, "scopes": "read,write", "minter_set": "default",
 		},
 	}
@@ -79,7 +79,7 @@ func TestCredsIssue(t *testing.T) {
 		t.Fatal("expected credential_id")
 	}
 
-	cred, ok := resp.Data["credential"].(map[string]interface{})
+	cred, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected credential map, got %T", resp.Data["credential"])
 	}
@@ -95,7 +95,7 @@ func TestCredsIssue(t *testing.T) {
 		t.Fatal("expected upstream_token_id in internal_data")
 	}
 
-	meta := resp.Data["metadata"].(map[string]interface{})
+	meta := resp.Data["metadata"].(map[string]any)
 	if meta["minter_set"] != "default" {
 		t.Fatalf("expected minter_set=default, got %v", meta["minter_set"])
 	}
@@ -115,8 +115,8 @@ func TestMinterSetIsolation(t *testing.T) {
 	// Add a second, independent set "secondary" and a role bound to it.
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "minter-sets/secondary", Storage: storage,
-		Data: map[string]interface{}{"minters": []interface{}{
-			map[string]interface{}{"id": "minter-2", "token": "dop_v1_other", "never_expires": true},
+		Data: map[string]any{"minters": []any{
+			map[string]any{"id": "minter-2", "token": "dop_v1_other", "never_expires": true},
 		}},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
@@ -124,7 +124,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	}
 	req = &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/role2", Storage: storage,
-		Data: map[string]interface{}{"default_ttl": 900, "max_ttl": 3600, "scopes": "read", "minter_set": "secondary"},
+		Data: map[string]any{"default_ttl": 900, "max_ttl": 3600, "scopes": "read", "minter_set": "secondary"},
 	}
 	if resp, err := b.HandleRequest(t.Context(), req); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("role2 write: err=%v resp=%v", err, resp)
@@ -136,7 +136,7 @@ func TestMinterSetIsolation(t *testing.T) {
 	if err != nil || resp == nil || resp.IsError() {
 		t.Fatalf("role2 issue failed: err=%v resp=%v", err, resp)
 	}
-	meta := resp.Data["metadata"].(map[string]interface{})
+	meta := resp.Data["metadata"].(map[string]any)
 	if meta["minter_set"] != "secondary" || meta["minter_id"] != "minter-2" {
 		t.Fatalf("role2 used wrong minter: set=%v id=%v", meta["minter_set"], meta["minter_id"])
 	}
@@ -167,7 +167,7 @@ func TestPerRoleScopesFromSharedMinterSet(t *testing.T) {
 	} {
 		req := &logical.Request{
 			Operation: logical.UpdateOperation, Path: "roles/" + roleName, Storage: storage,
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"default_ttl": 900, "max_ttl": 3600,
 				"scopes": scope, "minter_set": sharedMinterSet,
 			},
@@ -197,7 +197,7 @@ func TestPerRoleScopesFromSharedMinterSet(t *testing.T) {
 		{"droplet-reader", readerResp, scopeDropletRead},
 		{"droplet-deleter", deleterResp, scopeDropletDelete},
 	} {
-		cred := tc.resp.Data["credential"].(map[string]interface{})
+		cred := tc.resp.Data["credential"].(map[string]any)
 		scopes, ok := cred["scopes"].([]string)
 		if !ok {
 			t.Fatalf("%s: expected credential.scopes []string, got %T", tc.role, cred["scopes"])
@@ -206,7 +206,7 @@ func TestPerRoleScopesFromSharedMinterSet(t *testing.T) {
 			t.Fatalf("%s: expected credential.scopes=[%s], got %v", tc.role, tc.scope, scopes)
 		}
 
-		meta := tc.resp.Data["metadata"].(map[string]interface{})
+		meta := tc.resp.Data["metadata"].(map[string]any)
 		if meta["scope"] != tc.scope {
 			t.Fatalf("%s: expected metadata.scope=%s, got %v", tc.role, tc.scope, meta["scope"])
 		}
@@ -338,7 +338,7 @@ func issueCreds(t *testing.T, b logical.Backend, storage logical.Storage) *logic
 // test checking only one would not notice them diverging.
 func reportedScopes(t *testing.T, resp *logical.Response) (typed []string, flat string) {
 	t.Helper()
-	cred, ok := resp.Data["credential"].(map[string]interface{})
+	cred, ok := resp.Data["credential"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected credential map, got %T", resp.Data["credential"])
 	}
@@ -346,7 +346,7 @@ func reportedScopes(t *testing.T, resp *logical.Response) (typed []string, flat 
 	if !ok {
 		t.Fatalf("credential.scopes is %T, not a string list", cred["scopes"])
 	}
-	meta, ok := resp.Data["metadata"].(map[string]interface{})
+	meta, ok := resp.Data["metadata"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected metadata map, got %T", resp.Data["metadata"])
 	}

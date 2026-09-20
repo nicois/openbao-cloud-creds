@@ -12,9 +12,9 @@ func writeDefaultMinterSet(t *testing.T, b logical.Backend, storage logical.Stor
 		Operation: logical.UpdateOperation,
 		Path:      "minter-sets/default",
 		Storage:   storage,
-		Data: map[string]interface{}{
-			"minters": []interface{}{
-				map[string]interface{}{"id": "minter-1", "token": "cid:secret", "never_expires": true},
+		Data: map[string]any{
+			"minters": []any{
+				map[string]any{"id": "minter-1", "token": "cid:secret", "never_expires": true},
 			},
 		},
 	}
@@ -32,7 +32,7 @@ func TestRoleCRUD(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/graph-rw",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":   3600,
 			"max_ttl":       86400,
 			"app_object_id": "app-obj-id-123",
@@ -117,7 +117,7 @@ func TestRoleValidation_TTL(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":   7200,
 			"max_ttl":       3600,
 			"app_object_id": "app-obj-id-123",
@@ -141,7 +141,7 @@ func TestRoleValidation_MissingAppObjectID(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600,
 			"max_ttl":     86400,
 			"client_id":   "client-id-456",
@@ -163,7 +163,7 @@ func TestRoleValidation_MissingClientID(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "roles/bad-role",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl":   3600,
 			"max_ttl":       86400,
 			"app_object_id": "app-obj-id-123",
@@ -183,7 +183,7 @@ func TestRoleRequiresMinterSet(t *testing.T) {
 	writeDefaultMinterSet(t, b, storage)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/no-set", Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600, "max_ttl": 86400,
 			"app_object_id": "app-obj-id-123", "client_id": "client-id-456",
 		},
@@ -201,7 +201,7 @@ func TestRoleRequiresExistingMinterSet(t *testing.T) {
 	b, storage := getTestBackend(t)
 	req := &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/orphan", Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"default_ttl": 3600, "max_ttl": 86400,
 			"app_object_id": "app-obj-id-123", "client_id": "client-id-456", "minter_set": "nonexistent",
 		},

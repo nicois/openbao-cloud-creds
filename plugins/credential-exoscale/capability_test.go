@@ -20,7 +20,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Re
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldDefaultTTL: 3600, fieldMaxTTL: 86400,
 			fieldRoleID: capRoleID, fieldMinterSet: defaultSetName,
 		},
@@ -34,7 +34,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Re
 // A role may not be bound to a set whose minter cannot create api-keys. The
 // health check cannot see it: GET /v2/zone succeeds for any live key.
 func TestCapability_RoleWriteRejectedWhenMinterCannotMint(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresRotatableMinter(minter1ID, minter1Key),
 	})
 	srv.SetForbidCreateForKeyPrefix("EXO_key_")
@@ -56,7 +56,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotMint(t *testing.T) {
 
 // A successful probe leaves nothing upstream: it creates a key and deletes it.
 func TestCapability_ProbeLeavesNoKeyBehind(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresRotatableMinter(minter1ID, minter1Key),
 	})
 	before := srv.ProvisionedCount()
@@ -71,7 +71,7 @@ func TestCapability_ProbeLeavesNoKeyBehind(t *testing.T) {
 // A rotation successor that is live but whose granted IAM role cannot create
 // api-keys must not be committed: only a probe distinguishes it from a good one.
 func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresRotatableMinter(minter1ID, minter1Key),
 		neverExpiresRotatableMinter(minter2ID, minter2Key),
 	})
@@ -84,7 +84,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: minter1ID},
+		Data: map[string]any{fieldMinterID: minter1ID},
 	})
 	if err != nil {
 		t.Fatalf("rotate errored: %v", err)
@@ -109,7 +109,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
 
 // Replacing a set's minters re-probes every role already bound to it.
 func TestCapability_SetRewriteRejectedWhenReplacementCannotMint(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresRotatableMinter(minter1ID, minter1Key),
 	})
 	if resp := capWriteRole(t, bk, storage); resp != nil && resp.IsError() {
@@ -119,7 +119,7 @@ func TestCapability_SetRewriteRejectedWhenReplacementCannotMint(t *testing.T) {
 	srv.SetForbidCreateForKeyPrefix("EXO_key_")
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
-		Data: map[string]interface{}{fieldMintersKey: []interface{}{
+		Data: map[string]any{fieldMintersKey: []any{
 			neverExpiresRotatableMinter("minter-replacement", "EXO_key_9"),
 		}},
 	})
@@ -137,12 +137,12 @@ func TestCapability_SetRewriteRejectedWhenReplacementCannotMint(t *testing.T) {
 
 // The probe is skippable for operators who cannot accept a probe mint.
 func TestCapability_DisabledSkipsProbe(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresRotatableMinter(minter1ID, minter1Key),
 	})
 	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{fieldAPIURL: srv.URL, fieldVerifyCapability: false},
+		Data: map[string]any{fieldAPIURL: srv.URL, fieldVerifyCapability: false},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write failed: err=%v resp=%v", err, resp)
 	}

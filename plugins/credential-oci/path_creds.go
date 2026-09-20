@@ -130,7 +130,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			"auth_token": best.TokenValue,
 			"user_id":    role.UserOCID,
 		},
@@ -147,7 +147,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		MinterID:       best.MinterID,
 	})
 
-	resp := b.Secret("oci_auth_token").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret("oci_auth_token").Response(env.ToMap(), map[string]any{
 		fieldRole:      roleName,
 		fieldSlotIndex: best.SlotIndex,
 		"token_id":     best.TokenID,

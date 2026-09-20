@@ -24,7 +24,7 @@ func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
 	t.Cleanup(srv.Close)
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: config.StorageView,
-		Data: map[string]interface{}{"vultr_api_url": srv.URL},
+		Data: map[string]any{"vultr_api_url": srv.URL},
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("test config write failed: err=%v resp=%v", err, resp)
@@ -40,7 +40,7 @@ func TestConfigWriteRead(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
-		Data:      map[string]interface{}{},
+		Data:      map[string]any{},
 	}
 
 	resp, err := b.HandleRequest(t.Context(), req)

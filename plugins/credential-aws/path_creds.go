@@ -244,7 +244,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  args.roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			"access_key_id":     accessKeyID,
 			"secret_access_key": aws.ToString(output.Credentials.SecretAccessKey),
 			"session_token":     aws.ToString(output.Credentials.SessionToken),
@@ -266,7 +266,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	// the reconciler and the capacity counter rather than for revocation — which makes it
 	// the only place that names both the role and who asked for the session.
 	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+accessKeyID,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole:    args.roleName,
 			"minter":     args.sel.minterID,
 			"created":    args.now.UTC().Format(time.RFC3339),
@@ -284,7 +284,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		}
 	}
 
-	resp := b.Secret("aws_sts_credentials").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret("aws_sts_credentials").Response(env.ToMap(), map[string]any{
 		"access_key_id": accessKeyID,
 		fieldRole:       args.roleName,
 		fieldMinterSet:  args.sel.setID,
@@ -519,8 +519,7 @@ func classifyAWSError(err error) int {
 		return http.StatusOK
 	}
 
-	var apiErr smithy.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 		if status, ok := awsErrorCodes[apiErr.ErrorCode()]; ok {
 			return status
 		}

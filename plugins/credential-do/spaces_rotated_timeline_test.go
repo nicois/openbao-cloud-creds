@@ -84,7 +84,7 @@ func TestRotatedSpacesTimeline_RotationsComposeAcrossASequence(t *testing.T) {
 			if err != nil || resp == nil || resp.IsError() {
 				t.Fatalf("read at %v: err=%v resp=%v", time.Now(), err, resp)
 			}
-			cred, ok := resp.Data["credential"].(map[string]interface{})
+			cred, ok := resp.Data["credential"].(map[string]any)
 			if !ok {
 				t.Fatalf("no credential object at %v: %v", time.Now(), resp.Data)
 			}
@@ -171,15 +171,15 @@ func timelineBackend(t *testing.T, apiURL string) (*backend, logical.Storage) {
 	storage := cfg.StorageView
 	for _, w := range []struct {
 		path string
-		data map[string]interface{}
+		data map[string]any
 	}{
-		{"config", map[string]interface{}{fieldDOAPIURLKey: apiURL, fieldVerifyCapability: false}},
-		{"minter-sets/default", map[string]interface{}{fieldMintersKey: []interface{}{
-			map[string]interface{}{
+		{"config", map[string]any{fieldDOAPIURLKey: apiURL, fieldVerifyCapability: false}},
+		{"minter-sets/default", map[string]any{fieldMintersKey: []any{
+			map[string]any{
 				"id": "timeline-minter", minterTokenKey: "dop_v1_timeline", neverExpiresKey: true,
 			},
 		}}},
-		{"roles/timeline", map[string]interface{}{
+		{"roles/timeline", map[string]any{
 			"credential_type": credentialTypeSpacesKeyRotated,
 			"grants":          "timeline-bucket:read",
 			"region":          "nyc3",

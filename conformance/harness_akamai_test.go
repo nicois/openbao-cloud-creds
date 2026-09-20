@@ -30,8 +30,8 @@ const (
 // role shape serves both the succeeding and the refused probe.
 var akamaiAPIAccess = fmt.Sprintf(`{"apis":[{"apiId":%d,"accessLevel":"READ-WRITE"}]}`, akamaiRoleAPIID)
 
-func akamaiRoleFields() map[string]interface{} {
-	return map[string]interface{}{
+func akamaiRoleFields() map[string]any {
+	return map[string]any{
 		fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 		akamaiGroupIDField: akamaiGroupID, akamaiAPIAccessKey: akamaiAPIAccess,
 		fieldMinterSet: defaultSet,
@@ -46,7 +46,7 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 		Cloud:   "akamai",
 		Factory: credentialakamai.Factory,
 		Configure: func(t *testing.T, b logical.Backend, storage logical.Storage) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
+			plugintest.Write(t, b, storage, configPath, map[string]any{
 				akamaiHostField: akamaiHost, akamaiAPIURLField: srv.URL,
 			})
 			plugintest.Write(t, b, storage, setPath, minterSet(tokenMinter(liveMinterID, akamaiMinterToken)))
@@ -71,7 +71,7 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 		TrackingPrefix:           "active-clients/",
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
-			plugintest.Write(t, b, storage, configPath, map[string]interface{}{
+			plugintest.Write(t, b, storage, configPath, map[string]any{
 				akamaiHostField: akamaiHost, akamaiAPIURLField: srv.URL,
 				fieldVerifyCapability: verify,
 			})
@@ -86,7 +86,7 @@ func akamaiHarness(t *testing.T) plugintest.Harness {
 				minterSet(tokenMinter(minterID, akamaiMinterToken)))
 		},
 		WriteSetWithMinters: func(t *testing.T, b logical.Backend, storage logical.Storage, ids ...string) *logical.Response {
-			minters := make([]map[string]interface{}, 0, len(ids))
+			minters := make([]map[string]any, 0, len(ids))
 			for _, id := range ids {
 				// The same credential under different ids. Affinity is about WHICH minter is
 				// chosen, not about the credentials differing, so one token keeps the fake simple

@@ -120,11 +120,9 @@ func Snapshot(ctx context.Context, storage logical.Storage, prefix string, limit
 	if limit <= 0 {
 		return state, nil
 	}
-	state.WarnAt = int(float64(limit) * warnFraction)
-	if state.WarnAt < 1 {
+	state.WarnAt = max(int(float64(limit)*warnFraction),
 		// A cap of one has no room for a gentle warning; the first credential is the last.
-		state.WarnAt = 1
-	}
+		1)
 
 	ids, err := storage.List(ctx, prefix)
 	if err != nil {
@@ -138,7 +136,7 @@ func Snapshot(ctx context.Context, storage logical.Storage, prefix string, limit
 		if entry == nil {
 			continue
 		}
-		var record map[string]interface{}
+		var record map[string]any
 		if err := json.Unmarshal(entry.Value, &record); err != nil {
 			// A record we cannot read is still a credential that exists. Counting it against an
 			// unknown minter would be wrong, but ignoring it entirely would overstate room, so it

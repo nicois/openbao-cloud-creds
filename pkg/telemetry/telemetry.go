@@ -91,8 +91,8 @@ type IssuanceAttempt struct {
 
 // LogFields renders the attempt as structured log key/values, with the upstream
 // status and error appended.
-func (a IssuanceAttempt) LogFields(status int, err error) []interface{} {
-	return []interface{}{
+func (a IssuanceAttempt) LogFields(status int, err error) []any {
+	return []any{
 		labelCloud, a.Cloud,
 		"role", a.Role,
 		"minter_set", a.MinterSet,

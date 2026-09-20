@@ -112,7 +112,7 @@ func ValidateResourcePath(field, value string) error {
 	if strings.HasPrefix(value, "/") || strings.Contains(value, "://") {
 		return fmt.Errorf("%s must be a relative resource path, not %q", field, value)
 	}
-	for _, segment := range strings.Split(value, "/") {
+	for segment := range strings.SplitSeq(value, "/") {
 		if segment == "" {
 			return fmt.Errorf("%s contains an empty path segment: %q", field, value)
 		}

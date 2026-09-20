@@ -13,7 +13,7 @@ func TestReconcileEndpoint_DryRun(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "reconcile",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"mode": "dry_run",
 		},
 	}
@@ -47,7 +47,7 @@ func TestReconcileEndpoint_Normal(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "reconcile",
 		Storage:   storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"mode": "normal",
 		},
 	}

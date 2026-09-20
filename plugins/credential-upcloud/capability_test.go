@@ -18,7 +18,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Re
 	t.Helper()
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: capRolePath, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldDefaultTTL: 3600, fieldMaxTTL: 86400,
 			fieldMinterSet: defaultSetName,
 		},
@@ -33,7 +33,7 @@ func capWriteRole(t *testing.T, b *backend, storage logical.Storage) *logical.Re
 // that is invisible to the health check: a token without can_create_tokens reads
 // /1.3/account happily and only fails when asked to mint.
 func TestCapability_RoleWriteRejectedWhenMinterCannotMint(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "ucat_v1_one"),
 	})
 	srv.SetForbidMintForTokenPrefix("ucat_v1_")
@@ -55,7 +55,7 @@ func TestCapability_RoleWriteRejectedWhenMinterCannotMint(t *testing.T) {
 
 // A successful probe leaves nothing upstream: it creates a token and deletes it.
 func TestCapability_ProbeLeavesNoTokenBehind(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "ucat_v1_one"),
 	})
 	before := srv.ProvisionedCount()
@@ -70,7 +70,7 @@ func TestCapability_ProbeLeavesNoTokenBehind(t *testing.T) {
 // A rotation successor that is live but cannot mint (no can_create_tokens) must
 // not be committed: the health check passes, so only a probe catches it.
 func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "ucat_v1_one"),
 		neverExpiresMinter("minter-2", "ucat_v1_two"),
 	})
@@ -83,7 +83,7 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: "minter-1"},
+		Data: map[string]any{fieldMinterID: "minter-1"},
 	})
 	if err != nil {
 		t.Fatalf("rotate errored: %v", err)
@@ -108,12 +108,12 @@ func TestCapability_RotationRejectedWhenSuccessorCannotMint(t *testing.T) {
 
 // The probe is skippable for operators who cannot accept a probe mint.
 func TestCapability_DisabledSkipsProbe(t *testing.T) {
-	bk, srv, storage := newRotationBackend(t, []interface{}{
+	bk, srv, storage := newRotationBackend(t, []any{
 		neverExpiresMinter("minter-1", "ucat_v1_one"),
 	})
 	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldUsername: "testuser", fieldAPIURL: srv.URL, fieldVerifyCapability: false,
 		},
 	}); err != nil || (resp != nil && resp.IsError()) {

@@ -71,7 +71,7 @@ func (i *Intent) Advance(ctx context.Context, storage logical.Storage, prefix st
 // Progress renders a role's purge for a reader, deriving what is left in scope rather than
 // trusting a stored count. That is what keeps a finished purge finished on a mount that has
 // gone on issuing: the new credentials are past the cutoff, so they are not remaining work.
-func Progress(ctx context.Context, storage logical.Storage, prefix, role string) (map[string]interface{}, error) {
+func Progress(ctx context.Context, storage logical.Storage, prefix, role string) (map[string]any, error) {
 	intent, err := LoadIntent(ctx, storage, role)
 	if err != nil {
 		return nil, err

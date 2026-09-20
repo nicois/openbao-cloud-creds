@@ -28,7 +28,7 @@ func TestConfigWriteRefusesExfiltratingEndpoint(t *testing.T) {
 	for _, raw := range []string{"http://attacker.example", "http://169.254.169.254"} {
 		resp, err := b.HandleRequest(t.Context(), &logical.Request{
 			Operation: logical.UpdateOperation, Path: "config", Storage: config.StorageView,
-			Data: map[string]interface{}{"do_api_url": raw},
+			Data: map[string]any{"do_api_url": raw},
 		})
 		if err != nil {
 			t.Fatalf("unexpected transport error for %q: %v", raw, err)
@@ -44,7 +44,7 @@ func TestConfigWriteRefusesExfiltratingEndpoint(t *testing.T) {
 	// Loopback must still work, or every HTTP-fake test and the e2e layer break.
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "config", Storage: config.StorageView,
-		Data: map[string]interface{}{"do_api_url": "http://127.0.0.1:45231"},
+		Data: map[string]any{"do_api_url": "http://127.0.0.1:45231"},
 	})
 	if err != nil {
 		t.Fatalf("loopback endpoint returned a transport error: %v", err)

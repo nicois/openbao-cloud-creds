@@ -143,7 +143,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	capabilityCacheTTL := time.Duration(d.Get(fieldCapabilityCacheTTL).(int)) * time.Second
 
 	cfg := &cloudconfig.PluginConfig{
-		Versioned:         cloudconfig.Versioned{Schema: cloudconfig.SchemaVersion},
+		Schema:            cloudconfig.SchemaVersion,
 		Cloud:             cloudName,
 		ReconcileCadence:  reconcileCadence,
 		BootstrapDelay:    reconcilerBootstrapDelay,
@@ -247,7 +247,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, _ *f
 	}
 
 	return &logical.Response{
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			fieldCloud:              cfg.Cloud,
 			fieldRegion:             b.getRegion(),
 			fieldReconcileCadence:   int(cfg.ReconcileCadence.Seconds()),

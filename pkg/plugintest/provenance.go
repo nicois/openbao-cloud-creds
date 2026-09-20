@@ -70,7 +70,7 @@ func provCannotBeForged(t *testing.T, h Harness) {
 	requireTrackingRecords(t, h)
 	b, storage := newConfiguredBackend(t, h)
 
-	forged := map[string]interface{}{
+	forged := map[string]any{
 		requester.FieldTokenAccessor: "forged-accessor",
 		requester.FieldEntityID:      "forged-entity",
 		"entity_id":                  "forged-entity",
@@ -188,7 +188,7 @@ func requireCaller(t *testing.T, b logical.Backend, storage logical.Storage,
 	rolePath string, requirement requester.Requirement,
 ) {
 	t.Helper()
-	resp := TryWrite(t, b, storage, rolePath, map[string]interface{}{
+	resp := TryWrite(t, b, storage, rolePath, map[string]any{
 		requester.FieldRequireCallerIdentity: string(requirement),
 	})
 	if resp != nil && resp.IsError() {
@@ -199,7 +199,7 @@ func requireCaller(t *testing.T, b logical.Backend, storage logical.Storage,
 
 // issueAsCaller reads the issue path as a caller core resolved both fields for.
 func issueAsCaller(t *testing.T, b logical.Backend, storage logical.Storage,
-	path string, data map[string]interface{},
+	path string, data map[string]any,
 ) *logical.Response {
 	t.Helper()
 	return issueWith(t, b, storage, path, &logical.Request{
@@ -227,7 +227,7 @@ func issueWith(t *testing.T, b logical.Backend, storage logical.Storage,
 
 // soleTrackingRecord returns the one record under the prefix, failing on any other count: a case
 // asserting on "the" record must not silently read the first of several.
-func soleTrackingRecord(t *testing.T, storage logical.Storage, prefix string) map[string]interface{} {
+func soleTrackingRecord(t *testing.T, storage logical.Storage, prefix string) map[string]any {
 	t.Helper()
 	keys, err := storage.List(t.Context(), prefix)
 	if err != nil {
@@ -241,14 +241,14 @@ func soleTrackingRecord(t *testing.T, storage logical.Storage, prefix string) ma
 	if err != nil || entry == nil {
 		t.Fatalf("reading tracking record %s%s failed: err=%v entry=%v", prefix, keys[0], err, entry)
 	}
-	record := map[string]interface{}{}
+	record := map[string]any{}
 	if err := json.Unmarshal(entry.Value, &record); err != nil {
 		t.Fatalf("tracking record %s%s is not a JSON object: %v", prefix, keys[0], err)
 	}
 	return record
 }
 
-func assertRecordField(t *testing.T, record map[string]interface{}, key, want string) {
+func assertRecordField(t *testing.T, record map[string]any, key, want string) {
 	t.Helper()
 	got, present := record[key]
 	if !present {

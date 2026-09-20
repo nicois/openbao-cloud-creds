@@ -208,7 +208,7 @@ func TestLeaseRegistry_OwningOneClassDoesNotShieldTheOtherClassesSameID(t *testi
 // putTracking writes one tracking record, as issuance does.
 func putTracking(t *testing.T, storage logical.Storage, key string) {
 	t.Helper()
-	entry, err := logical.StorageEntryJSON(key, map[string]interface{}{fieldRole: "role-x"})
+	entry, err := logical.StorageEntryJSON(key, map[string]any{fieldRole: "role-x"})
 	if err != nil {
 		t.Fatalf("encoding a tracking record failed: %v", err)
 	}

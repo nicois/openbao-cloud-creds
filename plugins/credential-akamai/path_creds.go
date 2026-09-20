@@ -144,7 +144,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	env := credenvelope.NewEnvelope(credenvelope.EnvelopeParams{
 		Cloud: cloudName,
 		Role:  a.roleName,
-		Credential: map[string]interface{}{
+		Credential: map[string]any{
 			"client_token":  cred.ClientToken,
 			"access_token":  cred.AccessToken,
 			"client_secret": cred.ClientSecret,
@@ -165,7 +165,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 
 	// Track active client for reconciler
 	activeEntry, _ := logical.StorageEntryJSON("active-clients/"+a.clientResp.ClientID,
-		requester.Stamp(map[string]interface{}{
+		requester.Stamp(map[string]any{
 			fieldRole:      a.roleName,
 			fieldMinterSet: a.setName,
 			"minter":       a.minterID,
@@ -184,7 +184,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		}
 	}
 
-	resp := b.Secret("akamai_client").Response(env.ToMap(), map[string]interface{}{
+	resp := b.Secret("akamai_client").Response(env.ToMap(), map[string]any{
 		"upstream_client_id": a.clientResp.ClientID,
 		fieldRole:            a.roleName,
 		fieldMinterSet:       a.setName,
@@ -207,23 +207,23 @@ func leaseShortID(id string) string {
 
 // roleAccess derives the Akamai apiAccess and groupAccess request bodies from a
 // role's config, falling back to empty access when unset or unparseable.
-func roleAccess(role *akamaiRole) (apiAccess, groupAccess interface{}) {
+func roleAccess(role *akamaiRole) (apiAccess, groupAccess any) {
 	if role.APIAccess != "" {
 		if err := json.Unmarshal([]byte(role.APIAccess), &apiAccess); err != nil {
-			apiAccess = map[string]interface{}{jsonKeyAPIs: []interface{}{}}
+			apiAccess = map[string]any{jsonKeyAPIs: []any{}}
 		}
 	} else {
-		apiAccess = map[string]interface{}{jsonKeyAPIs: []interface{}{}}
+		apiAccess = map[string]any{jsonKeyAPIs: []any{}}
 	}
 
 	if role.GroupID > 0 {
-		groupAccess = map[string]interface{}{
-			jsonKeyGroups: []interface{}{
-				map[string]interface{}{jsonKeyGroupID: role.GroupID},
+		groupAccess = map[string]any{
+			jsonKeyGroups: []any{
+				map[string]any{jsonKeyGroupID: role.GroupID},
 			},
 		}
 	} else {
-		groupAccess = map[string]interface{}{jsonKeyGroups: []interface{}{}}
+		groupAccess = map[string]any{jsonKeyGroups: []any{}}
 	}
 	return apiAccess, groupAccess
 }

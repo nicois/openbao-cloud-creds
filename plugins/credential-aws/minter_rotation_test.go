@@ -109,7 +109,7 @@ func (c *fakeIAMMinterClient) ListAccessKeyIDs(_ context.Context) ([]string, err
 // API. The injected STS GetCallerIdentity fails for any access key whose id
 // contains failHealthMarker, letting a test fail the successor health-check
 // deterministically (the successor's id is set by the test via the store).
-func newRotationBackend(t *testing.T, store *fakeIAMStore, minters []interface{}) (*backend, logical.Storage) {
+func newRotationBackend(t *testing.T, store *fakeIAMStore, minters []any) (*backend, logical.Storage) {
 	t.Helper()
 
 	config := logical.TestBackendConfig()
@@ -137,14 +137,14 @@ func newRotationBackend(t *testing.T, store *fakeIAMStore, minters []interface{}
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{configRegionKey: defaultRegion},
+		Data: map[string]any{configRegionKey: defaultRegion},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
-		Data: map[string]interface{}{fieldMintersKey: minters},
+		Data: map[string]any{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write: err=%v resp=%v", err, resp)
 	}
@@ -168,8 +168,8 @@ func loadSetFromStorage(t *testing.T, storage logical.Storage) cloudconfig.Minte
 	return set
 }
 
-func neverExpiresMinter(id, accessKeyID, secret string) map[string]interface{} {
-	return map[string]interface{}{
+func neverExpiresMinter(id, accessKeyID, secret string) map[string]any {
+	return map[string]any{
 		"id":                     id,
 		minterAccessKeyIDKey:     accessKeyID,
 		minterSecretAccessKeyKey: secret,
@@ -182,14 +182,14 @@ func neverExpiresMinter(id, accessKeyID, secret string) map[string]interface{} {
 // 1 retired), and the retired minter is never selected while the successor is.
 func TestMinterRotation_HappyPath(t *testing.T) {
 	store := newFakeIAMStore("AKIA1") // minter-1's only key: one free slot
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, "AKIA1", "secret1"),
 		neverExpiresMinter(rotMinter2ID, "AKIA2", "secret2"),
 	})
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("rotate: err=%v resp=%v", err, resp)
@@ -282,8 +282,8 @@ func TestMinterRotation_HappyPath(t *testing.T) {
 func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 	exp1 := time.Now().Add(10 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	exp2 := time.Now().Add(50 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	expiringMinter := func(id, accessKeyID, secret, exp string) map[string]interface{} {
-		return map[string]interface{}{
+	expiringMinter := func(id, accessKeyID, secret, exp string) map[string]any {
+		return map[string]any{
 			"id":                     id,
 			minterAccessKeyIDKey:     accessKeyID,
 			minterSecretAccessKeyKey: secret,
@@ -291,7 +291,7 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 		}
 	}
 	store := newFakeIAMStore("AKIA1")
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		expiringMinter(rotMinter1ID, "AKIA1", "secret1", exp1),
 		expiringMinter(rotMinter2ID, "AKIA2", "secret2", exp2),
 	})
@@ -317,7 +317,7 @@ func TestMinterRotation_RejectedBreaksValidation(t *testing.T) {
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil {
 		t.Fatalf("rotate err: %v", err)
@@ -355,14 +355,14 @@ func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
 	store.nextSeq = 0
 	// Override the successor key naming to embed the fail marker by pre-setting a
 	// prefix the fake create uses: we instead make the fake create a marked id.
-	bk, storage := newRotationBackendFailHealth(t, store, []interface{}{
+	bk, storage := newRotationBackendFailHealth(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, "AKIA1", "secret1"),
 		neverExpiresMinter(rotMinter2ID, "AKIA2", "secret2"),
 	})
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil {
 		t.Fatalf("rotate err: %v", err)
@@ -390,7 +390,7 @@ func TestMinterRotation_RejectedSuccessorHealthCheckFails(t *testing.T) {
 // newRotationBackendFailHealth is like newRotationBackend but the fake IAM
 // CreateAccessKey returns key ids containing failHealthMarker, so the injected
 // STS GetCallerIdentity fails the successor's health check.
-func newRotationBackendFailHealth(t *testing.T, store *fakeIAMStore, minters []interface{}) (*backend, logical.Storage) {
+func newRotationBackendFailHealth(t *testing.T, store *fakeIAMStore, minters []any) (*backend, logical.Storage) {
 	t.Helper()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
@@ -416,13 +416,13 @@ func newRotationBackendFailHealth(t *testing.T, store *fakeIAMStore, minters []i
 
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{configRegionKey: defaultRegion},
+		Data: map[string]any{configRegionKey: defaultRegion},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("config write: err=%v resp=%v", err, resp)
 	}
 	if resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathMinterSetWrite, Storage: storage,
-		Data: map[string]interface{}{fieldMintersKey: minters},
+		Data: map[string]any{fieldMintersKey: minters},
 	}); err != nil || (resp != nil && resp.IsError()) {
 		t.Fatalf("minter-set write: err=%v resp=%v", err, resp)
 	}
@@ -469,14 +469,14 @@ func (c *failHealthIAMClient) ListAccessKeyIDs(_ context.Context) ([]string, err
 // reads it back.
 func TestRotateConfig_MinterRetireGraceRoundTrip(t *testing.T) {
 	store := newFakeIAMStore("AKIA1")
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, "AKIA1", "secret1"),
 		neverExpiresMinter(rotMinter2ID, "AKIA2", "secret2"),
 	})
 
 	if resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: pathConfigKey, Storage: storage,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			configRegionKey:        defaultRegion,
 			fieldMinterRetireGrace: 86400,
 		},
@@ -501,7 +501,7 @@ func TestRotateConfig_MinterRetireGraceRoundTrip(t *testing.T) {
 func TestRetireSweep_DropsAfterGraceKeepsBeforeGrace(t *testing.T) {
 	// Seed the store with the upstream keys the sweep should delete.
 	store := newFakeIAMStore("AKIA-active", "AKIA-old", "AKIA-recent")
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		neverExpiresMinter("active-1", "AKIA-active", "secretA"),
 		neverExpiresMinter("old-expired", "AKIA-old", "secretO"),
 		neverExpiresMinter("recent", "AKIA-recent", "secretR"),
@@ -567,14 +567,14 @@ func TestMinterRotation_TwoKeyGuard(t *testing.T) {
 	// The user already holds 2 keys (e.g. a successor minted by an earlier
 	// rotation still in its retirement grace).
 	store := newFakeIAMStore("AKIA1", "AKIA1b")
-	bk, storage := newRotationBackend(t, store, []interface{}{
+	bk, storage := newRotationBackend(t, store, []any{
 		neverExpiresMinter(rotMinter1ID, "AKIA1", "secret1"),
 		neverExpiresMinter(rotMinter2ID, "AKIA2", "secret2"),
 	})
 
 	resp, err := bk.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: rotatePath, Storage: storage,
-		Data: map[string]interface{}{fieldMinterID: rotMinter1ID},
+		Data: map[string]any{fieldMinterID: rotMinter1ID},
 	})
 	if err != nil {
 		t.Fatalf("rotate err: %v", err)

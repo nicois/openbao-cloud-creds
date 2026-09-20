@@ -43,9 +43,9 @@ func extractSignature(t *testing.T, req *http.Request) string {
 	t.Helper()
 	auth := req.Header.Get("Authorization")
 	const marker = "signature="
-	i := strings.Index(auth, marker)
-	if i < 0 {
+	_, after, ok := strings.Cut(auth, marker)
+	if !ok {
 		t.Fatalf("no signature in %q", auth)
 	}
-	return auth[i+len(marker):]
+	return after
 }

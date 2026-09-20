@@ -75,7 +75,7 @@ const fakeTokenExpirySeconds = 3600 // 1h
 
 // writeJSON encodes v as JSON to the response writer, panicking on failure
 // (acceptable in a test fake).
-func writeJSON(w http.ResponseWriter, v interface{}) {
+func writeJSON(w http.ResponseWriter, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		panic(fmt.Sprintf("fake server: failed to encode JSON: %v", err))
 	}
@@ -100,7 +100,7 @@ const (
 // paging over Go's randomised map iteration would hand out overlapping pages, so a client
 // that pages *correctly* would still see duplicates and misses — a bug belonging to the
 // fake alone, which is the one kind of finding a fake must never manufacture.
-func paginateDO(r *http.Request, listKey string, entries []map[string]interface{}) map[string]interface{} {
+func paginateDO(r *http.Request, listKey string, entries []map[string]any) map[string]any {
 	perPage := clampedQueryInt(r, "per_page", doDefaultPageSize, 1, doMaxPageSize)
 	page := clampedQueryInt(r, "page", 1, 1, math.MaxInt32)
 
@@ -110,21 +110,21 @@ func paginateDO(r *http.Request, listKey string, entries []map[string]interface{
 	if window == nil {
 		// A JSON `null` is not an empty list: a client decoding one gets no error and no
 		// entries, which is exactly the silence this fake exists to make loud.
-		window = []map[string]interface{}{}
+		window = []map[string]any{}
 	}
 
-	links := map[string]interface{}{}
+	links := map[string]any{}
 	if end < len(entries) {
 		lastPage := (len(entries) + perPage - 1) / perPage
-		links["pages"] = map[string]interface{}{
+		links["pages"] = map[string]any{
 			"next": pageURL(r, perPage, page+1),
 			"last": pageURL(r, perPage, lastPage),
 		}
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		listKey: window,
 		"links": links,
-		"meta":  map[string]interface{}{"total": len(entries)},
+		"meta":  map[string]any{"total": len(entries)},
 	}
 }
 
@@ -165,7 +165,7 @@ func deleteByID(
 	w http.ResponseWriter,
 	r *http.Request,
 	mu *sync.Mutex,
-	store map[string]map[string]interface{},
+	store map[string]map[string]any,
 	successStatus int,
 ) {
 	parts := strings.Split(r.URL.Path, "/")

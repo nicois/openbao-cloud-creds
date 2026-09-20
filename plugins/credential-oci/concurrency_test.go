@@ -26,16 +26,14 @@ const (
 func TestFakeOCIClient_ConcurrentAccess(t *testing.T) {
 	f := newFakeOCIClient()
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+	for range 8 {
+		wg.Go(func() {
+			for range 100 {
 				_, _, _ = f.CreateAuthToken(t.Context(), "user-1", "cloud-creds-x")
 				_ = f.TokenCount()
 				_, _ = f.ListAuthTokens(t.Context(), "user-1")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -66,7 +64,7 @@ func TestFakeOCIClient_ConcurrentAccess(t *testing.T) {
 func TestRotationReconcileRace(t *testing.T) {
 	const trials = 50
 
-	for trial := 0; trial < trials; trial++ {
+	for trial := range trials {
 		b, storage, fake := newInternalConfiguredBackend(t)
 
 		role, ok := loadRole(t.Context(), storage, "test-role")
@@ -169,7 +167,7 @@ func newInternalConfiguredBackend(t *testing.T) (*backend, logical.Storage, *fak
 	fake := newFakeOCIClient()
 	b.SetClientFactory(func(string) OCIIAMClient { return fake })
 
-	write := func(path string, data map[string]interface{}) {
+	write := func(path string, data map[string]any) {
 		resp, err := b.HandleRequest(t.Context(), &logical.Request{
 			Operation: logical.UpdateOperation, Path: path, Storage: storage, Data: data,
 		})
@@ -178,17 +176,17 @@ func newInternalConfiguredBackend(t *testing.T) (*backend, logical.Storage, *fak
 		}
 	}
 
-	write("config", map[string]interface{}{testRegionField: testRegionValue})
-	write("minter-sets/default", map[string]interface{}{
-		"minters": []interface{}{
-			map[string]interface{}{
+	write("config", map[string]any{testRegionField: testRegionValue})
+	write("minter-sets/default", map[string]any{
+		"minters": []any{
+			map[string]any{
 				"id":            "minter-1",
 				"token":         "tenancy:user:fingerprint:key",
 				"never_expires": true,
 			},
 		},
 	})
-	write("roles/test-role", map[string]interface{}{
+	write("roles/test-role", map[string]any{
 		"user_ocid":       "ocid1.user.oc1..testuser",
 		"slot_count":      2,
 		"rotation_period": 604800,

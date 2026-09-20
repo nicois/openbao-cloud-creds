@@ -66,9 +66,9 @@ func twoMinterSet() *cloudconfig.MinterSet {
 // intermittently rather than not at all.
 func TestGate_VerifySetProbesEveryMinterForEveryBoundRole(t *testing.T) {
 	storage := &logical.InmemStorage{}
-	putRole(t, storage, "role-a", map[string]interface{}{"name": "role-a", "minter_set": setAlpha, "shape": "read"})
-	putRole(t, storage, "role-b", map[string]interface{}{"name": "role-b", "minter_set": setAlpha, "shape": "write"})
-	putRole(t, storage, "elsewhere", map[string]interface{}{"name": "elsewhere", "minter_set": "beta"})
+	putRole(t, storage, "role-a", map[string]any{"name": "role-a", "minter_set": setAlpha, "shape": "read"})
+	putRole(t, storage, "role-b", map[string]any{"name": "role-b", "minter_set": setAlpha, "shape": "write"})
+	putRole(t, storage, "elsewhere", map[string]any{"name": "elsewhere", "minter_set": "beta"})
 
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: true}
@@ -90,7 +90,7 @@ func TestGate_VerifySetProbesEveryMinterForEveryBoundRole(t *testing.T) {
 // must not mask the successor's failure.
 func TestGate_VerifySuccessorProbesOnlyTheSuccessor(t *testing.T) {
 	storage := &logical.InmemStorage{}
-	putRole(t, storage, "role-a", map[string]interface{}{"name": "role-a", "minter_set": setAlpha})
+	putRole(t, storage, "role-a", map[string]any{"name": "role-a", "minter_set": setAlpha})
 	putMinterSet(t, storage, twoMinterSet())
 
 	var probed []string
@@ -158,7 +158,7 @@ func TestGate_FailureExplainsWithoutLeakingTheUpstreamBody(t *testing.T) {
 
 func TestGate_DisabledRunsNoProbes(t *testing.T) {
 	storage := &logical.InmemStorage{}
-	putRole(t, storage, "role-a", map[string]interface{}{"name": "role-a", "minter_set": setAlpha})
+	putRole(t, storage, "role-a", map[string]any{"name": "role-a", "minter_set": setAlpha})
 	putMinterSet(t, storage, twoMinterSet())
 
 	var probed []string
@@ -203,8 +203,8 @@ func TestChecksPerMinter_SkipsRetiredMinters(t *testing.T) {
 // message still names both roles (see TestVerify_FailureNamesMinterAndAllSharingRoles).
 func TestGate_RolesWithTheSameMintShapeProbeOnce(t *testing.T) {
 	storage := &logical.InmemStorage{}
-	putRole(t, storage, "role-a", map[string]interface{}{"name": "role-a", "minter_set": setAlpha, "shape": "read"})
-	putRole(t, storage, "role-b", map[string]interface{}{"name": "role-b", "minter_set": setAlpha, "shape": "read"})
+	putRole(t, storage, "role-a", map[string]any{"name": "role-a", "minter_set": setAlpha, "shape": "read"})
+	putRole(t, storage, "role-b", map[string]any{"name": "role-b", "minter_set": setAlpha, "shape": "read"})
 
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: true}
@@ -326,7 +326,7 @@ func TestGate_RoleWriteProbesAHealthyMinter(t *testing.T) {
 // set permanently unfixable.
 func TestGate_SetWriteIsNotRefusedAfterARejectedLogin(t *testing.T) {
 	storage := &logical.InmemStorage{}
-	putRole(t, storage, "role-a", map[string]interface{}{"name": "role-a", "minter_set": setAlpha, "shape": "read"})
+	putRole(t, storage, "role-a", map[string]any{"name": "role-a", "minter_set": setAlpha, "shape": "read"})
 
 	var probed []string
 	gate := Gate{Cloud: "test", Enabled: true, Limiter: loginRejectedLimiter(t, "minter-1")}

@@ -140,10 +140,10 @@ func TestStateMachine_ConcurrentAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < iterations; i++ {
+			for i := range iterations {
 				switch (g + i) % 6 {
 				case 0:
 					// Transient/server error.
