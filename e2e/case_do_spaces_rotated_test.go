@@ -66,6 +66,7 @@ func doSpacesRotatedCase(t *testing.T) e2eCase {
 		// will still delete it on demand, so the purge lever works here. The two facts about
 		// deletion come apart on exactly this row.
 		HardRevoke:               false,
+		TracksIssuedCredentials:  true,
 		DeletesIssuedCredentials: true,
 		SharesOneCredential:      true,
 		Upstream:                 srv.ProvisionedSpacesKeyCount,

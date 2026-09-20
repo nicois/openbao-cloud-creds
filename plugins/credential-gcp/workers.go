@@ -126,7 +126,7 @@ func (b *backend) reconcileWorker(ctx context.Context, storage logical.Storage) 
 	capability.SweepCache(ctx, storage, cloudName, b.Logger(), b.gate().CacheTTL)
 
 	res, err := localexpiry.PruneExpired(ctx, storage, localexpiry.Options{
-		Prefix: "active-tokens/",
+		Prefix: activeTrackingPrefix,
 		Now:    time.Now(),
 		DryRun: false,
 		Logger: b.Logger(),

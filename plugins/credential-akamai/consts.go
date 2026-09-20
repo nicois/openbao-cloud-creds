@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 )
 
 // cloudName is the cloud identifier used in stored config, response envelopes,
@@ -24,6 +25,10 @@ const (
 	// Deleting a role stops nothing: live leases stay renewable and every credential
 	// already issued keeps working, so this is the only lever that closes the tap.
 	fieldDisabled = "disabled"
+	// fieldRequireCallerIdentity is the role field that refuses to issue to a caller this
+	// mount cannot name. Aliased from pkg/requester rather than spelled again, so the field
+	// an operator sets here is provably the one every other cloud reads.
+	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
 
 	// fieldRotationParams is the per-minter rotation metadata map key (carries
 	// the authorizing username and, after rotation, the upstream client_id used

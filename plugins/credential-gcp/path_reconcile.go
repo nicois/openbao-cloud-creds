@@ -46,7 +46,7 @@ func (b *backend) pathReconcile(ctx context.Context, req *logical.Request, d *fr
 	dryRun := mode == modeDryRun
 
 	res, err := localexpiry.PruneExpired(ctx, req.Storage, localexpiry.Options{
-		Prefix: "active-tokens/",
+		Prefix: activeTrackingPrefix,
 		Now:    time.Now(),
 		DryRun: dryRun,
 		Logger: b.Logger(),

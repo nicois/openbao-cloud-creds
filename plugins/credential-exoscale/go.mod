@@ -26,6 +26,10 @@ replace github.com/nicois/openbao-cloud-creds/pkg/clusterrole => ../../pkg/clust
 
 replace github.com/nicois/openbao-cloud-creds/pkg/mintercapacity => ../../pkg/mintercapacity
 
+replace github.com/nicois/openbao-cloud-creds/pkg/requester => ../../pkg/requester
+
+replace github.com/nicois/openbao-cloud-creds/pkg/issuedlist => ../../pkg/issuedlist
+
 require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-metrics v0.5.4
@@ -33,12 +37,14 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.4.0
+	github.com/nicois/openbao-cloud-creds/pkg/issuedlist v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/mintercapacity v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/mintledger v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/reconciler v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/recovery v0.4.0
+	github.com/nicois/openbao-cloud-creds/pkg/requester v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/telemetry v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/upstreampurge v0.4.0
 	github.com/nicois/openbao-cloud-creds/pkg/worker v0.4.0

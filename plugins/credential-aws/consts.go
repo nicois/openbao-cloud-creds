@@ -1,6 +1,9 @@
 package credentialaws
 
-import "github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+import (
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
+)
 
 // cloudName is the cloud identifier used in stored config, response envelopes,
 // and the "cloud" metric label.
@@ -23,6 +26,11 @@ const (
 	fieldDisabled   = "disabled"
 	fieldCloud      = "cloud"
 	fieldIAMRoleARN = "iam_role_arn"
+
+	// fieldRequireCallerIdentity is the role field demanding that a credential is only
+	// issued to a caller this mount can name. Spelled by pkg/requester rather than here,
+	// so the field a report looks for is the same on every cloud.
+	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
 
 	// fieldDefaultTTL / fieldMaxTTL are the role TTL field names.
 	fieldDefaultTTL = "default_ttl"

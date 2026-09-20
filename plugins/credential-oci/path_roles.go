@@ -9,20 +9,22 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
 // ociRole stores the configuration for a single OCI credential role.
 type ociRole struct {
-	Name           string        `json:"name"`
-	UserOCID       string        `json:"user_ocid"`
-	SlotCount      int           `json:"slot_count"`
-	RotationPeriod time.Duration `json:"rotation_period"`
-	DefaultTTL     time.Duration `json:"default_ttl"`
-	MaxTTL         time.Duration `json:"max_ttl"`
-	MinterSet      string        `json:"minter_set"`
-	Disabled       bool          `json:"disabled,omitempty"`
+	Name                  string        `json:"name"`
+	UserOCID              string        `json:"user_ocid"`
+	SlotCount             int           `json:"slot_count"`
+	RotationPeriod        time.Duration `json:"rotation_period"`
+	DefaultTTL            time.Duration `json:"default_ttl"`
+	MaxTTL                time.Duration `json:"max_ttl"`
+	MinterSet             string        `json:"minter_set"`
+	Disabled              bool          `json:"disabled,omitempty"`
+	RequireCallerIdentity string        `json:"require_caller_identity,omitempty"`
 }
 
 const (
@@ -76,6 +78,10 @@ func (b *backend) rolePaths() []*framework.Path {
 						"Writing it alone is enough — a write to an existing role changes only the " +
 						"fields it carries. Reversible; it destroys nothing already issued",
 				},
+				fieldRequireCallerIdentity: {
+					Type:        framework.TypeString,
+					Description: requester.RoleFieldDescription(),
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -105,6 +111,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	defaultTTL := time.Duration(d.Get("default_ttl").(int)) * time.Second
 	maxTTL := time.Duration(d.Get("max_ttl").(int)) * time.Second
 	minterSet := d.Get(fieldMinterSet).(string)
+	requireCallerIdentity := d.Get(fieldRequireCallerIdentity).(string)
 
 	if errResp := b.validateRoleWriteParams(ctx, req, roleWriteParams{
 		userOCID:       userOCID,
@@ -132,15 +139,23 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
+	// Refused at role write, not at issuance. A requirement this binary cannot parse is
+	// treated as "refuse everyone" when a credential is read, so accepting one here would
+	// hand an operator a role that looks written and serves nobody.
+	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
+
 	ociR := &ociRole{
-		Name:           name,
-		UserOCID:       userOCID,
-		SlotCount:      slotCount,
-		RotationPeriod: rotationPeriod,
-		DefaultTTL:     defaultTTL,
-		MaxTTL:         maxTTL,
-		MinterSet:      minterSet,
-		Disabled:       d.Get(fieldDisabled).(bool),
+		Name:                  name,
+		UserOCID:              userOCID,
+		SlotCount:             slotCount,
+		RotationPeriod:        rotationPeriod,
+		DefaultTTL:            defaultTTL,
+		MaxTTL:                maxTTL,
+		MinterSet:             minterSet,
+		Disabled:              d.Get(fieldDisabled).(bool),
+		RequireCallerIdentity: requireCallerIdentity,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -289,14 +304,15 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
 func roleData(role *ociRole) map[string]interface{} {
 	return map[string]interface{}{
-		fieldName:      role.Name,
-		fieldUserOCID:  role.UserOCID,
-		fieldSlotCount: role.SlotCount,
-		fieldRotation:  int(role.RotationPeriod.Seconds()),
-		"default_ttl":  int(role.DefaultTTL.Seconds()),
-		"max_ttl":      int(role.MaxTTL.Seconds()),
-		fieldMinterSet: role.MinterSet,
-		fieldDisabled:  role.Disabled,
+		fieldName:                  role.Name,
+		fieldUserOCID:              role.UserOCID,
+		fieldSlotCount:             role.SlotCount,
+		fieldRotation:              int(role.RotationPeriod.Seconds()),
+		"default_ttl":              int(role.DefaultTTL.Seconds()),
+		"max_ttl":                  int(role.MaxTTL.Seconds()),
+		fieldMinterSet:             role.MinterSet,
+		fieldDisabled:              role.Disabled,
+		fieldRequireCallerIdentity: role.RequireCallerIdentity,
 	}
 }
 

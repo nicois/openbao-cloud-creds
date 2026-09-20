@@ -59,6 +59,15 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return errResp, nil
 	}
 
+	// Before the dispatch below, so it covers all three credential types from one site: this is
+	// the question "may this caller be HANDED a credential at all", and it is the same question
+	// whether the answer would have been minted, or — on a rotated role — re-served from storage
+	// without touching the cloud. Nothing upstream has been contacted yet, so a refusal costs
+	// the cloud nothing, which is the placement requester.Enforce documents.
+	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return resp, nil
+	}
+
 	// Checked before any MINT, which is what RequireCredentialKind's contract is about.
 	// It can no longer come before the role is loaded, because which shape is served is
 	// now a property of the role rather than of the plugin — loading a role is a storage
@@ -168,7 +177,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	// Track active token for reconciler, and record WHICH caller obtained it. Without the requester
 	// a leaked DigitalOcean token is traceable to this mount and this role, and no further — while
 	// the question an incident asks is which unit is compromised, and core handed us the answer.
-	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+tokenResp.Token.ID,
+	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+tokenResp.Token.ID,
 		requester.Stamp(map[string]interface{}{
 			fieldRole:         roleName,
 			trackFieldMinter:  minterID,
@@ -289,7 +298,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 				"credential left upstream for the owner-tag reconciler to delete "+
 				"(it does not expire on its own)",
 				"minter_set", minterSet, "minter_id", minterID)
-			_ = req.Storage.Delete(ctx, "active-tokens/"+tokenID)
+			_ = req.Storage.Delete(ctx, activeTrackingPrefix+tokenID)
 			return nil, nil
 		}
 	}
@@ -310,7 +319,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	b.recordMinterSuccess(minterSet, minterID, now)
 
 	// Remove from active tokens
-	if err := req.Storage.Delete(ctx, "active-tokens/"+tokenID); err != nil {
+	if err := req.Storage.Delete(ctx, activeTrackingPrefix+tokenID); err != nil {
 		b.Logger().Warn("failed to remove active token tracking", "token_id", tokenID, "error", err)
 	}
 

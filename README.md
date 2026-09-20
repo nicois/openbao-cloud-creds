@@ -175,11 +175,26 @@ do, and **deleting the role is neither of them** — it stops nothing, because l
 renewable and every credential already issued keeps working.
 
 ```bash
+bao list  cloud-creds/<cloud>/issued                                      # what is outstanding, and whose?
 bao write cloud-creds/<cloud>/roles/<role> disabled=true                  # stop issuing more
 bao write cloud-creds/<cloud>/roles/<role>/revoke-upstream mode=dry_run   # how many are out?
 bao write cloud-creds/<cloud>/roles/<role>/revoke-upstream                # delete them upstream
 bao read  cloud-creds/<cloud>/roles/<role>/revoke-upstream                # progress
 ```
+
+`issued/` comes first because an incident hands you a credential or a service name, not a lease id.
+It lists every credential this mount has issued and not yet revoked, keyed by the id the cloud's own
+console shows, and each entry names the role, the minter and **who obtained it** — the token accessor
+and identity entity core resolved at issuance, which is how a leaked credential is traced to one unit
+rather than to a mount. It pages (`after`/`limit`), it never contains credential material, and it is
+an inventory rather than a log: an entry disappears when its credential is revoked. On OCI it refuses
+with `unsupported`, because a credential there is a shared rotation slot and there is no
+per-credential record — an empty list would read as "nothing is outstanding".
+
+A role can also insist on being able to name its callers before it issues at all:
+`require_caller_identity=any` refuses a request core resolved no caller for, and `token_accessor`
+additionally refuses a batch token, whose accessor is absent and whose identity entity belongs to the
+service token that created it.
 
 The levers are independent on purpose. `disabled=true` needs nothing but the flag — not the
 role's other fields, and not a healthy cloud — so an operator who does not have the role

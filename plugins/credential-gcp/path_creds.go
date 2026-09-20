@@ -14,6 +14,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/minteraffinity"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -116,12 +117,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	})
 
 	// Track active credential for metrics (no upstream entity to clean up)
-	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+credentialID, map[string]interface{}{
-		fieldRole:    roleName,
-		"minter":     minterID,
-		"created":    now.UTC().Format(time.RFC3339),
-		"expires_at": expiresAt.UTC().Format(time.RFC3339),
-	})
+	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+credentialID,
+		requester.Stamp(map[string]interface{}{
+			fieldRole:    roleName,
+			"minter":     minterID,
+			"created":    now.UTC().Format(time.RFC3339),
+			"expires_at": expiresAt.UTC().Format(time.RFC3339),
+		}, req))
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
 			// Tracking is metrics-only here: access tokens auto-expire and the
@@ -158,7 +160,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, _ *
 	credentialID, _ := req.Secret.InternalData["credential_id"].(string)
 	minterSet, _ := req.Secret.InternalData[fieldMinterSet].(string)
 	if credentialID != "" {
-		if err := req.Storage.Delete(ctx, "active-tokens/"+credentialID); err != nil {
+		if err := req.Storage.Delete(ctx, activeTrackingPrefix+credentialID); err != nil {
 			b.Logger().Warn("failed to remove active credential tracking",
 				"credential_id", credentialID, "minter_set", minterSet, "error", err)
 		}
@@ -362,6 +364,11 @@ func (b *backend) preflight(ctx context.Context, req *logical.Request, d *framew
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
 		return nil, mintercapacity.State{}, errResp
+	}
+	// Before capacity is counted and before a minter is selected: a role that demands a caller
+	// it can name must cost the upstream nothing when it refuses one it cannot.
+	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return nil, mintercapacity.State{}, resp
 	}
 	capacity, errResp := b.capacitySnapshot(ctx, req)
 	if errResp != nil {

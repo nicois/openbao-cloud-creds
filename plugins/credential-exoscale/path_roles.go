@@ -7,6 +7,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -18,6 +19,10 @@ type exoscaleRole struct {
 	RoleID     string        `json:"role_id"`
 	MinterSet  string        `json:"minter_set"`
 	Disabled   bool          `json:"disabled,omitempty"`
+	// RequireCallerIdentity is how much of a caller's identity this role insists on before
+	// it issues. Empty is requester.RequireNone, so a role written before the field existed
+	// keeps issuing exactly what it issued.
+	RequireCallerIdentity string `json:"require_caller_identity,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -54,6 +59,10 @@ func (b *backend) rolePaths() []*framework.Path {
 						"because live leases stay renewable and issued credentials keep working. " +
 						"Writing it alone is enough — a write to an existing role changes only the " +
 						"fields it carries. Reversible; it destroys nothing already issued",
+				},
+				fieldRequireCallerIdentity: {
+					Type:        framework.TypeString,
+					Description: requester.RoleFieldDescription(),
 				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -114,13 +123,22 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
+	requireCallerIdentity := d.Get(fieldRequireCallerIdentity).(string)
+	// Refused here rather than at issuance. A value this binary cannot parse fails closed on
+	// every credential read (requester.Enforce), so accepting it would persist a role that
+	// looks written and issues nothing to anybody.
+	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
+
 	exoRole := &exoscaleRole{
-		Name:       name,
-		DefaultTTL: defaultTTL,
-		MaxTTL:     maxTTL,
-		RoleID:     roleID,
-		MinterSet:  minterSet,
-		Disabled:   d.Get(fieldDisabled).(bool),
+		Name:                  name,
+		DefaultTTL:            defaultTTL,
+		MaxTTL:                maxTTL,
+		RoleID:                roleID,
+		MinterSet:             minterSet,
+		Disabled:              d.Get(fieldDisabled).(bool),
+		RequireCallerIdentity: requireCallerIdentity,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -163,12 +181,13 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
 func roleData(role *exoscaleRole) map[string]interface{} {
 	return map[string]interface{}{
-		fieldName:       role.Name,
-		fieldDefaultTTL: int(role.DefaultTTL.Seconds()),
-		fieldMaxTTL:     int(role.MaxTTL.Seconds()),
-		fieldRoleID:     role.RoleID,
-		fieldMinterSet:  role.MinterSet,
-		fieldDisabled:   role.Disabled,
+		fieldName:                  role.Name,
+		fieldDefaultTTL:            int(role.DefaultTTL.Seconds()),
+		fieldMaxTTL:                int(role.MaxTTL.Seconds()),
+		fieldRoleID:                role.RoleID,
+		fieldMinterSet:             role.MinterSet,
+		fieldDisabled:              role.Disabled,
+		fieldRequireCallerIdentity: role.RequireCallerIdentity,
 	}
 }
 

@@ -4,6 +4,8 @@ go 1.27.0
 
 require (
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.4.0
+	github.com/nicois/openbao-cloud-creds/pkg/issuedlist v0.4.0
+	github.com/nicois/openbao-cloud-creds/pkg/requester v0.4.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
 
@@ -12,6 +14,7 @@ require (
 	github.com/armon/go-radix v1.0.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
@@ -59,3 +62,7 @@ require (
 )
 
 replace github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../credenvelope
+
+replace github.com/nicois/openbao-cloud-creds/pkg/requester => ../requester
+
+replace github.com/nicois/openbao-cloud-creds/pkg/issuedlist => ../issuedlist

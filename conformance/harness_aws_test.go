@@ -27,6 +27,9 @@ const (
 	awsLiveSecret     = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 	awsOtherKeyID     = "AKIARESEEDEDKEY00000"
 	awsOtherSecret    = "reseededSecretAccessKey1234567890abcdef"
+	// awsTrackingPrefix is where the plugin records each session it mints. Stated here
+	// because a wrong prefix yields a green test that asserts nothing.
+	awsTrackingPrefix = "active-tokens/"
 )
 
 func awsMinter(id, keyID, secret string) map[string]interface{} {
@@ -80,6 +83,10 @@ func awsHarness(t *testing.T) plugintest.Harness {
 		ProvisionedCount:         func() int { return int(minted.Load()) },
 		ExpectsHardRevoke:        false,
 		DeletesIssuedCredentials: false,
+		// Declared for the `provenance` category, which reads the record's contents. The
+		// revoke case that also consumes it stays skipped on ExpectsHardRevoke=false: an
+		// STS session cannot be deleted, so an untracked one is harmless.
+		TrackingPrefix: awsTrackingPrefix,
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{

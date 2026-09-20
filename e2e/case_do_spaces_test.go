@@ -47,8 +47,9 @@ func doSpacesCase(t *testing.T) e2eCase {
 		TTLSeconds: shortTTL,
 		// Renewable for the same reason the token role is: a Spaces key has no upstream expiry,
 		// so renewal only defers the revoke that is the credential's whole bound.
-		Renewable:  true,
-		HardRevoke: true,
+		Renewable:               true,
+		HardRevoke:              true,
+		TracksIssuedCredentials: true,
 		// Every hard-revoke cloud can also be purged: the same delete call serves both.
 		DeletesIssuedCredentials: true,
 		// The Spaces-key count, not the token count: a summed count would let this row pass on

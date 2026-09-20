@@ -22,6 +22,9 @@ const (
 	ovhRegion             = "eu"
 	ovhClientID           = "test-client-id"
 	ovhClientSecret       = "test-client-secret"
+	// ovhTrackingPrefix is where the plugin records each credential it mints. Stated here because
+	// a wrong prefix yields a green test that asserts nothing.
+	ovhTrackingPrefix = "active-tokens/"
 )
 
 func ovhMinter(id string) map[string]interface{} {
@@ -66,6 +69,9 @@ func ovhHarness(t *testing.T) plugintest.Harness {
 		ProvisionedCount:         srv.ProvisionedCount,
 		ExpectsHardRevoke:        false,
 		DeletesIssuedCredentials: false,
+		// Declared for the `provenance` category. The revoke case that also reads it stays
+		// skipped on ExpectsHardRevoke=false: an OAuth2 token cannot be deleted.
+		TrackingPrefix: ovhTrackingPrefix,
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{

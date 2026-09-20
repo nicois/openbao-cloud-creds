@@ -359,6 +359,22 @@ func (c *Cluster) ReadWithData(path string, data map[string][]string) *api.Secre
 	return secret
 }
 
+// List is a LIST operation, which OpenBao carries as its own HTTP verb rather than as a read with a
+// parameter. It exists for the `issued/` inventory: an in-process test calls the handler with
+// logical.ListOperation directly, so nothing below this layer proves that a plugin's key_info
+// survives the plugin RPC boundary and core's response marshalling.
+//
+// A nil secret is returned rather than fatal: an empty listing is a legitimate answer, and it is
+// exactly the answer the inventory must give after the credential is revoked.
+func (c *Cluster) List(path string) *api.Secret {
+	c.t.Helper()
+	secret, err := c.client.Logical().List(path)
+	if err != nil {
+		c.t.Fatalf("list %s failed: %v\nlog:\n%s", path, err, c.LogTail())
+	}
+	return secret
+}
+
 // ReadExpectingError is for the requests that MUST be refused. It returns the error
 // so the caller can assert on the code the client actually receives.
 func (c *Cluster) ReadExpectingError(path string, data map[string][]string) error {

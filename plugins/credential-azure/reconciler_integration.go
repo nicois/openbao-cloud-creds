@@ -77,7 +77,7 @@ type leaseRegistry struct {
 }
 
 func (r *leaseRegistry) OwnedIDs(ctx context.Context) (map[string]struct{}, error) {
-	entries, err := r.storage.List(ctx, "active-tokens/")
+	entries, err := r.storage.List(ctx, activeTrackingPrefix)
 	if err != nil {
 		return nil, err
 	}

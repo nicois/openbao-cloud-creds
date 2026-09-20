@@ -127,7 +127,9 @@ func (b *backend) buildSpacesResponse(ctx context.Context, req *logical.Request,
 		MinterID:       minterID,
 	})
 
-	if err := b.trackSpacesKey(ctx, req.Storage, spacesKeyRecord{
+	// The request that read this lease is the caller that obtained the key, so its identity is
+	// recorded with it: a leaked Spaces key otherwise traces to this mount and role, no further.
+	if err := b.trackSpacesKey(ctx, req.Storage, req, spacesKeyRecord{
 		roleName: roleName, minterID: minterID, accessKey: key.AccessKey, createdAt: now,
 	}); err != nil {
 		// Same bargain as the token path (audit F6): never hand out a credential we

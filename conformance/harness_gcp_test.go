@@ -29,6 +29,9 @@ const (
 		`"private_key_id":"key123","private_key":"-----BEGIN RSA PRIVATE KEY-----\nfake\n` +
 		`-----END RSA PRIVATE KEY-----\n","client_email":"minter@test-project.iam.gserviceaccount.com",` +
 		`"client_id":"123456789"}`
+	// gcpTrackingPrefix is where the plugin records each credential it mints. Stated here because
+	// a wrong prefix yields a green test that asserts nothing.
+	gcpTrackingPrefix = "active-tokens/"
 )
 
 func gcpMinter(id string) map[string]interface{} {
@@ -86,6 +89,9 @@ func gcpHarness(t *testing.T) plugintest.Harness {
 		ProvisionedCount:         func() int { return int(minted.Load()) },
 		ExpectsHardRevoke:        false,
 		DeletesIssuedCredentials: false,
+		// Declared for the `provenance` category. The revoke case that also reads it stays
+		// skipped on ExpectsHardRevoke=false: an impersonation token cannot be deleted.
+		TrackingPrefix: gcpTrackingPrefix,
 
 		ConfigureProbe: func(t *testing.T, b logical.Backend, storage logical.Storage, verify bool) {
 			plugintest.Write(t, b, storage, configPath, map[string]interface{}{

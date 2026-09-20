@@ -60,7 +60,7 @@ var suites = []suite{
 		run:  RunReloadSuite,
 		requires: func(h Harness) []string {
 			return missing(
-				field{"RolePath", h.RolePath != ""},
+				field{fieldRolePath, h.RolePath != ""},
 				field{"WorkersRunning", h.WorkersRunning != nil},
 			)
 		},
@@ -121,7 +121,7 @@ var suites = []suite{
 		name: CategoryContainment,
 		run:  RunContainmentSuite,
 		requires: func(h Harness) []string {
-			return missing(field{"RolePath", h.RolePath != ""})
+			return missing(field{fieldRolePath, h.RolePath != ""})
 		},
 	},
 	{
@@ -146,7 +146,31 @@ var suites = []suite{
 			)
 		},
 	},
+	{
+		name: CategoryProvenance,
+		run:  RunProvenanceSuite,
+		// Only the role path: the two cases that read a tracking record gate on
+		// TrackingPrefix themselves and print why, while the cases about refusing an
+		// unidentifiable caller need nothing cloud-specific — so no cloud can opt out of
+		// the contract that a credential is attributable, the same reasoning as `lease`.
+		requires: func(h Harness) []string {
+			return missing(field{fieldRolePath, h.RolePath != ""})
+		},
+	},
+	{
+		name: CategoryInventory,
+		run:  RunInventorySuite,
+		// Nothing cloud-specific: the `issued/` path exists on every plugin, answering where
+		// credentials are tracked one-per-credential and REFUSING where they are not. A cloud
+		// that could opt out would be one whose inventory nobody ever asked for.
+		requires: func(_ Harness) []string { return nil },
+	},
 }
+
+// fieldRolePath names the harness field three categories need. A const because more than two
+// categories now require it, which is lint's threshold and a fair one: a typo'd field name in a
+// requires() list reads as "this harness is wired" and silently disables the check.
+const fieldRolePath = "RolePath"
 
 type field struct {
 	name string

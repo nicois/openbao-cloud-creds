@@ -133,10 +133,16 @@ runtime `minter_insufficient_privilege` idea was deliberately not pursued (see
 | `config_invalid` | 400 | Operator input is missing, malformed, or names something that does not exist; also a failed capability probe | No — fix config |
 | `unsupported` | 501 | This cloud cannot do it and never will (minter rotation on DO/OVH/Vultr/OCI; `revoke-upstream` on AWS/GCP/OVH/OCI, where the message names the containment the operator does have) | No — never |
 | `credential_kind_unsupported` | 400 | The caller pinned a `credential_kind` this role does not serve, or one this binary does not know | **Yes, asking for a different shape** — the one refusal a client can resolve without an operator |
+| `caller_unidentified` | 403 | The role sets `require_caller_identity` and core resolved no acceptable caller from the presented token | **Yes, under a different token** — a batch token has no accessor, so re-present under a service token |
 | `pool_exhausted` | 503 | All slots simultaneously unavailable | Yes, short backoff |
 | `lease_revoke_failed` | 500 | Couldn't revoke upstream cleanly | Operator alert |
 | `internal` | 500 | Plugin bug, or a failure none of the above describes | No |
 
+> **Revised 2026-09-20.** `caller_unidentified` added with the role field
+> `require_caller_identity`. It earns a code because the action is the *caller's* and is
+> specific: every other `do not retry` code needs an operator, while this one is resolved by
+> presenting the request under a token core can name. Additive, so no `api_version` bump.
+>
 > **Revised 2026-08-23.** `credential_kind_unsupported` added with `metadata.credential_kind`
 > (api_version 4). It passes the "a client would act differently" test in a way no other
 > code does: a library that can parse two shapes retries asking for the other one, where

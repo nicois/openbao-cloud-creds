@@ -1,6 +1,9 @@
 package credentialdo
 
-import "github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+import (
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
+)
 
 // cloudName is the cloud identifier used in stored config, response envelopes,
 // and the "cloud" metric label.
@@ -23,6 +26,10 @@ const (
 	// Deleting a role stops nothing: live leases stay renewable and every credential
 	// already issued keeps working, so this is the only lever that closes the tap.
 	fieldDisabled = "disabled"
+	// fieldRequireCallerIdentity is the role field that refuses to issue to a caller this
+	// mount cannot name. Aliased from pkg/requester rather than spelled again: a report
+	// joining credentials to identities has to find the same field name on every cloud.
+	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
 	// fieldMinterID names the minter targeted by the rotate endpoint.
 	fieldMinterID = "minter_id"
 	// fieldMinterRetireGrace is the config field/response key for the retirement

@@ -40,9 +40,10 @@ func azureCase(t *testing.T) e2eCase {
 			azureAppObjIDField: azureAppObjectID, azureClientIDField: azureAppClientID,
 			fieldMinterSet: defaultSet,
 		},
-		TTLSeconds: hourTTL,
-		Renewable:  false,
-		HardRevoke: true,
+		TTLSeconds:              hourTTL,
+		Renewable:               false,
+		HardRevoke:              true,
+		TracksIssuedCredentials: true,
 		// Every hard-revoke cloud can also be purged: the same delete call serves both.
 		DeletesIssuedCredentials: true,
 		Upstream:                 srv.ProvisionedCount,

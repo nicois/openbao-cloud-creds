@@ -12,6 +12,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -67,6 +68,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
 		return errResp, nil
+	}
+
+	// Before a minter is chosen and before anything is minted: a role that insists on a
+	// namable caller must cost UpCloud nothing when it refuses one.
+	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return resp, nil
 	}
 
 	now := time.Now()
@@ -156,12 +163,16 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		MinterID:       minterID,
 	})
 
-	// Track active token for reconciler
-	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+tokenResp.ID, map[string]interface{}{
-		fieldRole: roleName,
-		"minter":  minterID,
-		"created": now.UTC().Format(time.RFC3339),
-	})
+	// Track active token for reconciler, and record WHICH caller obtained it. Without the
+	// requester a leaked UpCloud token is traceable to this mount and this role, and no
+	// further — while the question an incident asks is which unit is compromised, and core
+	// handed us the answer.
+	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+tokenResp.ID,
+		requester.Stamp(map[string]interface{}{
+			fieldRole: roleName,
+			"minter":  minterID,
+			"created": now.UTC().Format(time.RFC3339),
+		}, req))
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
 			// Tracking write failed: revoke the just-minted upstream credential

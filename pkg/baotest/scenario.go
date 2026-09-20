@@ -139,6 +139,15 @@ type Case struct {
 	// asserted a refusal on exactly the role where the lever works.
 	DeletesIssuedCredentials bool
 
+	// TracksIssuedCredentials is true where the plugin writes one tracking record per issued
+	// credential, and therefore answers the `issued/` inventory rather than refusing it.
+	//
+	// Declared rather than probed, for the reason every other fact here is: a scenario that asked
+	// the endpoint and adapted to the answer would agree with a plugin whose inventory had stopped
+	// working. False only where a credential is not one-per-issuance — OCI's phased-rotation slots,
+	// which are shared by every reader and created by a rotation rather than by a read.
+	TracksIssuedCredentials bool
+
 	// SharesOneCredential is true where every reader of the role holds ONE credential that
 	// the plugin replaces on its own schedule, rather than one minted per read.
 	//
@@ -193,9 +202,10 @@ func (tc Case) mintsPerRead() int {
 	return 1
 }
 
-func (tc Case) rolePath() string  { return tc.Mount + "/roles/" + tc.RoleName }
-func (tc Case) issuePath() string { return tc.Mount + "/creds/" + tc.RoleName }
-func (tc Case) purgePath() string { return tc.rolePath() + "/revoke-upstream" }
+func (tc Case) rolePath() string      { return tc.Mount + "/roles/" + tc.RoleName }
+func (tc Case) issuePath() string     { return tc.Mount + "/creds/" + tc.RoleName }
+func (tc Case) purgePath() string     { return tc.rolePath() + "/revoke-upstream" }
+func (tc Case) inventoryPath() string { return tc.Mount + "/issued" }
 
 // The revoke-upstream report's keys and modes, spelled out rather than imported from the
 // package that produces them: what this layer checks is that a client receives them, and a
@@ -249,6 +259,7 @@ func RunScenario(t *testing.T, c *Cluster, tc Case) {
 
 	assertLeaseIsTracked(t, c, first.LeaseID)
 	assertRenewContract(t, c, tc, first.LeaseID)
+	assertInventoryListsWhatIsOutstanding(t, c, tc, first)
 
 	if tc.HardRevoke {
 		want--
@@ -261,6 +272,107 @@ func RunScenario(t *testing.T, c *Cluster, tc Case) {
 	want = assertTokenRevocationCascade(t, c, tc, want)
 
 	assertPurgeUpstream(t, c, tc, want)
+}
+
+// assertInventoryListsWhatIsOutstanding drives the `issued/` inventory over HTTP: the credential just
+// read appears, with the role and the caller that obtained it, and no credential material.
+//
+// It belongs at THIS layer specifically. The endpoint's logic is fenced in-process by the shared
+// conformance category, but two things only a running server can prove: that a LIST is a distinct
+// HTTP verb reaching the plugin as logical.ListOperation across the plugin RPC boundary, and that
+// key_info survives core's response marshalling — an in-process test hands the handler a Data map and
+// reads a Go struct back, so neither is exercised. The provenance recorded here is real, too: core
+// populates the token accessor from the dev root token, which is what an in-process request has to
+// fake.
+//
+// Gated on a cloud that tracks per-credential records. Where it does not (OCI's shared slots), the
+// endpoint refuses by design and the conformance category asserts the refusal.
+func assertInventoryListsWhatIsOutstanding(t *testing.T, c *Cluster, tc Case, issued *api.Secret) {
+	t.Helper()
+	if !tc.TracksIssuedCredentials {
+		return
+	}
+	listed := c.List(tc.inventoryPath())
+	if listed == nil {
+		t.Fatalf("%s lists nothing while a credential is outstanding: an inventory that "+
+			"understates what is live is worse than none", tc.inventoryPath())
+	}
+	keys, _ := listed.Data["keys"].([]interface{})
+	credentialID, _ := issued.Data["credential_id"].(string)
+	if !containsString(keys, credentialID) {
+		t.Fatalf("%s does not list the credential just issued (%q): %v", tc.inventoryPath(),
+			credentialID, listed.Data)
+	}
+
+	entry := inventoryEntry(t, listed, credentialID)
+	if entry["role"] != tc.RoleName {
+		t.Errorf("the inventory entry names role %v, want %q", entry["role"], tc.RoleName)
+	}
+	// Only asserted where a read MINTS: a shared credential's record is written by the rotation
+	// that minted it, so it names no caller — see the provenance note in docs/decisions.md.
+	if !tc.SharesOneCredential && entry[fieldRequestedByTokenAccessor] == nil {
+		t.Errorf("the inventory entry carries no %s, so a leaked credential still cannot be "+
+			"traced to the unit that obtained it: %v", fieldRequestedByTokenAccessor, entry)
+	}
+	assertNoMaterialListed(t, issued, listed)
+}
+
+// fieldRequestedByTokenAccessor is spelled here rather than imported, for the reason the purge
+// report's keys are: what this layer checks is that a CLIENT receives the field, so it must not be
+// able to rename itself and stay green.
+const fieldRequestedByTokenAccessor = "requested_by_token_accessor"
+
+// assertNoMaterialListed: nothing the client was handed as credential material appears in the
+// inventory. The credential's own identifier is excluded, because publishing it is the point — it is
+// what joins an entry to the cloud's console.
+func assertNoMaterialListed(t *testing.T, issued, listed *api.Secret) {
+	t.Helper()
+	credential, ok := issued.Data["credential"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("the issuance response carries no credential block: %v", issued.Data)
+	}
+	identifier, _ := issued.Data["credential_id"].(string)
+	rendered, err := json.Marshal(listed.Data)
+	if err != nil {
+		t.Fatalf("marshalling the inventory failed: %v", err)
+	}
+	for field, value := range credential {
+		secret, isString := value.(string)
+		if !isString || len(secret) < shortestSecret || secret == identifier {
+			continue
+		}
+		if strings.Contains(string(rendered), secret) {
+			t.Errorf("the inventory response contains the credential's %q value. This endpoint is "+
+				"the one place a tracking record becomes public", field)
+		}
+	}
+}
+
+// shortestSecret is the shortest credential value worth searching for: an endpoint or a region is
+// neither secret nor long, and matching them would produce false positives.
+const shortestSecret = 16
+
+func inventoryEntry(t *testing.T, listed *api.Secret, key string) map[string]interface{} {
+	t.Helper()
+	info, ok := listed.Data["key_info"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("the inventory carries no key_info, so an entry says nothing but an id. A client "+
+			"receives what core marshals, which is what this layer exists to check: %v", listed.Data)
+	}
+	entry, ok := info[key].(map[string]interface{})
+	if !ok {
+		t.Fatalf("key_info has no object for %q: %v", key, info)
+	}
+	return entry
+}
+
+func containsString(values []interface{}, want string) bool {
+	for _, v := range values {
+		if s, ok := v.(string); ok && s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // assertTokenRevocationCascade proves the chain an operator needs when a machine identity is

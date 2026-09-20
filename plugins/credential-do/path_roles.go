@@ -8,6 +8,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -36,6 +37,11 @@ type doRole struct {
 	Scopes     []string      `json:"scopes"`
 	MinterSet  string        `json:"minter_set"`
 	Disabled   bool          `json:"disabled,omitempty"`
+
+	// RequireCallerIdentity is how much of a caller's identity this role insists on before
+	// it will hand over a credential. Empty is requester.RequireNone, so a role written
+	// before the field existed keeps issuing exactly what it issued.
+	RequireCallerIdentity string `json:"require_caller_identity,omitempty"`
 
 	// CredentialType selects which of this cloud's two credential shapes the role
 	// issues. Empty means credentialTypeToken: roles written before this field existed
@@ -140,6 +146,10 @@ func roleFields() map[string]*framework.FieldSchema {
 				"Writing it alone is enough — a write to an existing role changes only the " +
 				"fields it carries. Reversible; it destroys nothing already issued (see " +
 				"roles/<name>/revoke-upstream for that)",
+		},
+		fieldRequireCallerIdentity: {
+			Type:        framework.TypeString,
+			Description: requester.RoleFieldDescription(),
 		},
 	}
 	for name, field := range spacesRoleFields() {
@@ -271,20 +281,29 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
+	// Refused HERE rather than at issuance: a value this binary cannot parse fails closed, so
+	// storing it would turn every later read of the role into a refusal, far from the write
+	// that got it wrong.
+	requireCallerIdentity := d.Get(fieldRequireCallerIdentity).(string)
+	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
+
 	doR := &doRole{
-		Name:           name,
-		DefaultTTL:     defaultTTL,
-		MaxTTL:         maxTTL,
-		Scopes:         scopes,
-		MinterSet:      minterSet,
-		Disabled:       d.Get(fieldDisabled).(bool),
-		CredentialType: typed.credentialType,
-		Grants:         typed.grants,
-		Region:         typed.region,
-		Endpoint:       typed.endpoint,
-		RotationPeriod: typed.rotationPeriod,
-		RotationJitter: typed.rotationJitter,
-		OverlapTTL:     typed.overlapTTL,
+		Name:                  name,
+		DefaultTTL:            defaultTTL,
+		MaxTTL:                maxTTL,
+		Scopes:                scopes,
+		MinterSet:             minterSet,
+		Disabled:              d.Get(fieldDisabled).(bool),
+		RequireCallerIdentity: requireCallerIdentity,
+		CredentialType:        typed.credentialType,
+		Grants:                typed.grants,
+		Region:                typed.region,
+		Endpoint:              typed.endpoint,
+		RotationPeriod:        typed.rotationPeriod,
+		RotationJitter:        typed.rotationJitter,
+		OverlapTTL:            typed.overlapTTL,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for
@@ -581,12 +600,13 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
 func roleData(role *doRole) map[string]interface{} {
 	data := map[string]interface{}{
-		fieldName:           role.Name,
-		"default_ttl":       int(role.DefaultTTL.Seconds()),
-		"max_ttl":           int(role.MaxTTL.Seconds()),
-		fieldMinterSet:      role.MinterSet,
-		fieldDisabled:       role.Disabled,
-		fieldCredentialType: role.credentialType(),
+		fieldName:                  role.Name,
+		"default_ttl":              int(role.DefaultTTL.Seconds()),
+		"max_ttl":                  int(role.MaxTTL.Seconds()),
+		fieldMinterSet:             role.MinterSet,
+		fieldDisabled:              role.Disabled,
+		fieldRequireCallerIdentity: role.RequireCallerIdentity,
+		fieldCredentialType:        role.credentialType(),
 	}
 	// Only the fields belonging to this role's credential type are reported. Emitting the
 	// other group as empty would suggest they could be set, which the write refuses.

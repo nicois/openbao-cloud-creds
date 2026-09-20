@@ -21,7 +21,12 @@
 // lives here rather than being reused from Key().
 package requester
 
-import "github.com/openbao/openbao/sdk/v2/logical"
+import (
+	"fmt"
+
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/openbao/openbao/sdk/v2/logical"
+)
 
 // Field names for the provenance stamped onto a tracking record. Named here so all plugins agree:
 // a report joining credentials to identities cannot do it if one cloud spells the key differently.
@@ -68,4 +73,99 @@ func Stamp(record map[string]interface{}, req *logical.Request) map[string]inter
 		record[key] = value
 	}
 	return record
+}
+
+// FieldRequireCallerIdentity is the ROLE field an operator sets to demand that a credential is
+// only issued to a caller this mount can name. Spelled once here so ten plugins agree on it.
+const FieldRequireCallerIdentity = "require_caller_identity"
+
+// Requirement is how much of a caller's identity a role insists on before it will issue.
+//
+// Three values rather than a bool, because the two absences are different and an operator needs
+// to say which one they will not accept. See the token-type findings in docs/decisions.md: a BATCH
+// token has no accessor at all, while a root or otherwise entity-less service token has an
+// accessor and no entity. So "somebody is there" and "I can tell which session it was" are
+// separate demands, and only the second excludes a batch caller.
+type Requirement string
+
+const (
+	// RequireNone issues to anyone, recording whatever provenance is resolvable. The default,
+	// because every role written before this field existed must keep issuing what it issued.
+	RequireNone Requirement = "none"
+	// RequireAny refuses a caller core resolved neither an entity nor a token accessor for —
+	// an unauthenticated internal call.
+	RequireAny Requirement = "any"
+	// RequireTokenAccessor additionally refuses a caller with no token accessor, which in
+	// practice means a batch token. Its entity is shared with the service token that created
+	// it, so on a batch caller the accessor is the only field that distinguishes one unit from
+	// another — and a credential traced to a shared entity names a fleet, not a compromise.
+	RequireTokenAccessor Requirement = "token_accessor"
+)
+
+// Requirements is the accepted vocabulary, for a field description and for validation.
+func Requirements() []Requirement {
+	return []Requirement{RequireNone, RequireAny, RequireTokenAccessor}
+}
+
+// ParseRequirement validates a stored or submitted value. An empty string is RequireNone, so a
+// role persisted before the field existed parses rather than failing closed on every read.
+func ParseRequirement(value string) (Requirement, error) {
+	if value == "" {
+		return RequireNone, nil
+	}
+	for _, known := range Requirements() {
+		if Requirement(value) == known {
+			return known, nil
+		}
+	}
+	return RequireNone, fmt.Errorf("%s must be one of %s, %s or %s, not %q",
+		FieldRequireCallerIdentity, RequireNone, RequireAny, RequireTokenAccessor, value)
+}
+
+// Enforce returns the refusal a role's stored requirement demands, or nil to proceed.
+//
+// Takes the raw stored string and parses it here, so an unrecognised value fails closed at the
+// one site that matters rather than at ten call sites that each decided for themselves.
+//
+// Returning the RESPONSE rather than a bool keeps the code and the wording in one place: ten
+// plugins calling this cannot drift into ten different messages, and none of them can reach for
+// a code of its own. It is deliberately checked BEFORE a minter is selected, so a refused request
+// costs the upstream nothing.
+func Enforce(req *logical.Request, value string) *logical.Response {
+	requirement, err := ParseRequirement(value)
+	if err != nil {
+		// Fail CLOSED on a value this binary does not understand. The alternative — treat an
+		// unknown requirement as RequireNone — would turn a role written by a newer binary into
+		// one that issues to anybody, which is the opposite of what its operator asked for.
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error())
+	}
+	switch requirement {
+	case RequireTokenAccessor:
+		if req == nil || req.ClientTokenAccessor == "" {
+			return credenvelope.ErrorResponse(credenvelope.ErrCallerUnidentified,
+				"this role requires %s=%s and the presented token has no accessor, so the "+
+					"credential could not be attributed to one caller (a batch token has no "+
+					"accessor; present a service token)",
+				FieldRequireCallerIdentity, RequireTokenAccessor)
+		}
+	case RequireAny:
+		if req == nil || (req.ClientTokenAccessor == "" && req.EntityID == "") {
+			return credenvelope.ErrorResponse(credenvelope.ErrCallerUnidentified,
+				"this role requires %s=%s and core resolved neither an entity nor a token "+
+					"accessor for this request", FieldRequireCallerIdentity, RequireAny)
+		}
+	case RequireNone:
+	}
+	return nil
+}
+
+// RoleFieldDescription is the help text for the role field, so an operator reads the same
+// explanation on every cloud.
+func RoleFieldDescription() string {
+	return "Who this role will issue to: " + string(RequireNone) +
+		" (anyone; provenance is still recorded when resolvable), " + string(RequireAny) +
+		" (refuse a request core resolved no caller for at all), or " +
+		string(RequireTokenAccessor) + " (additionally refuse a caller with no token accessor, " +
+		"which is what a batch token is — its entity is shared with the token that created it, " +
+		"so the accessor is the only field naming one unit). Defaults to " + string(RequireNone)
 }

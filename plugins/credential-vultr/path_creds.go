@@ -14,6 +14,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -59,6 +60,50 @@ func (b *backend) secretVultr() *framework.Secret {
 	}
 }
 
+// issuedUser is one minted sub-user: what to record about it, and the client that can undo the mint.
+type issuedUser struct {
+	roleName string
+	minterID string
+	userID   string
+	client   *vultrClient
+	now      time.Time
+}
+
+// recordIssuedUser writes the mint ledger entry and the active-user tracking record, and revokes the
+// credential upstream if the tracking write fails — a credential this mount cannot track is one
+// nothing will reconcile or revoke (audit F6). The record also carries WHO obtained it.
+//
+// The ledger entry comes FIRST and deliberately outlives the tracking entry: this cloud's list API
+// reports no creation time, so the ledger is what lets the reconciler confirm an orphan's age (A5),
+// and the leak worth reclaiming is exactly the one where the upstream delete failed and the tracking
+// entry is already gone.
+func (b *backend) recordIssuedUser(ctx context.Context, req *logical.Request,
+	u issuedUser,
+) *logical.Response {
+	if err := mintledger.Record(ctx, req.Storage, u.userID, u.now); err != nil {
+		b.Logger().Warn("could not record the mint in the ledger; this credential will not be "+
+			"automatically reclaimable if it leaks", "cloud", cloudName, "id", u.userID, "error", err)
+	}
+	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+u.userID,
+		requester.Stamp(map[string]interface{}{
+			fieldRole: u.roleName,
+			"minter":  u.minterID,
+			"created": u.now.UTC().Format(time.RFC3339),
+		}, req))
+	if activeEntry == nil {
+		return nil
+	}
+	if err := req.Storage.Put(ctx, activeEntry); err != nil {
+		// Best-effort delete: the id is in no lease either, so this is the only chance.
+		_, _ = u.client.DeleteUser(ctx, u.userID)
+		b.Logger().Error("failed to persist active-user record; revoked upstream credential",
+			"user_id", u.userID, "error", err)
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal,
+			"failed to persist credential tracking record")
+	}
+	return nil
+}
+
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
 
@@ -71,6 +116,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
 		return errResp, nil
+	}
+
+	// Before a minter is selected and before anything is minted: a request this mount cannot
+	// attribute costs the upstream nothing when the role insists on a nameable caller.
+	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return resp, nil
 	}
 
 	now := time.Now()
@@ -119,33 +170,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		setName: setName, minterID: minterID, expiresAt: expiresAt,
 	})
 
-	// Track active user for reconciler
-	// Record the mint in the ledger BEFORE the tracking entry. The ledger is what
-	// makes this credential reclaimable later: this cloud's list API reports no
-	// creation time, and the reconciler will not delete an entity whose age it
-	// cannot confirm (A5). Unlike the tracking entry, the ledger entry is not
-	// deleted on revoke — the leak worth cleaning up is precisely the one where the
-	// upstream delete failed and the tracking entry went away.
-	if err := mintledger.Record(ctx, req.Storage, userResp.User.ID, now); err != nil {
-		b.Logger().Warn("could not record the mint in the ledger; this credential will not be "+
-			"automatically reclaimable if it leaks", "cloud", cloudName, "id", userResp.User.ID, "error", err)
-	}
-	activeEntry, _ := logical.StorageEntryJSON("active-users/"+userResp.User.ID, map[string]interface{}{
-		fieldRole: roleName,
-		"minter":  minterID,
-		"created": now.UTC().Format(time.RFC3339),
-	})
-	if activeEntry != nil {
-		if err := req.Storage.Put(ctx, activeEntry); err != nil {
-			// Tracking write failed: revoke the just-minted upstream credential
-			// so we never hand out a credential we cannot later track/reconcile
-			// (audit F6). Best-effort delete.
-			_, _ = client.DeleteUser(ctx, userResp.User.ID)
-			b.Logger().Error("failed to persist active-user record; revoked upstream credential",
-				"user_id", userResp.User.ID, "error", err)
-			return credenvelope.ErrorResponse(credenvelope.ErrInternal,
-				"failed to persist credential tracking record"), nil
-		}
+	if errResp := b.recordIssuedUser(ctx, req, issuedUser{
+		roleName: roleName, minterID: minterID, userID: userResp.User.ID,
+		client: client, now: now,
+	}); errResp != nil {
+		return errResp, nil
 	}
 
 	resp := b.Secret("vultr_user").Response(env.ToMap(), map[string]interface{}{
@@ -191,7 +220,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 				"credential left upstream for the owner-tag reconciler to delete "+
 				"(it does not expire on its own)",
 				"minter_set", minterSet, "minter_id", minterID)
-			_ = req.Storage.Delete(ctx, "active-users/"+userID)
+			_ = req.Storage.Delete(ctx, activeTrackingPrefix+userID)
 			return nil, nil
 		}
 	}
@@ -212,7 +241,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	b.recordMinterSuccess(minterSet, minterID, now)
 
 	// Remove from active users
-	if err := req.Storage.Delete(ctx, "active-users/"+userID); err != nil {
+	if err := req.Storage.Delete(ctx, activeTrackingPrefix+userID); err != nil {
 		b.Logger().Warn("failed to remove active user tracking", "user_id", userID, "error", err)
 	}
 

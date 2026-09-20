@@ -1775,17 +1775,54 @@ differ on the override, which is why the derivation is duplicated rather than re
 present no token, so `""` under a provenance key would read as "issued by an identity whose name is
 blank" rather than "no resolvable caller".
 
-### Status, and what is NOT done
+### Status: applied to all ten, and fenced (2026-09-20)
 
-Wired on `credential-do` only. **Nine plugins still write tracking records without provenance, and
-there is no conformance assertion**, so this is currently the half-applied change AGENTS.md exists to
-prevent. Finishing it means, in this order:
+Every plugin stamps its tracking record, every role write path accepts
+`require_caller_identity`, and an eleventh conformance category (`provenance`) runs against all
+twelve subjects. What that category asserts, and the order it was built in, are both deliberate.
 
-1. An assertion in `pkg/plugintest` — `containment.go` already reads records via
-   `Harness.TrackingPrefix`, so that is the seam. It must set `req.ClientTokenAccessor` on the issuing
-   request, because an in-process `logical.Request` carries none unless the test supplies it. Write it
-   first and watch nine plugins fail; that is the point of it.
-2. Wire the remaining nine (and DO Spaces, which has its own `active-spaces-keys/` prefix).
+**A role field, not only a record.** Recording provenance answers "who obtained this?" after the
+fact; it cannot answer "refuse to issue to anyone I cannot name". `require_caller_identity` is
+`none` (default, so every pre-existing role keeps issuing exactly as before), `any` (refuse a
+request core resolved no caller for at all) or `token_accessor` (additionally refuse a caller with
+no accessor — a batch token). Three values rather than a bool because **the two absences are
+different callers**: a batch token has no accessor and does have an entity, a root token has an
+accessor and no entity. A bool would have banned one of them by accident.
+
+The check is `requester.Enforce`, which returns the refusal itself rather than a verdict, so ten
+plugins cannot drift into ten wordings or reach for a code of their own. It **fails closed** on a
+value it does not recognise: a role written by a newer binary must not read as "issue to anybody" on
+the older node of a mixed-version cluster, which is the A29/A30 fail-open shape again.
+
+**The category was mutation-tested, because a suite that passes everywhere on its first run proves
+nothing.** Five defects were injected one at a time and each was caught by exactly one case:
+dropping `Stamp` in one plugin; dropping `Enforce`; dropping the field from a role read (the Exoscale
+`PrefillRoleWrite` hazard — a field the read path omits is erased by the next partial write); making
+`Identity` prefer `req.Data`, i.e. giving provenance the override affinity has; and moving `Enforce`
+to after the mint, which is caught only by
+`RefusingAnUnidentifiedCallerCostsTheUpstreamNothing` — the other five cases pass with that defect
+present, which is what earns that case its place.
+
+**Two subjects record nothing per read, and say so rather than being skipped silently.** OCI serves
+a slot provisioned earlier and DO's `spaces_key_rotated` serves one key to every reader, so in both
+cases the credential was minted by a rotation and no single caller obtained it. Stamping the reader
+who happened to trigger a due rotation would name the wrong unit — the exact failure this design
+exists to prevent — so `trackSpacesKey` takes a request that may be nil and the rotation passes nil.
+The requirement cases still run on both: on a shared credential `require_caller_identity` gates who
+may be **told** the credential, which is the only attribution that shape allows. Note the corollary
+an operator needs to know: tightening the field on a shared-credential role does not cut off a
+caller that has already read it — that waits for the next rotation.
+
+**Not gated: `roles/<name>/rotate`.** It mints a Spaces key but returns `access_key` and
+`rotate_at` and deliberately never the secret, so it hands its caller no credential. The requirement
+is about who may be handed one, not about who may cause a mint.
+
+**What the transport half rests on.** A throwaway external plugin (see the probe findings above)
+showed `client_token_accessor` and `entity_id` are fields 10 and 17 of the request protobuf, so they
+cross the process boundary. That used to be the whole of what `e2e/` could say, because a tracking
+record was reachable only through the plugin's own storage. The `issued/` endpoint below changed
+that: `pkg/baotest`'s scenario now LISTs the inventory over HTTP and asserts the entry names the role
+and the caller, which is the first assertion at that layer to touch a tracking record at all.
 
 ### The open question for the report this was built for
 
@@ -1798,6 +1835,132 @@ credentials those units hold. Provenance supplies the last link — but note the
 
 Those are different things. The chain SecretID accessor -> token accessor -> credential needs its
 middle link established before a report can claim to show a service's credentials, and nothing here
-has proven it. `sys/leases/lookup` does not expose the creating token, and there is no list endpoint
-for tracked credentials on any plugin — only `minter-sets` and `roles` have `ListOperation` — so
-enumerating them for a report needs one adding.
+has proven it. `sys/leases/lookup` does not expose the creating token.
+
+**Enumeration is no longer the blocker, though: that is what `issued/` is.** See the note below. What
+remains open is only the middle link, and note what the probe found about the alias — an entity's
+AppRole alias metadata already carries `role_name`, so the chain may not need SecretID accessors at
+all.
+
+## Why the issued-credential inventory publishes by allowlist, and refuses where it cannot answer (2026-09-20)
+
+`issued/` (LIST, per mount) answers what provenance made worth asking: which credentials are
+outstanding, and who obtained each. Four decisions are load-bearing.
+
+**Fields are published by ALLOWLIST, not by rendering the record.** A tracking record is internal
+state a plugin may extend at any time; this response is a published API on a path an operator may
+grant broadly. Copying values through would mean a future field — a token, a password, a signed URL —
+became public in a diff that mentions no endpoint. So `issuedlist.Fields()` is the whole vocabulary,
+an unknown key is dropped, and publishing one is a deliberate edit. The conformance category proves
+the control works from the other side: with a raw token stamped into DO's record the listing stays
+clean, and the case fails the moment that field is allowlisted.
+
+**It pages, over possibly more than one prefix.** This is the only keyspace that grows with the FLEET
+rather than with the operator's configuration (one record per outstanding credential, at a design
+target of 10^5 roles), and `logical.Storage.ListPage` makes a page a page at the storage layer rather
+than a slice of a full listing. `Prefixes` is a list because `credential-do` writes two — tokens and
+Spaces keys, deliberately separate because their upstream quotas are — and one path has to cover both:
+an inventory reporting the tokens and silently omitting the Spaces keys would look like a working one.
+That forces the cursor to carry WHICH keyspace it is in; a cursor carrying only a key restarts in the
+first prefix forever, which is exactly what the injected-defect run showed.
+
+**It refuses on OCI rather than answering `keys: []`.** Same reasoning as the zero-deletion success
+above: mid-incident an empty list reads as "this mount has issued nothing" and a responder stops
+looking. OCI has no per-credential record at all — a read serves a shared, pre-provisioned slot — and
+the refusal names what the operator does have (the role's slot state, and `rotate-slot`). Pointing the
+endpoint at `slots/` would have been worse than a gap: a slot record carries `TokenValue`.
+
+**It is an inventory, not a log.** A record is deleted when its credential is revoked, so this says
+what is live NOW. That is the report's question and exactly not an audit trail, and the difference is
+invisible from the response — so the help text says it, and a conformance case asserts a revoked
+credential leaves the listing. The direction that must never happen is understating: a record whose
+JSON will not parse still yields an entry, because the credential is outstanding either way.
+
+### What core actually hands an external plugin, probed against a live server (2026-09-20)
+
+The note above was reasoned from the SDK. A throwaway external plugin was then registered in a
+`bao server -dev` (OpenBao v2.6.1) and read by an AppRole-logged-in client, which forged both
+provenance fields in the request body. Findings, all observed rather than inferred:
+
+- **Forgery does not reach them.** `entity_id` and `client_token_accessor` in `req.Data` arrived as
+  request *data*, while `req.EntityID`/`req.ClientTokenAccessor` held the values from the presented
+  token. The no-override design holds across the plugin process boundary, not just in-process.
+- **A batch token has NO accessor.** An AppRole role with `token_type=batch` logs in with
+  `accessor=""` and a populated `entity_id`. So a requirement written as "the accessor must be
+  present" refuses every batch-token caller, and a report keyed on token accessors cannot see them
+  at all. **`entity_id` is the field that survives both token types**; the accessor is the field
+  that survives a root or otherwise entity-less token. Neither is universally present, which is why
+  both are recorded and why a `require_caller_identity` role field would have to mean *at least one*.
+- **`SystemView.EntityInfo` and `GroupsForEntity` work from inside the plugin process**, over the
+  plugin gRPC (they are methods on `logical.SystemView`, transported by
+  `sdk/plugin/grpc_system.go`). The entity resolved to its name, its groups, and its alias —
+  and **the alias's metadata carries `role_name`** (`{"role_name": "unit-service"}`, mount
+  `auth_approle_<accessor>`, alias name = the role's RoleID).
+- **`req.TokenEntry()` is nil in an external plugin.** It is not in the request protobuf, so the
+  token's policies, parent and creation time are not available; only the three scalar fields are.
+- `req.DisplayName` is the auth method's name (`"approle"`, `"token"`), not an identity. It is not
+  worth recording.
+
+**This shortens the open question above.** The chain does not have to run through SecretID
+accessors: an entity's AppRole alias already names the role a unit logged in as, resolvable at mint
+time from inside the plugin. What remains genuinely missing is enumeration — no plugin exposes a
+`ListOperation` over its `active-*/` prefix, so there is still nothing to join against. Note also
+that an entity can be renamed or merged after issuance, so a report wanting stable text must
+snapshot the resolved name at mint time rather than resolve the ID later.
+
+### What a batch-token caller means for a lease and a credential (2026-09-20)
+
+The accessor gap above is one consequence of a token type worth stating in full, because two of its
+properties change what this repo's plugins deliver. Probed on OpenBao v2.6.1 with a throwaway
+lease-issuing plugin; the rest is `bao token create` output.
+
+A **batch token** is an encrypted, self-contained bearer string (prefix `b.`, ~130 chars) rather than
+a row in the token store: core decrypts it to recover the policies, TTL and entity, so creating one
+costs no storage write. A **service token** (prefix `s.`) is a stored entry with an accessor. The
+cheapness is the point — a fleet logging in per CI job or per pod costs nothing — and it is paid for
+in features: a batch token **cannot be renewed** ("batch tokens cannot be renewed"), **cannot create
+child tokens** ("batch tokens cannot create more tokens"), has **no accessor** so it is neither
+listable under `auth/token/accessors` nor revocable individually, and is not orphan by default.
+
+Two consequences that land on a credential this repo issues:
+
+- **The lease belongs to the PARENT, not to the batch token.** A credential read with a batch token
+  produced a lease, and revoking the parent service token's accessor revoked that lease and fired the
+  plugin's revoke callback. So containment through a token still reaches a batch caller's cloud
+  credential — via the parent, which is the only addressable thing in the chain. Revoking the batch
+  token itself is not an option that exists.
+- **The lease TTL is capped by the batch token's remaining life.** A 20-minute lease requested by a
+  batch token with 10 minutes left was issued at **599s**. The role's `default_ttl` is therefore an
+  upper bound for such a caller, which is a TTL-honesty case
+  ([`ttl-semantics.md`](ttl-semantics.md)) nothing currently states: the credential is shorter-lived
+  than the role promises, and shortening is the safe direction, but a client sizing its refresh loop
+  off the role definition rather than off `lease_duration` will be surprised.
+
+**Whether a deployment can simply forbid them** — asked because accessor-level provenance depends on
+it. Probed on the same server:
+
+- **The role decides, and the client cannot argue.** `token_type` on an AppRole role takes
+  `service`/`batch`/`default`/`default-service`/`default-batch`; `default` resolves to the mount's
+  setting, which is service. Passing `token_type=batch` or `type=batch` in the login body of a
+  service role is **ignored** with `Endpoint ignored these unrecognized parameters`.
+- **The mount overrides every role on it.** `bao auth tune -token-type=service approle/` turned a
+  role explicitly declaring `token_type=batch` into a service login. That is the one-line
+  mount-wide lever, and it is where an operator who wants accessor provenance should start.
+- **But a service token can still mint a batch CHILD, carrying the same entity.** A role forced to
+  `service`, whose policy grants `auth/token/create`, created a batch child with `accessor=""` and
+  the parent's `entity_id` unchanged. So forcing the role closes the login, not the chain — and the
+  token store cannot be fenced the same way: `bao auth tune -token-type=service token/` is refused
+  with `'token_type' cannot be set for 'token' or 'ns_token' auth mounts`.
+- **Closing the chain is an ACL job**, and one of the two ways is blunt. A token role
+  (`auth/token/roles/<r>` with `token_type=service`) reached through a policy that grants only
+  `auth/token/create/<r>` **forces service even when the caller asks for batch**, silently and
+  without a warning. The alternative, `denied_parameters = {"type" = []}` on `auth/token/create`,
+  also works but refuses *any* explicit type — including `type=service`, and therefore every
+  `bao token create` invocation, because the CLI always sends the field.
+
+**The plugin-side consequence.** A plugin cannot read the token's type (`req.TokenEntry()` is nil
+across the plugin boundary), but it can infer it: an empty `ClientTokenAccessor` with a non-empty
+`EntityID` is a batch caller, and both empty is an unauthenticated internal call. So a role field
+demanding an accessor is implementable, and what it really means is "refuse batch callers" — which
+is a policy an operator should be able to state, since the entity is shared with the parent and only
+the accessor distinguishes the unit.

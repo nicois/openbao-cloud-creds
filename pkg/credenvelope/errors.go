@@ -37,7 +37,7 @@ import (
 //	retry with backoff        upstream_unavailable, upstream_timeout, upstream_quota_exceeded
 //	do not retry, fix config  config_invalid, upstream_request_invalid, role_not_found, role_disabled, unsupported
 //	ask for a different shape credential_kind_unsupported
-//	do not retry, fix creds   upstream_auth_failed
+//	do not retry, fix creds   upstream_auth_failed, caller_unidentified
 //	do not retry, page someone internal, lease_revoke_failed, entity_unavailable, pool_exhausted
 type ErrorCode string
 
@@ -55,6 +55,14 @@ const (
 	// can parse two shapes retries asking for the other. Every other
 	// "do not retry, fix config" code needs a human.
 	ErrCredentialKindUnsupported ErrorCode = "credential_kind_unsupported"
+
+	// ErrCallerUnidentified: the role requires a resolvable caller identity and core
+	// resolved none from the presented token. Its own code because the action is the
+	// caller's and is specific — re-present the request under a token core can identify
+	// — rather than "a human must change the mount's config". In practice it means a
+	// batch token (which has no accessor) or an unauthenticated internal call reached a
+	// role that records who obtained each credential.
+	ErrCallerUnidentified ErrorCode = "caller_unidentified"
 
 	// Upstream-shaped: the cloud answered, or failed to answer.
 	ErrUpstreamAuthFailed     ErrorCode = "upstream_auth_failed"
@@ -77,7 +85,7 @@ const (
 func AllCodes() []ErrorCode {
 	return []ErrorCode{
 		ErrRoleNotFound, ErrRoleDisabled, ErrConfigInvalid, ErrUnsupported,
-		ErrCredentialKindUnsupported,
+		ErrCredentialKindUnsupported, ErrCallerUnidentified,
 		ErrUpstreamAuthFailed, ErrUpstreamQuotaExceeded, ErrUpstreamTimeout,
 		ErrUpstreamUnavailable, ErrUpstreamRequestInvalid, ErrEntityUnavailable,
 		ErrPoolExhausted, ErrLeaseRevokeFailed, ErrInternal,

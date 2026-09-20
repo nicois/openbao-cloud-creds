@@ -65,6 +65,17 @@ const (
 	// it, and the credential it replaces has to stay live for the overlap and be gone
 	// after it.
 	CategoryRotation Category = "rotation"
+	// CategoryProvenance covers WHO obtained a credential: the tracking record names the
+	// caller core resolved, a caller cannot forge that, and a role may refuse to issue to a
+	// caller this mount cannot name. Without it a leaked cloud credential is traceable to a
+	// mount and a role and no further, while the question an incident asks is which unit is
+	// compromised.
+	CategoryProvenance Category = "provenance"
+	// CategoryInventory covers the `issued/` endpoint: what this mount has handed out and not
+	// yet revoked, which is what makes provenance answerable over the API rather than only
+	// present in storage. It also fences the one place a tracking record becomes public — no
+	// credential material may appear in a listing.
+	CategoryInventory Category = "inventory"
 )
 
 // Harness is supplied by the conformance table, one per plugin. Fields are
@@ -128,9 +139,11 @@ type Harness struct {
 	// the durability rule that record exists for: a credential whose tracking
 	// write FAILS must be revoked rather than returned.
 	//
-	// Empty skips that case. It is only meaningful where revoke is hard —
-	// on a no-revoke cloud the credential self-expires, so an untracked one is
-	// harmless and the write is metrics-only.
+	// Empty skips those cases. For the revoke case it is only meaningful where revoke is
+	// hard — on a no-revoke cloud the credential self-expires, so an untracked one is
+	// harmless and the write is metrics-only. The `provenance` category reads the record's
+	// CONTENTS, so the prefix now matters on the no-revoke clouds too: it is the only
+	// durable statement naming who obtained a credential that outlives the lease.
 	TrackingPrefix string
 
 	// --- Capability ---

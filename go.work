@@ -18,6 +18,7 @@ use (
 	./pkg/plugintest
 	./pkg/reconciler
 	./pkg/recovery
+	./pkg/issuedlist
 	./pkg/requester
 	./pkg/telemetry
 	./pkg/totp

@@ -2,7 +2,10 @@ module github.com/nicois/openbao-cloud-creds/pkg/requester
 
 go 1.27.0
 
-require github.com/openbao/openbao/sdk/v2 v2.6.2
+require (
+	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.4.0
+	github.com/openbao/openbao/sdk/v2 v2.6.2
+)
 
 require (
 	github.com/armon/go-metrics v0.4.1 // indirect
@@ -57,3 +60,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../credenvelope

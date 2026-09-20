@@ -12,6 +12,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -61,6 +62,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
 		return errResp, nil
+	}
+
+	// Before a minter is picked and before anything is minted: a role that demands an
+	// identifiable caller must cost the upstream nothing when it refuses one.
+	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return resp, nil
 	}
 
 	now := time.Now()
@@ -157,12 +164,13 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 	})
 
 	// Track active client for reconciler
-	activeEntry, _ := logical.StorageEntryJSON("active-clients/"+a.clientResp.ClientID, map[string]interface{}{
-		fieldRole:      a.roleName,
-		fieldMinterSet: a.setName,
-		"minter":       a.minterID,
-		"created":      a.now.UTC().Format(time.RFC3339),
-	})
+	activeEntry, _ := logical.StorageEntryJSON("active-clients/"+a.clientResp.ClientID,
+		requester.Stamp(map[string]interface{}{
+			fieldRole:      a.roleName,
+			fieldMinterSet: a.setName,
+			"minter":       a.minterID,
+			"created":      a.now.UTC().Format(time.RFC3339),
+		}, req))
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
 			// Tracking write failed: revoke the just-minted upstream credential

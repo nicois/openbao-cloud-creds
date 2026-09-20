@@ -22,6 +22,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -78,6 +79,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
 		return errResp, nil
+	}
+
+	// Checked before a minter is selected and before AssumeRole, so a role that will not
+	// issue to an unnameable caller costs STS nothing to refuse.
+	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return resp, nil
 	}
 
 	now := time.Now()
@@ -255,13 +262,16 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 		MinterID:       args.sel.minterID,
 	})
 
-	// Track active credential for metrics (no upstream entity to clean up)
-	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+accessKeyID, map[string]interface{}{
-		fieldRole:    args.roleName,
-		"minter":     args.sel.minterID,
-		"created":    args.now.UTC().Format(time.RFC3339),
-		"expires_at": expiresAt.UTC().Format(time.RFC3339),
-	})
+	// Stamped with the caller: STS sessions cannot be deleted, so this record exists for
+	// the reconciler and the capacity counter rather than for revocation — which makes it
+	// the only place that names both the role and who asked for the session.
+	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+accessKeyID,
+		requester.Stamp(map[string]interface{}{
+			fieldRole:    args.roleName,
+			"minter":     args.sel.minterID,
+			"created":    args.now.UTC().Format(time.RFC3339),
+			"expires_at": expiresAt.UTC().Format(time.RFC3339),
+		}, req))
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
 			// Tracking is metrics-only here: STS credentials auto-expire and the
@@ -337,7 +347,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, _ *
 	accessKeyID, _ := req.Secret.InternalData["access_key_id"].(string)
 	minterSet, _ := req.Secret.InternalData[fieldMinterSet].(string)
 	if accessKeyID != "" {
-		if err := req.Storage.Delete(ctx, "active-tokens/"+accessKeyID); err != nil {
+		if err := req.Storage.Delete(ctx, activeTrackingPrefix+accessKeyID); err != nil {
 			b.Logger().Warn("failed to remove active credential tracking",
 				"access_key_id", accessKeyID, "minter_set", minterSet, "error", err)
 		}
@@ -549,7 +559,10 @@ func awsCodeWord(code string) *regexp.Regexp {
 }
 
 // activeTrackingPrefix is the storage prefix this plugin records issued credentials under. Named
-// here because pkg/mintercapacity counts them, and the prefix is NOT uniform across clouds.
+// here because the prefix is NOT uniform across clouds and three separate things now have to agree
+// on it: the write above, pkg/mintercapacity counting the records, and the issued/ listing reading
+// them back. A listing that named a different prefix than the writer would be a permanently empty
+// inventory that looks like a working endpoint.
 const activeTrackingPrefix = "active-tokens/"
 
 // warnOnNearingCapacity tells an operator before the ceiling rather than with it. The remedy for a

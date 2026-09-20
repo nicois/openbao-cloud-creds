@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 )
 
 // cloudName is the cloud identifier used in stored config, response envelopes,
@@ -40,6 +41,12 @@ const (
 	// capability probe is reused. Probes are real mints against the cloud, so an
 	// unremembered fan-out re-minted on every configuration write (A29).
 	fieldCapabilityCacheTTL = "capability_cache_ttl"
+
+	// fieldRequireCallerIdentity is the role field demanding a caller this mount can
+	// name before it will serve a slot credential. Taken from pkg/requester rather
+	// than spelled again here, so a report joining credentials to identities finds
+	// the same field name on every cloud.
+	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
 )
 
 // descRoleName is the shared field description for the role-name parameter.

@@ -14,6 +14,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -57,6 +58,45 @@ func (b *backend) secretAzure() *framework.Secret {
 	}
 }
 
+// trackArgs is what one tracking record needs: the credential, who minted it, and the client that
+// can undo the mint if the record cannot be written.
+type trackArgs struct {
+	role     *azureRole
+	roleName string
+	minterID string
+	keyID    string
+	client   *azureClient
+	now      time.Time
+}
+
+// trackIssuedCredential writes the active-credential record, and revokes the credential upstream if
+// that write fails: a credential this mount cannot track is one nothing will ever reconcile or
+// revoke (audit F6). The record also carries WHO obtained it, via requester.Stamp.
+func (b *backend) trackIssuedCredential(ctx context.Context, req *logical.Request,
+	a trackArgs,
+) *logical.Response {
+	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+a.keyID,
+		requester.Stamp(map[string]interface{}{
+			fieldRole:        a.roleName,
+			"minter":         a.minterID,
+			fieldAppObjectID: a.role.AppObjectID,
+			"created":        a.now.UTC().Format(time.RFC3339),
+		}, req))
+	if activeEntry == nil {
+		return nil
+	}
+	if err := req.Storage.Put(ctx, activeEntry); err != nil {
+		// Best-effort delete: the upstream id is in no lease either, so this is the only
+		// chance to clean it up.
+		_, _ = a.client.RemovePassword(ctx, a.role.AppObjectID, a.keyID)
+		b.Logger().Error("failed to persist active-credential record; revoked upstream credential",
+			"key_id", a.keyID, "error", err)
+		return credenvelope.ErrorResponse(credenvelope.ErrInternal,
+			"failed to persist credential tracking record")
+	}
+	return nil
+}
+
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
 
@@ -69,6 +109,10 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
 		return errResp, nil
+	}
+
+	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return resp, nil
 	}
 
 	now := time.Now()
@@ -119,24 +163,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		minterID:    minterID,
 	})
 
-	// Track active credential for reconciler
-	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+pwResp.KeyID, map[string]interface{}{
-		fieldRole:        roleName,
-		"minter":         minterID,
-		fieldAppObjectID: role.AppObjectID,
-		"created":        now.UTC().Format(time.RFC3339),
-	})
-	if activeEntry != nil {
-		if err := req.Storage.Put(ctx, activeEntry); err != nil {
-			// Tracking write failed: revoke the just-minted upstream credential
-			// so we never hand out a credential we cannot later track/reconcile
-			// (audit F6). Best-effort delete.
-			_, _ = client.RemovePassword(ctx, role.AppObjectID, pwResp.KeyID)
-			b.Logger().Error("failed to persist active-credential record; revoked upstream credential",
-				"key_id", pwResp.KeyID, "error", err)
-			return credenvelope.ErrorResponse(credenvelope.ErrInternal,
-				"failed to persist credential tracking record"), nil
-		}
+	if errResp := b.trackIssuedCredential(ctx, req, trackArgs{
+		role: role, roleName: roleName, minterID: minterID, keyID: pwResp.KeyID,
+		client: client, now: now,
+	}); errResp != nil {
+		return errResp, nil
 	}
 
 	resp := b.Secret("azure_client_secret").Response(env.ToMap(), map[string]interface{}{
@@ -272,7 +303,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 			b.Logger().Warn("revoke: issuing minter gone and no fallback in set; "+
 				"leaving credential to expire via TTL",
 				"minter_set", minterSet, "minter_id", minterID)
-			_ = req.Storage.Delete(ctx, "active-tokens/"+keyID)
+			_ = req.Storage.Delete(ctx, activeTrackingPrefix+keyID)
 			return nil, nil
 		}
 	}
@@ -293,7 +324,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	b.recordMinterSuccess(minterSet, minterID, now)
 
 	// Remove from active tokens
-	if err := req.Storage.Delete(ctx, "active-tokens/"+keyID); err != nil {
+	if err := req.Storage.Delete(ctx, activeTrackingPrefix+keyID); err != nil {
 		b.Logger().Warn("failed to remove active credential tracking", "key_id", keyID, "error", err)
 	}
 

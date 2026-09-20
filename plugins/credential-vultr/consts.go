@@ -1,6 +1,9 @@
 package credentialvultr
 
-import "github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+import (
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
+)
 
 // cloudName is the cloud identifier used in stored config, response envelopes,
 // and the "cloud" metric label.
@@ -16,6 +19,10 @@ const (
 	// Deleting a role stops nothing: live leases stay renewable and every credential
 	// already issued keeps working, so this is the only lever that closes the tap.
 	fieldDisabled = "disabled"
+
+	// fieldRequireCallerIdentity is the role field demanding that a credential is only issued
+	// to a caller this mount can name. Spelled once, in pkg/requester, so all clouds agree.
+	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
 
 	// fieldDefaultTTL / fieldMaxTTL are the role TTL field names.
 	fieldDefaultTTL  = "default_ttl"

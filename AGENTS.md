@@ -20,7 +20,7 @@ plugins/<x>/*_test  only what is true of <x> alone.
 
 `pkg/plugintest` must never import a plugin (that would be an import cycle, since every plugin imports `pkg/plugintest`). The `conformance/` module is where the two meet; it is test-only, so plugin-module isolation still holds.
 
-## The ten categories
+## The twelve categories
 
 `plugintest.AllCategories()` is the list. Each is one shared suite over one `Harness`:
 
@@ -36,9 +36,11 @@ plugins/<x>/*_test  only what is true of <x> alone.
 | `error-taxonomy` | every error a client can receive carries a code from `credenvelope.AllCodes()`, and the code says what the client should *do* |
 | `containment` | the two levers an operator has when issued credentials have leaked: `disabled=true` is settable through the role's own write path and stops issuance at once (with nothing but the flag, and while the cloud refuses to mint), and `roles/<name>/revoke-upstream` deletes what the role already issued — on an already-disabled role, dry-running without deleting, idempotently, leaving the role issuing, in one uniform report — and *refuses* with `unsupported` where the cloud cannot delete an issued credential |
 | `rotation` | a credential SHARED by every reader and replaced on the plugin's own schedule: a read re-serves rather than mints, the lease is non-renewable and cannot outlast the overlap, one lease ending deletes nothing, an overdue credential is replaced on the next read, and the replaced one keeps working through the overlap and is gone afterwards |
+| `provenance` | WHO obtained a credential: the tracking record carries the caller core resolved (`requested_by_token_accessor`, `requested_by_entity_id`), a caller supplying those fields itself does NOT get them recorded, and a role may set `require_caller_identity` to refuse a caller this mount cannot name — before a minter is selected, so a refusal leaves no orphan |
+| `inventory` | the `issued/` listing: every outstanding credential appears keyed by its upstream id with the role and the caller that obtained it, a revoked one leaves, the cursor pages without losing or repeating an entry, an over-large page is refused — and **no credential material appears**, asserted against the material actually issued rather than against a list of field names, because this endpoint is the one place a tracking record becomes public |
 
 `error-taxonomy` is the second category **no cloud may opt out of** (its `requires`
-returns nothing, like `lease`). Individual cases that need a knob — a mint refusal, a
+returns nothing, like `lease`, `provenance` and `inventory`). Individual cases that need a knob — a mint refusal, a
 forced upstream status — skip themselves *with a printed reason*, so a cloud lacking a
 knob still gets the cases that need none. It earned its place on its first run by
 finding that OVH's error classifier had no 5xx branch at all, so a cloud returning 500
@@ -95,7 +97,8 @@ questions the moment a credential is shared.
 come from"). Short version: core persists the lease synchronously before the client sees anything,
 and revokes through the plugin if that write fails, so no plugin needs to arrange it. What a plugin
 IS responsible for is the `active-*/` tracking record — and revoking immediately if that write
-fails, which the `revoke` category now asserts via `Harness.TrackingPrefix`. Note the prefixes are
+fails, which the `revoke` category now asserts via `Harness.TrackingPrefix` — the same field the
+`provenance` and `inventory` categories read, so it is load-bearing on the no-revoke clouds too. Note the prefixes are
 not uniform across clouds; declaring the wrong one yields a green test that asserts nothing.
 
 Adding a category means: a `Run<X>Suite` in `pkg/plugintest`, an entry in the `suites` registry in `conformance.go` naming the `Harness` fields it needs, and then every harness in the table — twelve subjects across ten clouds — either wiring those fields or declaring the gap. That last step is the point — a new category cannot land half-applied.
@@ -116,7 +119,9 @@ renewability lie above — were invisible to every in-process test.
 The scenario itself is **`baotest.RunScenario`** in
 [`pkg/baotest/scenario.go`](pkg/baotest/scenario.go), not in this module. `e2e/` is a
 registry plus one vocabulary file per driven subject, each returning a `baotest.Case`: the
-three write bodies, the TTL and renewability contract, what a lease ending and an operator's
+three write bodies, the TTL and renewability contract, whether the plugin tracks each issued
+credential (`TracksIssuedCredentials`, which is what makes the `issued/` inventory assertable over
+HTTP), what a lease ending and an operator's
 purge each do to the credential, whether the credential is shared, and a `func() int` reading
 the fake's count. `Case` is to this layer exactly what `plugintest.Harness` is to conformance.
 
@@ -222,9 +227,9 @@ make check-release-tags VERSION=v0.5.0                    # after tagging: every
 ```
 
 **Releasing.** The set is tagged in lockstep, `<module dir>/vX.Y.Z` for every directory under
-`pkg/` and `plugins/` holding a `go.mod` — and a tag cannot be corrected once pushed, only
-superseded, because the module proxy caches a version's content permanently. The guards sit on both
-sides of the tag, because neither half is checkable at the same moment:
+`pkg/` and `plugins/` holding a `go.mod` (32 today) — and a tag cannot be corrected once pushed,
+only superseded, because the module proxy caches a version's content permanently. The guards sit
+on both sides of the tag, because neither half is checkable at the same moment:
 
 | when | what | where |
 |---|---|---|

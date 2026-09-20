@@ -7,18 +7,20 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
 type akamaiRole struct {
-	Name       string        `json:"name"`
-	DefaultTTL time.Duration `json:"default_ttl"`
-	MaxTTL     time.Duration `json:"max_ttl"`
-	GroupID    int           `json:"group_id"`
-	APIAccess  string        `json:"api_access"`
-	MinterSet  string        `json:"minter_set"`
-	Disabled   bool          `json:"disabled,omitempty"`
+	Name                  string        `json:"name"`
+	DefaultTTL            time.Duration `json:"default_ttl"`
+	MaxTTL                time.Duration `json:"max_ttl"`
+	GroupID               int           `json:"group_id"`
+	APIAccess             string        `json:"api_access"`
+	MinterSet             string        `json:"minter_set"`
+	Disabled              bool          `json:"disabled,omitempty"`
+	RequireCallerIdentity string        `json:"require_caller_identity,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -62,6 +64,10 @@ func (b *backend) rolePaths() []*framework.Path {
 						"Writing it alone is enough — a write to an existing role changes only the " +
 						"fields it carries. Reversible; it destroys nothing already issued",
 				},
+				fieldRequireCallerIdentity: {
+					Type:        framework.TypeString,
+					Description: requester.RoleFieldDescription(),
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -89,6 +95,12 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	maxTTL := time.Duration(d.Get(fieldMaxTTL).(int)) * time.Second
 	groupID := d.Get(fieldGroupID).(int)
 	apiAccess := d.Get(fieldAPIAccess).(string)
+	requireCallerIdentity := d.Get(fieldRequireCallerIdentity).(string)
+	// Refused here rather than at issuance: a value nobody can parse must be a failed role
+	// write, not a role that looks configured and declines every caller.
+	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 
 	// apiAccess is what an Akamai API client is permitted to call; an empty grant is a
 	// client with no access at all (A28).
@@ -124,13 +136,14 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	ar := &akamaiRole{
-		Name:       name,
-		DefaultTTL: defaultTTL,
-		MaxTTL:     maxTTL,
-		GroupID:    groupID,
-		APIAccess:  apiAccess,
-		MinterSet:  minterSet,
-		Disabled:   d.Get(fieldDisabled).(bool),
+		Name:                  name,
+		DefaultTTL:            defaultTTL,
+		MaxTTL:                maxTTL,
+		GroupID:               groupID,
+		APIAccess:             apiAccess,
+		MinterSet:             minterSet,
+		Disabled:              d.Get(fieldDisabled).(bool),
+		RequireCallerIdentity: requireCallerIdentity,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -173,13 +186,14 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
 func roleData(role *akamaiRole) map[string]interface{} {
 	return map[string]interface{}{
-		fieldName:       role.Name,
-		fieldDefaultTTL: int(role.DefaultTTL.Seconds()),
-		fieldMaxTTL:     int(role.MaxTTL.Seconds()),
-		fieldGroupID:    role.GroupID,
-		fieldAPIAccess:  role.APIAccess,
-		fieldMinterSet:  role.MinterSet,
-		fieldDisabled:   role.Disabled,
+		fieldName:                  role.Name,
+		fieldDefaultTTL:            int(role.DefaultTTL.Seconds()),
+		fieldMaxTTL:                int(role.MaxTTL.Seconds()),
+		fieldGroupID:               role.GroupID,
+		fieldAPIAccess:             role.APIAccess,
+		fieldMinterSet:             role.MinterSet,
+		fieldDisabled:              role.Disabled,
+		fieldRequireCallerIdentity: role.RequireCallerIdentity,
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -47,6 +48,30 @@ func (b *backend) secretOCI() *framework.Secret {
 	}
 }
 
+// loadIssuableRole reads a role and refuses the two states that cannot issue: absent, and disabled
+// by an operator containing a leak. Extracted from pathCredsRead to keep it inside the length limit.
+func (b *backend) loadIssuableRole(ctx context.Context, req *logical.Request,
+	roleName string,
+) (*ociRole, *logical.Response) {
+	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
+	if err != nil {
+		return nil, credenvelope.InternalResponse(b.Logger().Warn, "loading the role", err)
+	}
+	if entry == nil {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound,
+			"role %q does not exist", roleName)
+	}
+	var role ociRole
+	if err := json.Unmarshal(entry.Value, &role); err != nil {
+		return nil, credenvelope.InternalResponse(b.Logger().Warn, "parsing the stored role", err)
+	}
+	if role.Disabled {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled,
+			"role %q is disabled", roleName)
+	}
+	return &role, nil
+}
+
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
 
@@ -56,22 +81,17 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return errResp, nil
 	}
 
-	// Load role from storage
-	entry, err := req.Storage.Get(ctx, "roles/"+roleName)
-	if err != nil {
-		return credenvelope.InternalResponse(b.Logger().Warn, "loading the role", err), nil
-	}
-	if entry == nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleNotFound, "role %q does not exist", roleName), nil
+	role, errResp := b.loadIssuableRole(ctx, req, roleName)
+	if errResp != nil {
+		return errResp, nil
 	}
 
-	var role ociRole
-	if err := json.Unmarshal(entry.Value, &role); err != nil {
-		return credenvelope.InternalResponse(b.Logger().Warn, "parsing the stored role", err), nil
-	}
-
-	if role.Disabled {
-		return credenvelope.ErrorResponse(credenvelope.ErrRoleDisabled, "role %q is disabled", roleName), nil
+	// Checked after the role is loaded and before a slot is chosen, so a refusal reads
+	// nothing and costs OCI nothing. A slot credential is shared, so it cannot be traced
+	// to whoever obtained it afterwards — refusing an unidentifiable caller up front is
+	// the only attribution this cloud's shape allows.
+	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return resp, nil
 	}
 
 	// Load all slots and find the freshest active one

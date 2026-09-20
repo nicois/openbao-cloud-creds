@@ -13,6 +13,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
 	"github.com/nicois/openbao-cloud-creds/pkg/ownertag"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -185,11 +186,12 @@ func (b *backend) trackActiveKey(ctx context.Context, req *logical.Request, a tr
 		b.Logger().Warn("could not record the mint in the ledger; this credential will not be "+
 			"automatically reclaimable if it leaks", "cloud", cloudName, "id", a.keyID, "error", err)
 	}
-	activeEntry, _ := logical.StorageEntryJSON("active-tokens/"+a.keyID, map[string]interface{}{
-		fieldRole: a.roleName,
-		"minter":  a.minterID,
-		"created": a.now.UTC().Format(time.RFC3339),
-	})
+	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+a.keyID,
+		requester.Stamp(map[string]interface{}{
+			fieldRole: a.roleName,
+			"minter":  a.minterID,
+			"created": a.now.UTC().Format(time.RFC3339),
+		}, req))
 	if activeEntry == nil {
 		return nil
 	}
@@ -234,7 +236,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 				"credential left upstream for the owner-tag reconciler to delete "+
 				"(it does not expire on its own)",
 				"minter_set", minterSet, "minter_id", minterID)
-			_ = req.Storage.Delete(ctx, "active-tokens/"+keyID)
+			_ = req.Storage.Delete(ctx, activeTrackingPrefix+keyID)
 			return nil, nil
 		}
 	}
@@ -255,7 +257,7 @@ func (b *backend) pathCredsRevoke(ctx context.Context, req *logical.Request, d *
 	b.recordMinterSuccess(minterSet, minterID, now)
 
 	// Remove from active tokens
-	if err := req.Storage.Delete(ctx, "active-tokens/"+keyID); err != nil {
+	if err := req.Storage.Delete(ctx, activeTrackingPrefix+keyID); err != nil {
 		b.Logger().Warn("failed to remove active key tracking", "key_id", keyID, "error", err)
 	}
 
@@ -433,6 +435,11 @@ func (b *backend) preflight(ctx context.Context, req *logical.Request, d *framew
 	role, errResp := b.loadIssuableRole(ctx, req, roleName)
 	if errResp != nil {
 		return nil, mintercapacity.State{}, errResp
+	}
+	// Before the capacity scan and before a minter is chosen: a role that will not issue to
+	// this caller must cost neither storage work nor an upstream call.
+	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return nil, mintercapacity.State{}, resp
 	}
 	capacity, errResp := b.capacitySnapshot(ctx, req)
 	if errResp != nil {

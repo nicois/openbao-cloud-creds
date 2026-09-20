@@ -29,9 +29,10 @@ func doCase(t *testing.T) e2eCase {
 			fieldDefaultTTL: shortTTL, fieldMaxTTL: hourTTL,
 			fieldScopes: doScopes, fieldMinterSet: defaultSet,
 		},
-		TTLSeconds: shortTTL,
-		Renewable:  true,
-		HardRevoke: true,
+		TTLSeconds:              shortTTL,
+		Renewable:               true,
+		HardRevoke:              true,
+		TracksIssuedCredentials: true,
 		// Every hard-revoke cloud can also be purged: the same delete call serves both.
 		DeletesIssuedCredentials: true,
 		Upstream:                 srv.ProvisionedCount,

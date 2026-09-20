@@ -63,6 +63,19 @@ func loadSlot(ctx context.Context, storage logical.Storage, roleName string, slo
 }
 
 // saveSlot persists a slot to storage.
+//
+// This is the only per-credential tracking record this plugin keeps, and it is deliberately
+// NOT stamped with requester provenance. A credential read here serves a pre-provisioned
+// slot rather than minting one: the upstream auth token is created by initializeSlots or
+// rotateSlot — the latter on a worker with no request in scope — and is then handed out to
+// every client that reads the role. No single caller obtained it, so there is no honest
+// value to record; stamping this record with whoever happened to trigger the rotation would
+// name the operator who wrote the role rather than the services holding the token, which is
+// worse than recording nothing because an incident responder would chase the wrong unit.
+//
+// What this cloud can offer instead is a refusal rather than a record: see
+// require_caller_identity in pathCredsRead, which declines to SERVE a slot credential to a
+// caller the mount cannot name.
 func saveSlot(ctx context.Context, storage logical.Storage, roleName string, s *slot) error {
 	entry, err := logical.StorageEntryJSON(storageKeyForSlot(roleName, s.SlotIndex), s)
 	if err != nil {

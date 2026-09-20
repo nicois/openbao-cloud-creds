@@ -7,6 +7,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -25,6 +26,9 @@ type vultrRole struct {
 	EmailDomain string        `json:"email_domain"`
 	MinterSet   string        `json:"minter_set"`
 	Disabled    bool          `json:"disabled,omitempty"`
+	// RequireCallerIdentity is empty on every role written before the field existed, which
+	// parses as "none": such a role keeps issuing exactly as it did.
+	RequireCallerIdentity string `json:"require_caller_identity,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -68,6 +72,10 @@ func (b *backend) rolePaths() []*framework.Path {
 						"Writing it alone is enough — a write to an existing role changes only the " +
 						"fields it carries. Reversible; it destroys nothing already issued",
 				},
+				fieldRequireCallerIdentity: {
+					Type:        framework.TypeString,
+					Description: requester.RoleFieldDescription(),
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -107,6 +115,13 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	if minterSet == "" {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil
 	}
+
+	// Refused here rather than at issuance: a typo in this field must be reported to whoever
+	// wrote the role, not discovered as a refusal by the first caller reading credentials.
+	requireCallerIdentity := d.Get(fieldRequireCallerIdentity).(string)
+	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
 	if err != nil {
 		return credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err), nil
@@ -137,6 +152,8 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		EmailDomain: emailDomain,
 		MinterSet:   minterSet,
 		Disabled:    d.Get(fieldDisabled).(bool),
+
+		RequireCallerIdentity: requireCallerIdentity,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -179,13 +196,14 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
 func roleData(role *vultrRole) map[string]interface{} {
 	return map[string]interface{}{
-		fieldName:        role.Name,
-		fieldDefaultTTL:  int(role.DefaultTTL.Seconds()),
-		fieldMaxTTL:      int(role.MaxTTL.Seconds()),
-		fieldACLs:        role.ACLs,
-		fieldEmailDomain: role.EmailDomain,
-		fieldMinterSet:   role.MinterSet,
-		fieldDisabled:    role.Disabled,
+		fieldName:                  role.Name,
+		fieldDefaultTTL:            int(role.DefaultTTL.Seconds()),
+		fieldMaxTTL:                int(role.MaxTTL.Seconds()),
+		fieldACLs:                  role.ACLs,
+		fieldEmailDomain:           role.EmailDomain,
+		fieldMinterSet:             role.MinterSet,
+		fieldDisabled:              role.Disabled,
+		fieldRequireCallerIdentity: role.RequireCallerIdentity,
 	}
 }
 

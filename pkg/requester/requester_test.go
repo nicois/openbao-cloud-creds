@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -74,5 +75,46 @@ func TestStampOnARequestWithNoIdentityLeavesTheRecordAlone(t *testing.T) {
 	Stamp(record, &logical.Request{})
 	if len(record) != 1 {
 		t.Errorf("record gained provenance keys with nothing to put in them: %v", record)
+	}
+}
+
+// TestAnUnknownRequirementFailsClosed is the case no plugin's role path can reach, which is exactly
+// why it is asserted here: a role written by a NEWER binary can name a requirement this one does not
+// know. Treating it as RequireNone would turn "only issue to callers I can name" into "issue to
+// anybody" on the older node of a mixed-version cluster — the same fail-open class as A29/A30.
+func TestAnUnknownRequirementFailsClosed(t *testing.T) {
+	resp := Enforce(&logical.Request{ClientTokenAccessor: "acc", EntityID: "ent"}, "some_future_rule")
+	if resp == nil {
+		t.Fatal("a requirement this binary does not understand was treated as no requirement")
+	}
+	if !resp.IsError() {
+		t.Fatalf("expected an error response, got %v", resp)
+	}
+}
+
+// TestWhatEachRequirementAccepts pins the two absences apart. They are different callers: a batch
+// token has no accessor and does have an entity (shared with the service token that created it),
+// while a root token has an accessor and no entity. A requirement that could not tell them apart
+// would make `token_accessor` either useless or a ban on root.
+func TestWhatEachRequirementAccepts(t *testing.T) {
+	callers := map[string]*logical.Request{
+		"service token": {ClientTokenAccessor: "acc", EntityID: "ent"},
+		"batch token":   {EntityID: "ent"},
+		"root token":    {ClientTokenAccessor: "acc"},
+		"no token":      {},
+	}
+	refused := map[Requirement][]string{
+		RequireNone:          {},
+		RequireAny:           {"no token"},
+		RequireTokenAccessor: {"batch token", "no token"},
+	}
+	for requirement, wantRefused := range refused {
+		for name, req := range callers {
+			got := Enforce(req, string(requirement)) != nil
+			want := slices.Contains(wantRefused, name)
+			if got != want {
+				t.Errorf("%s with requirement %s: refused=%v, want %v", name, requirement, got, want)
+			}
+		}
 	}
 }

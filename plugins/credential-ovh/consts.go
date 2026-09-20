@@ -1,6 +1,9 @@
 package credentialovh
 
-import "github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+import (
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
+)
 
 // cloudName is the cloud identifier used in stored config, response envelopes,
 // and the "cloud" metric label.
@@ -17,7 +20,12 @@ const (
 	// Deleting a role stops nothing: live leases stay renewable and every credential
 	// already issued keeps working, so this is the only lever that closes the tap.
 	fieldDisabled = "disabled"
-	fieldCloud    = "cloud"
+	// fieldRequireCallerIdentity is the role field demanding that a credential is only
+	// issued to a caller this mount can name, so a leaked token can be traced to the unit
+	// that asked for it. Aliased rather than respelled: pkg/requester owns the name so a
+	// report can join every cloud's records on one key.
+	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
+	fieldCloud                 = "cloud"
 	// fieldMinterID names the minter targeted by the rotate endpoint.
 	fieldMinterID = "minter_id"
 	// fieldMinterRetireGrace is the config field/response key for the retirement

@@ -8,6 +8,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -43,6 +44,10 @@ type awsRole struct {
 	InlinePolicy string   `json:"inline_policy,omitempty"`
 	MinterSet    string   `json:"minter_set"`
 	Disabled     bool     `json:"disabled,omitempty"`
+	// RequireCallerIdentity is how much of a caller's identity this role insists on
+	// before it will issue. Empty means none, so a role written before the field
+	// existed keeps issuing exactly as it did.
+	RequireCallerIdentity string `json:"require_caller_identity,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -98,6 +103,10 @@ func (b *backend) rolePaths() []*framework.Path {
 						"Writing it alone is enough — a write to an existing role changes only the " +
 						"fields it carries. Reversible; it destroys nothing already issued",
 				},
+				fieldRequireCallerIdentity: {
+					Type:        framework.TypeString,
+					Description: requester.RoleFieldDescription(),
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -148,6 +157,27 @@ func optionalRoleFields(d *framework.FieldData) (sessionTags map[string]string, 
 	return sessionTags, externalID
 }
 
+// requireExistingMinterSet resolves the set a role binds to, refusing an absent name and one that
+// does not exist. Extracted from pathRoleWrite so that function stays inside the length limit; the
+// check belongs at role write because a role naming a set that is not there can never issue.
+func (b *backend) requireExistingMinterSet(ctx context.Context, storage logical.Storage,
+	d *framework.FieldData,
+) (string, *logical.Response) {
+	minterSet := d.Get(fieldMinterSet).(string)
+	if minterSet == "" {
+		return "", credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required")
+	}
+	exists, err := b.minterSetExists(ctx, storage, minterSet)
+	if err != nil {
+		return "", credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err)
+	}
+	if !exists {
+		return "", credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"minter_set %q does not exist", minterSet)
+	}
+	return minterSet, nil
+}
+
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get(fieldName).(string)
 	// A write to an existing role changes the fields it carries and leaves the rest as
@@ -163,16 +193,9 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "iam_role_arn is required"), nil
 	}
 
-	minterSet := d.Get(fieldMinterSet).(string)
-	if minterSet == "" {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set is required"), nil
-	}
-	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
-	if err != nil {
-		return credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err), nil
-	}
-	if !exists {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "minter_set %q does not exist", minterSet), nil
+	minterSet, errResp := b.requireExistingMinterSet(ctx, req.Storage, d)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	if errResp := validateSTSTTLs(defaultTTL, maxTTL); errResp != nil {
@@ -183,6 +206,13 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	inlinePolicy := d.Get(fieldInlinePolicy).(string)
 	if errResp := validateSessionPolicies(policyARNs, inlinePolicy); errResp != nil {
 		return errResp, nil
+	}
+
+	// Refused here rather than at issuance: an operator who mistypes the requirement finds
+	// out when they write the role, not when the first caller is unexpectedly let through.
+	requireCallerIdentity := d.Get(fieldRequireCallerIdentity).(string)
+	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
 	role := &cloudconfig.Role{
@@ -212,6 +242,8 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 
 		PolicyARNs:   policyARNs,
 		InlinePolicy: inlinePolicy,
+
+		RequireCallerIdentity: requireCallerIdentity,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -254,12 +286,13 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
 func roleData(role *awsRole) map[string]interface{} {
 	data := map[string]interface{}{
-		fieldName:       role.Name,
-		fieldDefaultTTL: int(role.DefaultTTL.Seconds()),
-		fieldMaxTTL:     int(role.MaxTTL.Seconds()),
-		fieldIAMRoleARN: role.IAMRoleARN,
-		fieldMinterSet:  role.MinterSet,
-		fieldDisabled:   role.Disabled,
+		fieldName:                  role.Name,
+		fieldDefaultTTL:            int(role.DefaultTTL.Seconds()),
+		fieldMaxTTL:                int(role.MaxTTL.Seconds()),
+		fieldIAMRoleARN:            role.IAMRoleARN,
+		fieldMinterSet:             role.MinterSet,
+		fieldDisabled:              role.Disabled,
+		fieldRequireCallerIdentity: role.RequireCallerIdentity,
 	}
 	// An unset optional field is omitted rather than reported empty, so a role that
 	// never had one is not prefilled with one either.

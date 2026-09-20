@@ -17,6 +17,7 @@ import (
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -339,7 +340,10 @@ func (b *backend) rotateSharedSpacesKey(ctx context.Context, storage logical.Sto
 		return credenvelope.InternalResponse(b.Logger().Error, why, err)
 	}
 
-	if err := b.trackSpacesKey(ctx, storage, spacesKeyRecord{
+	// nil request, deliberately: a rotation is not somebody's read. The key it mints is served
+	// to every reader of the role until the next rotation, so there is no one caller who
+	// obtained it — and the worker that drives most rotations has no request in scope at all.
+	if err := b.trackSpacesKey(ctx, storage, nil, spacesKeyRecord{
 		roleName: roleName, minterID: sel.minterID, accessKey: key.AccessKey, createdAt: now,
 	}); err != nil {
 		return nil, undo("persisting the credential tracking record", err)
@@ -411,12 +415,22 @@ type spacesKeyRecord struct {
 	createdAt time.Time
 }
 
-func (b *backend) trackSpacesKey(ctx context.Context, storage logical.Storage, rec spacesKeyRecord) error {
-	entry, err := logical.StorageEntryJSON(spacesTrackingPrefix+rec.accessKey, map[string]interface{}{
-		fieldRole:         rec.roleName,
-		trackFieldMinter:  rec.minterID,
-		trackFieldCreated: rec.createdAt.UTC().Format(time.RFC3339),
-	})
+// trackSpacesKey records an issued Spaces key, stamped with WHICH caller obtained it.
+//
+// req may be nil, and on one of the two callers it always is. A per-lease key was obtained by
+// the request that read the lease, so that request's identity belongs on the record — but a
+// rotated role's key is minted on a schedule and then served to every reader, so no single
+// caller obtained it and there is nobody to name. requester.Stamp omits what it is not given,
+// which is the honest record in that case rather than a missing one.
+func (b *backend) trackSpacesKey(ctx context.Context, storage logical.Storage, req *logical.Request,
+	rec spacesKeyRecord,
+) error {
+	entry, err := logical.StorageEntryJSON(spacesTrackingPrefix+rec.accessKey,
+		requester.Stamp(map[string]interface{}{
+			fieldRole:         rec.roleName,
+			trackFieldMinter:  rec.minterID,
+			trackFieldCreated: rec.createdAt.UTC().Format(time.RFC3339),
+		}, req))
 	if err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -38,11 +39,12 @@ const (
 )
 
 type ovhRole struct {
-	Name       string        `json:"name"`
-	DefaultTTL time.Duration `json:"default_ttl"`
-	MaxTTL     time.Duration `json:"max_ttl"`
-	MinterSet  string        `json:"minter_set"`
-	Disabled   bool          `json:"disabled,omitempty"`
+	Name                  string        `json:"name"`
+	DefaultTTL            time.Duration `json:"default_ttl"`
+	MaxTTL                time.Duration `json:"max_ttl"`
+	MinterSet             string        `json:"minter_set"`
+	Disabled              bool          `json:"disabled,omitempty"`
+	RequireCallerIdentity string        `json:"require_caller_identity,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -75,6 +77,10 @@ func (b *backend) rolePaths() []*framework.Path {
 						"because live leases stay renewable and issued credentials keep working. " +
 						"Writing it alone is enough — a write to an existing role changes only the " +
 						"fields it carries. Reversible; it destroys nothing already issued",
+				},
+				fieldRequireCallerIdentity: {
+					Type:        framework.TypeString,
+					Description: requester.RoleFieldDescription(),
 				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -141,12 +147,21 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
+	// Refused HERE rather than at issuance: a requirement this binary cannot parse must
+	// never reach storage, or the role reads back fine and fails closed on the first
+	// caller instead of on the operator who mistyped it.
+	requireCallerIdentity := d.Get(fieldRequireCallerIdentity).(string)
+	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
+
 	ovhR := &ovhRole{
-		Name:       name,
-		DefaultTTL: defaultTTL,
-		MaxTTL:     maxTTL,
-		MinterSet:  minterSet,
-		Disabled:   d.Get(fieldDisabled).(bool),
+		Name:                  name,
+		DefaultTTL:            defaultTTL,
+		MaxTTL:                maxTTL,
+		MinterSet:             minterSet,
+		Disabled:              d.Get(fieldDisabled).(bool),
+		RequireCallerIdentity: requireCallerIdentity,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -189,11 +204,12 @@ func (b *backend) pathRoleRead(ctx context.Context, req *logical.Request, d *fra
 // (cloudconfig.PrefillRoleWrite), so a field cannot be readable and unpatchable.
 func roleData(role *ovhRole) map[string]interface{} {
 	return map[string]interface{}{
-		"name":        role.Name,
-		"default_ttl": int(role.DefaultTTL.Seconds()),
-		"max_ttl":     int(role.MaxTTL.Seconds()),
-		"minter_set":  role.MinterSet,
-		fieldDisabled: role.Disabled,
+		"name":                     role.Name,
+		"default_ttl":              int(role.DefaultTTL.Seconds()),
+		"max_ttl":                  int(role.MaxTTL.Seconds()),
+		"minter_set":               role.MinterSet,
+		fieldDisabled:              role.Disabled,
+		fieldRequireCallerIdentity: role.RequireCallerIdentity,
 	}
 }
 
