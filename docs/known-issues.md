@@ -4,8 +4,11 @@ Issues found during live testing and subsequent audits, each with a precise root
 cause and the fix. KI-001/KI-002 came out of the original multi-cloud spike's
 resilience assessment (against a live raft cluster, UpCloud) and are **RESOLVED**
 (fix + red-baseline regression tests); KI-005, KI-007 and KI-008 are resolved
-likewise, as is KI-010. KI-003, KI-004 and KI-006 are accepted, documented risks.
-Resolved entries are kept for the rationale and history.
+likewise, as are KI-010, KI-011 and KI-012. KI-003, KI-004 and KI-006 are accepted,
+documented risks. Resolved entries are kept for the rationale and history.
+
+KI-012's fix is the one thing here that is **resolved but unreleased** — it landed after
+v0.5.0 was tagged, so a deployment running the published modules still has the defect.
 
 **KI-011 is the one to read for what to do when a credential leaks**, and it is
 resolved with a residual worth knowing in advance: the two levers are `disabled=true`
@@ -791,3 +794,58 @@ not the reconciler's, why a purge bypasses `loadRole` — is in
   was lost (the KI-002 path, a storage failure between mint and track) is invisible to
   it, and remains the owner-tag reconciler's job. Credentials created in the account by
   anything else were never in scope.
+
+## KI-012 — a failed rotation returned no credential, while a working one sat in storage (`credential-do`, `spaces_key_rotated`) — [RESOLVED 2026-09-21]
+
+**Status:** RESOLVED 2026-09-21 (fallback inside a bounded window, two conformance
+cases and one per-plugin test, each confirmed by injecting the defect it describes).
+Present in v0.4.0 and v0.5.0; the fix is **unreleased** as of this entry.
+
+**Severity:** Medium, and higher than it looks. The credential was fine — issued,
+non-expiring, and already in the client's hands. What had failed was this mount's
+ability to mint its *successor*, and the read turned that into a total denial for
+every reader of the role, repeated on every read, for as long as the fault lasted.
+Not High only because `rotation_period` is measured in days, so the window in which
+an upstream fault can land on a due key is small.
+
+**Symptom:** a `credential_type=spaces_key_rotated` role whose key had reached its
+rotation age, on a mount that could not reach DigitalOcean (or whose minter had been
+rejected), answered `creds/<role>` with an upstream error and **no credential** —
+while `shared-spaces-keys/<role>` held a valid key that every other reader was
+already using successfully. A client that had refreshed a minute earlier held a
+working credential; the same client refreshing now got nothing.
+
+**Root cause:** the read path treated "this key must be replaced" as a single
+condition. `serveSharedSpacesKey` called `rotationReason`, and on any non-empty
+reason attempted a rotation whose error response it returned verbatim. There was no
+notion of a key that was *due* but still serviceable, so the only two outcomes were
+a replacement or a refusal — and the key already in storage, which DigitalOcean does
+not expire, was never considered.
+
+**Fix:** `rotationReason` returns a typed `rotationCause`, and only `causeAge` falls
+back to serving the existing key. The window is bounded by
+`sharedSpacesKey.servableUntil`, the earlier of `minted_at + rotation_period` (the
+promise that field already makes — which is why no new role field was added) and
+`deadline()` (past which no positive TTL can be issued without a lease outliving its
+credential). The response carries a `Warnings` entry naming the rotation error and
+the moment the key stops being served; past the window the read is refused with the
+rotation's own error code. Retrying is the lifecycle worker's job, as it already was.
+
+**Deliberately NOT part of the fallback:** `causeGrants`. A key whose grants no
+longer match the role carries privilege an operator has just revoked, and serving it
+because the replacement failed would undo that narrowing on the exact path used to
+reduce blast radius — and misreport it, since the envelope renders `scope` from the
+role rather than from the key. `causeUnminted` has nothing to serve at all.
+
+**Tests:** `rotation/AnOverdueCredentialIsStillServedWhileTheRotationFails` and
+`rotation/PastTheAgeTheRolePromisesTheReadIsRefused` in `pkg/plugintest`, plus
+`TestRotatedSpacesCreds_NarrowedGrantsAreNotServedWhenRotationFails` in the plugin
+(the shared suite cannot express it: grants are DigitalOcean's own vocabulary).
+Reverting the fallback fails the first, unbounding the window fails the second, and
+allowing `causeGrants` through fails the third — all three verified, not assumed.
+
+**Residual:** the fallback's trigger is modelled by the fake, not observed. Minting
+a Spaces key has never been exercised against the real API (KI-009 fenced the token
+path; `testdata/cloud-real/` holds `/v2/account` and `/v2/tokens` only), so how
+DigitalOcean actually refuses a create — and therefore which classifier branch the
+fallback runs behind — rests on the published specification.

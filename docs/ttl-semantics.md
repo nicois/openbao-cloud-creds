@@ -176,3 +176,27 @@ sharply. **Akamai** does not shorten the credential at all (the Identity API's o
 is far beyond any lease), so revoke is the *only* bound — and therefore `revoke-upstream` is
 the only containment. **DigitalOcean Spaces keys** have no expiry field in the API at all, same
 conclusion. See KI-011 and [`decisions.md`](decisions.md).
+
+## Two TTLs the matrix does not predict (2026-09-21)
+
+Both are cases where the lease a client receives is **shorter** than the role's `default_ttl`, which
+is the safe direction — but a client that sizes its refresh loop from the role definition rather than
+from the `lease_duration` it was handed will be cut off early. Neither is visible in the matrix above,
+because neither is a property of the cloud.
+
+**A batch-token caller's lease is capped by the token's remaining life.** Probed against OpenBao
+v2.6.1: a 20-minute lease requested by a batch token with 10 minutes left was issued at **599s**. A
+batch token is not a stored entry, so it cannot be renewed and its expiry is fixed at login; core
+will not let a lease outlive it. The role's `default_ttl` is therefore an upper bound for such a
+caller, not the value they get. (Two other batch facts matter for containment rather than TTL: the
+lease belongs to the token's **parent**, so revoking the parent's accessor does revoke the
+credential; and the token has no accessor of its own, which is what `require_caller_identity=token_accessor`
+refuses. See the batch-token note in [`decisions.md`](decisions.md).)
+
+**A rotated Spaces key served past its rotation age gets what is left of the overlap.** When a
+rotation fails and the key is still inside the window it may be served in, the response's TTL is
+clamped to `deadline() - now` — the earliest moment that key could be deleted — so it shrinks as the
+window closes. That keeps OBC-002 true (no lease outlives the credential it names) on the one type
+where the credential's life is the role's schedule rather than the lease's. Past the window the read
+is refused instead, carrying the rotation's own error code. See the failed-rotation note in
+[`decisions.md`](decisions.md).

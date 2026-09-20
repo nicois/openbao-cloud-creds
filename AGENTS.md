@@ -83,8 +83,9 @@ a schedule and no window in which a replaced credential must keep working — th
 one fact about the lifecycle, shared by ten of the eleven rather than paraphrased ten times.
 (OCI declares its own: it *does* share a credential and *does* replace it on a schedule, but two
 auth tokens per user is the whole budget, so a rotation deletes the slot's credential as it
-replaces it and there is no overlap to assert.) Its three `Harness` seams —
-`ForceRotationDue`, `ForceOverlapExpired`, `SweepRetiredCredentials` — **backdate the stored
+replaces it and there is no overlap to assert.) Its four `Harness` seams —
+`ForceRotationDue`, `ForcePastRotationCeiling`, `ForceOverlapExpired`,
+`SweepRetiredCredentials` — **backdate the stored
 deadlines and then make the ordinary call**, deliberately: the periods are days, and a fake
 clock would prove the suite's own arithmetic instead of the plugin's, while the stored deadline
 is the same durable state a restart rehydrates. The category also carries two facts the

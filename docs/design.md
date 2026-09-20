@@ -103,11 +103,35 @@ bao write cloud-creds/<cloud>/roles/<name> \
   <cloud-specific fields>
 ```
 
+Fields every cloud accepts, beyond the TTLs: `minter_set` (required, the set this role mints
+from), `disabled` (stop issuing without deleting anything — see Containment), and
+`require_caller_identity` (`none` default / `any` / `token_accessor`), which refuses to issue to
+a caller core cannot name and answers `caller_unidentified`. `token_accessor` is the value that
+refuses a **batch token**: it has no accessor, and its identity entity belongs to the service
+token that created it, so the accessor is the only field naming one unit.
+
 Cloud-specific fields (not exhaustive):
 - AWS: `iam_role_arn`, `policy_arns[]`, `inline_policy`
 - GCP: `service_account_email`, `scopes[]`
 - DO: `scopes[]` (fine-grained `<resource>:<verb>`, e.g. `droplet:create droplet:read`; `api:read`/`api:write` are all-read/all-write aliases — corrected 2026-08-21)
 - UpCloud: `permissions` (per UpCloud's API)
+
+### Issued-credential inventory
+
+```
+bao list cloud-creds/<cloud>/issued
+```
+
+One entry per credential this mount has issued and not yet revoked, keyed by the upstream id the
+cloud's own console shows. `key_info` carries the role, the minter, the timestamps, and **who
+obtained it** (`requested_by_token_accessor`, `requested_by_entity_id`, read from what core
+populated from the presented token — there is no parameter a caller could use to set them).
+Fields are published by an allowlist in `pkg/issuedlist`, so no credential material can reach a
+listing; pages with `after`/`limit`, looping while `more` is true.
+
+An inventory, **not an audit log**: an entry disappears when its credential is revoked, so it
+answers what is live now. Refused with `unsupported` on OCI, which keeps no per-credential record
+(a read serves a shared rotation slot) — an empty success would read as "nothing is outstanding".
 
 ### Error model
 
