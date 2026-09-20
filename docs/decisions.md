@@ -1752,3 +1752,52 @@ read, and revoking a shared credential's lease deletes nothing — is unmeasured
 reaches OpenBao's expiration manager. And minting a Spaces key has never been exercised against the
 real API: `plugins/credential-do/testdata/cloud-real/` holds recordings for `/v2/account` and
 `/v2/tokens` only, so this type rests on the published specification and the fake.
+
+## Who obtained a credential, and why provenance must not be overridable (2026-09-20)
+
+The tracking record every plugin writes at mint time says what was issued and by which minter, but not
+to whom. So a leaked cloud credential could be traced to a mount and a role, and no further — while the
+question an incident actually asks is *which unit is compromised*. `logical.Request` carries the answer
+(`ClientTokenAccessor`, `EntityID`) and every plugin dropped it.
+
+`pkg/requester` stamps it onto the record. Two things about the design are load-bearing.
+
+**It is not `pkg/minteraffinity`, though that package already binds the same two fields.** Affinity
+derives a shard key from them and deliberately lets a caller override it with `shard_key`, because
+spreading work across minters is the caller's business. Provenance must do the opposite: a
+caller-supplied value would let one unit record *another* unit's identity against a credential it
+obtained, which is worse than recording nothing — an incident responder chases the wrong service while
+the compromised one keeps its access. So `requester.Identity` reads only what core populates from the
+presented token, and there is no override parameter to pass. The two share the request fields and
+differ on the override, which is why the derivation is duplicated rather than reused.
+
+**An absent field is omitted, not stamped empty.** A root token has no entity and an internal call may
+present no token, so `""` under a provenance key would read as "issued by an identity whose name is
+blank" rather than "no resolvable caller".
+
+### Status, and what is NOT done
+
+Wired on `credential-do` only. **Nine plugins still write tracking records without provenance, and
+there is no conformance assertion**, so this is currently the half-applied change AGENTS.md exists to
+prevent. Finishing it means, in this order:
+
+1. An assertion in `pkg/plugintest` — `containment.go` already reads records via
+   `Harness.TrackingPrefix`, so that is the seam. It must set `req.ClientTokenAccessor` on the issuing
+   request, because an in-process `logical.Request` carries none unless the test supplies it. Write it
+   first and watch nine plugins fail; that is the point of it.
+2. Wire the remaining nine (and DO Spaces, which has its own `active-spaces-keys/` prefix).
+
+### The open question for the report this was built for
+
+The goal is a JSON tree of live instances: service AppRole accessors, their child units, and the cloud
+credentials those units hold. Provenance supplies the last link — but note the identifiers differ:
+
+- `parent_secret_id_accessor` (see the SecretID lineage note) links a unit's **SecretID accessor** to
+  its service's SecretID accessor.
+- provenance records the **token accessor** that requested a credential.
+
+Those are different things. The chain SecretID accessor -> token accessor -> credential needs its
+middle link established before a report can claim to show a service's credentials, and nothing here
+has proven it. `sys/leases/lookup` does not expose the creating token, and there is no list endpoint
+for tracked credentials on any plugin — only `minter-sets` and `roles` have `ListOperation` — so
+enumerating them for a report needs one adding.

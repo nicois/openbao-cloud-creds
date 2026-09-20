@@ -11,13 +11,14 @@ use (
 	./pkg/clusterrole
 	./pkg/credenvelope
 	./pkg/localexpiry
-	./pkg/ownertag
-	./pkg/mintledger
-	./pkg/mintercapacity
 	./pkg/minteraffinity
+	./pkg/mintercapacity
+	./pkg/mintledger
+	./pkg/ownertag
 	./pkg/plugintest
 	./pkg/reconciler
 	./pkg/recovery
+	./pkg/requester
 	./pkg/telemetry
 	./pkg/totp
 	./pkg/upstreampurge
