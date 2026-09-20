@@ -216,7 +216,32 @@ go test -race github.com/nicois/openbao-cloud-creds/...   # everything (use full
 make test-conformance                                     # the matrix, then the table under -race
 make test-e2e                                             # plugin binaries in a live `bao server -dev` (needs `bao` on PATH)
 make lint                                                 # golangci-lint v2 over every module incl. conformance and (tagged) e2e
+make build-standalone                                     # every module under GOWORK=off — how a consumer outside this checkout builds it
+make install-hooks                                        # core.hooksPath -> .githooks (history + release-tag guards)
+make check-release-tags VERSION=v0.5.0                    # after tagging: every module tagged, at one commit, annotated
 ```
+
+**Releasing.** The set is tagged in lockstep, `<module dir>/vX.Y.Z` for every directory under
+`pkg/` and `plugins/` holding a `go.mod` — and a tag cannot be corrected once pushed, only
+superseded, because the module proxy caches a version's content permanently. The guards sit on both
+sides of the tag, because neither half is checkable at the same moment:
+
+| when | what | where |
+|---|---|---|
+| every commit | every internal require names ONE version | `TestEveryModuleAgreesOnOneVersion` (conformance) |
+| every commit | every module builds with no workspace | `make build-standalone` in CI |
+| before `git push --tags` | the whole tag set exists, at one commit, annotated | `.githooks/pre-push` |
+| after the tags are pushed | the same, unskippable | the `release-tags` CI job |
+
+The last two call `make check-release-tags`, which derives the module list from disk, so a module
+added since the last release cannot be left out silently. The CI job re-fetches for two minutes
+before failing: `git push --tags` starts one run per tag, and the earliest of them legitimately
+begin before their siblings' refs exist.
+
+Note what CI on the release commit itself cannot tell you: every module reaches its siblings
+through `replace ../<sibling>`, so a stale require is invisible in this checkout and authoritative
+outside it. That is why the require-version test exists at all, and why `build-standalone` runs
+with `GOWORK=off` rather than trusting a green workspace build.
 
 Lint applies to `pkg/plugintest` as **non-test** code: `revive function-length [60,0]`, `funlen 80/50`, `revive max-public-structs [5]`, `gocyclo 15`. Long suites get split into named helpers, one per assertion — which reads better anyway. Zero `//nolint` in this repo; keep it that way.
 

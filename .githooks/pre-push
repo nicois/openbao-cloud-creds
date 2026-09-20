@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# pre-push: two guards over the irreversible half of publishing this repository.
+#
+#   1. refuse a non-fast-forward (force) push to main;
+#   2. verify a release's tag set before the tags leave this machine.
+#
+# Both are in pre-push rather than pre-commit because a commit is recoverable and a push is
+# not. For the tag check that is not a preference but a fact: at commit time the tags do not
+# exist yet, so there is nothing to check — see the header of scripts/check-release-tags.sh,
+# which explains why tag completeness is deliberately not a test that runs on every commit.
+#
+# Installed by `make install-hooks`, which points core.hooksPath at this directory. These live
+# in the repository rather than in .git/hooks so that a fresh clone gets them: an uncommitted
+# hook protects only the machine that wrote it.
+#
+# Git feeds pre-push the ref list on STDIN, once. Both guards need it, so it is captured up
+# front rather than read twice — a second read gets nothing, silently, which would make guard 2
+# a hook that always passes.
+set -uo pipefail
+
+refs=$(cat)
+
+zero="0000000000000000000000000000000000000000"
+
+# --- guard 1: force-push to main ---------------------------------------------------------
+#
+# Rewriting already-published main history (e.g. via commit --amend or rebase of pushed
+# commits) is how this repo's history once diverged from origin. A normal push to main must
+# always be a fast-forward. Other branches are unaffected — feature/worktree branches may be
+# force-pushed freely.
+#
+# Intentional override (e.g. a one-time, deliberate history correction):
+#   ALLOW_FORCE_PUSH_MAIN=1 git push --force origin main
+#
+# Note: this is a LOCAL guard and is bypassable with --no-verify. The authoritative protection
+# is GitHub branch protection ("Allow force pushes: disabled") on main.
+while read -r _local_ref local_sha remote_ref remote_sha; do
+	[ "$remote_ref" = "refs/heads/main" ] || continue
+	# Deleting main, or pushing it as a brand-new ref upstream: nothing to rewrite.
+	[ "$local_sha" = "$zero" ] && continue
+	[ "$remote_sha" = "$zero" ] && continue
+	# Fast-forward iff the remote tip is an ancestor of what we're pushing.
+	if ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+		if [ "${ALLOW_FORCE_PUSH_MAIN:-0}" = "1" ]; then
+			echo "pre-push: ALLOW_FORCE_PUSH_MAIN=1 set — permitting non-fast-forward push to main." >&2
+			continue
+		fi
+		echo "pre-push: REFUSING non-fast-forward push to main." >&2
+		echo "  Pushing $local_sha would rewrite published history at $remote_sha." >&2
+		echo "  If this is a deliberate correction:" >&2
+		echo "    ALLOW_FORCE_PUSH_MAIN=1 git push --force origin main" >&2
+		exit 1
+	fi
+done <<<"$refs"
+
+# --- guard 2: release tag set ------------------------------------------------------------
+#
+# A tag here is not a label that can be moved. The Go module proxy caches a version's CONTENT
+# permanently, so once it has served pkg/x@v1.2.3 that content is fixed: a bad release cannot
+# be corrected, only abandoned for a new version. This repository has already paid that once —
+# v0.3.0 shipped with ten stale requires and the only remedy was another release.
+#
+# So when a push carries release tags, the whole set is checked before it goes: every module on
+# disk tagged, all at ONE commit, annotated in the scheme the previous releases used. Pushing
+# thirty-odd tags is one irreversible act made of many parts, and the one that is missing is
+# exactly what nobody notices by eye.
+#
+# The authoritative check is the CI job that runs on the pushed tags; this one exists to fail
+# BEFORE the push rather than after it.
+versions=()
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+	# Release tags are <module dir>/vX.Y.Z — there is no bare version tag in this repo.
+	case "$remote_ref" in
+	refs/tags/*/v*) ;;
+	*) continue ;;
+	esac
+	# A tag being DELETED is not a release being published.
+	[ "$local_sha" = "$zero" ] && continue
+	versions+=("${remote_ref##*/}")
+done <<<"$refs"
+
+((${#versions[@]} > 0)) || exit 0
+
+root=$(git rev-parse --show-toplevel)
+mapfile -t unique < <(printf '%s\n' "${versions[@]}" | sort -u)
+for version in "${unique[@]}"; do
+	echo "pre-push: verifying the $version tag set before it is published..." >&2
+	if ! "$root/scripts/check-release-tags.sh" "$version" >&2; then
+		echo "pre-push: REFUSING to push an incomplete $version release." >&2
+		echo "  Fix the tag set and push again. A published tag cannot be corrected," >&2
+		echo "  only superseded, because the module proxy caches it permanently." >&2
+		exit 1
+	fi
+done
+
+exit 0

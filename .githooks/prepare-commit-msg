@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+#
+# prepare-commit-msg: refuse to amend a commit that is already published
+# (reachable from any remote-tracking branch).
+#
+# Rationale: amending a pushed commit rewrites published history and forces a
+# divergence from origin. Amending UNpushed commits is fine and expected (e.g.
+# folding review fixes into a feature-branch commit before pushing), so this
+# guard fires ONLY when HEAD is already on a remote.
+#
+# Args ($2 is the commit source): "commit" => -c/-C/--amend (reusing a commit).
+# We additionally confirm --amend specifically by checking that the message
+# source commit ($3) is HEAD.
+#
+# Intentional override:
+#   ALLOW_AMEND_PUBLISHED=1 git commit --amend ...
+#
+# LOCAL guard (this clone, bypassable with --no-verify). Pair with GitHub
+# branch protection for the non-bypassable guarantee.
+
+source="$2"
+sha="$3"
+
+# Only care about amend (source == "commit" and the reused commit is HEAD).
+[ "$source" = "commit" ] || exit 0
+
+head=$(git rev-parse --verify HEAD 2>/dev/null) || exit 0
+# $3 may be a ref/sha being reused; for --amend it resolves to HEAD.
+if [ -n "$sha" ]; then
+	reused=$(git rev-parse --verify "$sha" 2>/dev/null)
+	[ "$reused" = "$head" ] || exit 0
+fi
+
+if git branch -r --contains "$head" 2>/dev/null | grep -q .; then
+	if [ "${ALLOW_AMEND_PUBLISHED:-0}" = "1" ]; then
+		echo "prepare-commit-msg: ALLOW_AMEND_PUBLISHED=1 — permitting amend of published commit $head." >&2
+		exit 0
+	fi
+	echo "prepare-commit-msg: REFUSING to amend $head — it is already on a remote-tracking branch." >&2
+	echo "  Amending published history forces a divergence from origin." >&2
+	echo "  Make a NEW commit on top instead, or if deliberate:" >&2
+	echo "    ALLOW_AMEND_PUBLISHED=1 git commit --amend ..." >&2
+	exit 1
+fi
+
+exit 0

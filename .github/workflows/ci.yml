@@ -99,6 +99,47 @@ jobs:
           done
           exit $fail
 
+  # A release is thirty-odd tags at one commit, and the Go module proxy caches a version's
+  # CONTENT permanently — so a tag cannot be corrected once published, only superseded by
+  # another version. This repository has already paid that: v0.3.0 shipped with ten stale
+  # requires and the remedy was a whole new release. So the tag set is verified after it is
+  # pushed, as the last thing that can still catch a module left behind before anyone pins it.
+  #
+  # The local pre-push hook (`make install-hooks`) runs the same check BEFORE the push. This job
+  # is the one that cannot be skipped with --no-verify.
+  #
+  # Why it tolerates an incomplete set for a while: `git push --tags` creates one workflow run
+  # per tag, and the earliest runs legitimately start before their siblings' refs exist. A job
+  # that failed on the first sight of an incomplete set would paint thirty-one runs red for every
+  # green one, which teaches people to ignore exactly the check that matters. So it re-fetches
+  # for a bounded window and reports only what is still missing at the end of it.
+  release-tags:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The check reads every tag and compares the tagged commits to HEAD, so it needs the
+          # history and the tags, not the default single-commit checkout.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Verify the whole release is tagged
+        run: |
+          # refs/tags/pkg/requester/v0.5.0 -> v0.5.0
+          version="${GITHUB_REF##*/}"
+          echo "verifying the $version tag set (triggered by ${GITHUB_REF#refs/tags/})"
+          for attempt in $(seq 1 12); do
+            if make check-release-tags VERSION="$version"; then
+              exit 0
+            fi
+            echo "--- incomplete after attempt $attempt; re-fetching tags in 10s"
+            sleep 10
+            git fetch --tags --force --quiet
+          done
+          echo "::error::the $version tag set is still incomplete two minutes after this run started"
+          make check-release-tags VERSION="$version"
+
   registration-smoke-test:
     runs-on: ubuntu-latest
     steps:

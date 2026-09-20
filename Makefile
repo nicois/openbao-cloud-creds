@@ -20,7 +20,7 @@ E2E_BUILD_TAG := e2e
 CLOUD_REAL_BUILD_TAG := cloud_real
 SCALE_BUILD_TAG := scale
 
-.PHONY: build build-standalone dist test test-conformance test-e2e test-cloud-real-do test-cloud-real-do-spaces test-cloud-real-aws test-scale lint fmt clean smoke-test
+.PHONY: check-release-tags install-hooks build build-standalone dist test test-conformance test-e2e test-cloud-real-do test-cloud-real-do-spaces test-cloud-real-aws test-scale lint fmt clean smoke-test
 
 build:
 	go build $(MODULE_PREFIX)/...
@@ -139,6 +139,33 @@ test-cloud-real-aws:
 # OpenBao dev server. Requires `bao` on PATH.
 smoke-test:
 	./scripts/registration-smoke-test.sh
+
+# Verifies a release's tag set: every module on disk tagged at VERSION, all at ONE commit,
+# annotated in the scheme the previous releases used. Run by the pre-push hook before the tags
+# leave the machine and by the CI job that fires on a pushed tag, so both call this rather than
+# keeping their own idea of which modules a release covers — the module list is derived from
+# disk inside the script, which is what stops a module added since the last release from being
+# silently left out.
+#
+# Only meaningful AFTER the tags exist, which is why it is not part of `make test`: between the
+# release commit and `git push --tags` the tags legitimately do not exist. The pre-tag half of
+# the same contract — that every internal require names one version — is asserted on every
+# commit by TestEveryModuleAgreesOnOneVersion in the conformance module.
+check-release-tags:
+	@test -n "$(VERSION)" || { echo "usage: make check-release-tags VERSION=v0.5.0"; exit 2; }
+	./scripts/check-release-tags.sh $(VERSION)
+
+# Points core.hooksPath at .githooks/, so the guards over the two irreversible acts — rewriting
+# published history, and publishing a tag the module proxy will cache forever — are the ones in
+# the repository rather than whatever each clone happens to have in .git/hooks.
+#
+# It supersedes an uncommitted .git/hooks copy of the same hooks: git consults hooksPath OR
+# .git/hooks, never both. Nothing there is deleted, so `git config --unset core.hooksPath`
+# restores the previous behaviour exactly.
+install-hooks:
+	git config core.hooksPath .githooks
+	@echo "core.hooksPath -> .githooks ($$(ls .githooks | tr '\n' ' '))"
+	@echo "undo with: git config --unset core.hooksPath"
 
 lint:
 	@for dir in $(LINT_DIRS); do \
