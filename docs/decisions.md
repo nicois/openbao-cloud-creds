@@ -1676,10 +1676,11 @@ but it is the one to confirm against a live account before relying on it.
 
 ## What the rotated key type still needs at fleet scale (2026-09-16)
 
-`credential_type=spaces_key_rotated` works, and two of the things a large fleet needs from it have
-landed: the shared-key record carries a schema version, and a rotation locks only its own role while
-a re-serve locks nothing. The four below are known, measured where measurement was possible, and
-**not** implemented. Recorded because the reasoning took longer than the code will.
+`credential_type=spaces_key_rotated` works, and three of the things a large fleet needs from it have
+landed: the shared-key record carries a schema version, a rotation locks only its own role while a
+re-serve locks nothing, and **item 1 below is now implemented** (2026-09-20) — see the note that
+follows this one. The remaining three are known, measured where measurement was possible, and **not**
+implemented. Recorded because the reasoning took longer than the code will.
 
 The shape being designed for is one role per reader — one credential each, not one shared across a
 group — at an order of 10^5 roles on one mount. That is what makes each item below a question about
@@ -1699,13 +1700,12 @@ scale rather than about correctness in the small.
 - A role costs **895 bytes** persisted (560 for the key record, 335 for the role), and nothing
   per-role is held in the plugin's heap.
 
-**1. A soft rotation deadline, and serving the current key when a rotation attempt fails.** This is
-the only one of the four that is a correctness fix rather than an optimisation. Today a read that
-finds the key due either rotates or returns an error — and on error it returns *no credential*, while
-a valid, non-expiring key sits in the record unreturned. A transient upstream fault at the moment a
-key comes due therefore denies a client that had a working credential a moment earlier. Attempting
-from a soft mark, serving the existing key when the attempt fails, and refusing only past a hard
-deadline turns that into a retry window whose length an operator chooses.
+**1. A soft rotation deadline, and serving the current key when a rotation attempt fails.**
+**[DONE 2026-09-20 — see the next note.]** This was the only one of the four that was a correctness
+fix rather than an optimisation. A read that found the key due either rotated or returned an error —
+and on error it returned *no credential*, while a valid, non-expiring key sat in the record
+unreturned. A transient upstream fault at the moment a key came due therefore denied a client that
+had a working credential a moment earlier.
 
 **2. An explicit acknowledgement before a superseded key becomes deletable.** `DeleteAt` is set to
 `now + overlap_ttl` at rotation, in the same request that hands the replacement over — so the clock
@@ -1964,3 +1964,61 @@ across the plugin boundary), but it can infer it: an empty `ClientTokenAccessor`
 demanding an accessor is implementable, and what it really means is "refuse batch callers" — which
 is a policy an operator should be able to state, since the entity is shared with the parent and only
 the accessor distinguishes the unit.
+
+## Why a failed rotation serves the old key, and what bounds that (2026-09-20)
+
+A shared Spaces key comes due, the read tries to replace it, and DigitalOcean is unreachable. Before
+this change the read returned an error and **no credential** — while a valid, non-expiring key sat in
+the record unreturned, and every subsequent read did the same for as long as the fault lasted. The
+client had a working copy of that credential a moment earlier and nothing about the credential had
+changed; only the mount's ability to mint its successor had.
+
+So a failed rotation now falls back to serving what exists. Three things decide whether it may.
+
+**Only the age cause falls back.** `rotationReason` became a typed `rotationCause`, because the read
+path has to tell three situations apart that all read as "this key must be replaced":
+
+- `causeAge` — the key is merely old. It works, DigitalOcean does not expire it, and a client was
+  holding it. This one falls back.
+- `causeGrants` — the key carries privilege the role no longer authorises. Serving it because the
+  replacement failed would undo an operator's narrowing of privilege, on exactly the path they use to
+  reduce blast radius. It must never fall back, and it is worse than "silent": the envelope renders
+  `scope` from the ROLE's grants, so a fallback would hand out a key with the old grants while
+  reporting the new ones. That was observed, not theorised — the per-plugin test that fences it was
+  confirmed by removing the cause check and watching a credential go out misdescribed.
+- `causeUnminted` — there is nothing to serve at all.
+
+**The window is `rotation_period`, and it needed no new role field.** `rotation_period` already reads
+as a promise about the maximum age of a credential — that is precisely why the jitter is *subtracted*
+rather than added (see the jitter note above). A separate "grace" field would have let an operator's
+90 days become 91 whenever the cloud was down, and the number that satisfied their policy would again
+be one nobody wrote down. So the soft mark is the existing `dueAt` (period less the jitter rolled at
+mint), the hard bound is `minted_at + rotation_period`, and the retry window is exactly the jitter
+the operator already chose. `rotation_jitter=0` means no window, which is coherent: an operator who
+wants a predictable rotation date is choosing not to have one.
+
+**`servableUntil` takes the earlier of two bounds**, and both are needed. The promise above is one.
+The other is `deadline()` — the earliest moment the key could be deleted — because a lease may never
+outlive the credential it names (OBC-002), and past that point there is no positive TTL left to hand
+out. Which one binds depends on whether the role's `overlap_ttl` exceeds its jitter, so both are
+computed. Removing the second bound produces a response with `ttl_seconds: -7776001`, which is how it
+was confirmed to matter rather than to be defensive decoration.
+
+**What the client and the operator see.** The response carries a `Warnings` entry naming the rotation
+error and the moment the key stops being served — the first use of response warnings in this
+repository, and the right place for it: the read SUCCEEDED, and the thing worth saying is not about
+this credential's validity but about a window that is closing. The log line is at Warn for the same
+reason. Past the bound the refusal is the rotation's *own* error response, unchanged, because its
+code tells a client whether the upstream failure is worth retrying, which is more useful than a new
+code meaning "too late".
+
+**The retry itself is the worker's**, not the reader's: `rotateOverdueSpacesRoles` already walks every
+role on the lifecycle tick, so a role whose rotation failed is retried every five minutes without a
+client having to read it. The fallback's job is only to stop the failure reaching the client.
+
+Fenced by two conformance cases in the `rotation` category — served inside the window, refused past
+it — plus a per-plugin test for the grants cause, which the shared suite cannot express because
+grants are DigitalOcean's own privilege vocabulary. All three were confirmed by injecting the defect
+they describe: reverting the fallback, unbounding the window, and allowing the grants cause through.
+The second seam `ForcePastRotationCeiling` exists because `ForceRotationDue` deliberately leaves the
+ceiling a full period away, so it can only reach one side of the window.

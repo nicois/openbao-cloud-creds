@@ -95,6 +95,9 @@ func doSpacesRotatedHarness(t *testing.T) plugintest.Harness {
 		ForceRotationDue: func(t *testing.T, b logical.Backend, storage logical.Storage) error {
 			return credentialdo.ForceRotationDue(t.Context(), b, storage, roleName)
 		},
+		ForcePastRotationCeiling: func(t *testing.T, b logical.Backend, storage logical.Storage) error {
+			return credentialdo.ForcePastRotationCeiling(t.Context(), b, storage, roleName)
+		},
 		ForceOverlapExpired: func(t *testing.T, b logical.Backend, storage logical.Storage) error {
 			return credentialdo.ForceOverlapExpired(t.Context(), b, storage, roleName)
 		},

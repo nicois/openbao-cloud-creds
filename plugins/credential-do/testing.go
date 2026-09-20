@@ -70,6 +70,42 @@ func ForceRotationDue(ctx context.Context, b logical.Backend, storage logical.St
 	return saveSharedSpacesState(ctx, storage, roleName, state)
 }
 
+// ForcePastRotationCeiling backdates the role's shared key past the age its role promises, so it
+// is not merely overdue but beyond the window in which a failed rotation may keep serving it.
+//
+// Separate from ForceRotationDue, which moves minted_at to a second ago and therefore leaves the
+// ceiling (minted_at + rotation_period) a whole period away. The two seams exist to exercise the
+// two sides of servableUntil: inside the window the key is still handed out when the rotation
+// fails, and outside it the read is refused.
+func ForcePastRotationCeiling(ctx context.Context, b logical.Backend, storage logical.Storage,
+	roleName string,
+) error {
+	backend, ok := b.(*backend)
+	if !ok {
+		return errNotThisBackend
+	}
+	release := backend.lockSharedRole(roleName)
+	defer release()
+
+	role, errResp := backend.loadRole(ctx, &logical.Request{Storage: storage}, roleName)
+	if errResp != nil {
+		return errors.New("loading the role: " + errResp.Error().Error())
+	}
+	state, err := loadSharedSpacesState(ctx, storage, roleName)
+	if err != nil {
+		return err
+	}
+	if state.Current == nil {
+		return errors.New("the role has no shared credential to rotate")
+	}
+	// One second past BOTH bounds servableUntil takes the earlier of, so the caller does not have
+	// to know which of overlap_ttl and the jitter binds for this role.
+	past := time.Now().Add(-role.RotationPeriod - role.OverlapTTL - time.Second)
+	state.Current.RotateAt = past
+	state.Current.MintedAt = past
+	return saveSharedSpacesState(ctx, storage, roleName, state)
+}
+
 // ForceOverlapExpired brings forward the deletion deadline of every key the role has retired,
 // so the next sweep is entitled to delete them.
 func ForceOverlapExpired(ctx context.Context, b logical.Backend, storage logical.Storage, roleName string) error {

@@ -222,6 +222,16 @@ type Harness struct {
 	// ForceOverlapExpired brings forward the deletion deadline of every credential the
 	// role has retired, so a sweep is entitled to delete them.
 	ForceOverlapExpired func(t *testing.T, b logical.Backend, storage logical.Storage) error
+	// ForcePastRotationCeiling ages the shared credential past the maximum age its role
+	// promises, which is the far side of the window a FAILED rotation may keep serving it in.
+	//
+	// Separate from ForceRotationDue, which makes the credential merely overdue. The two exist
+	// because the fallback has two sides and only one of them is safe to leave unasserted: if
+	// the window never closed, "rotate every 90 days" would quietly become "rotate when the
+	// cloud lets us". A harness that leaves this nil still gets the inside-the-window case, and
+	// the suite prints why the other did not run.
+	ForcePastRotationCeiling func(t *testing.T, b logical.Backend, storage logical.Storage) error
+
 	// SweepRetiredCredentials runs one pass of the plugin's own retirement sweep inline —
 	// the same function its worker calls on a timer, so the suite exercises the pass
 	// rather than a test-only reimplementation of it.

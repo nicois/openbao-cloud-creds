@@ -20,7 +20,7 @@ const (
 
 // rotationReasonOperator is what the rotation log says when this endpoint drove it, so the one
 // rotation an operator caused is distinguishable from the schedule's.
-const rotationReasonOperator = "an operator asked for it"
+const rotationReasonOperator rotationCause = "an operator asked for it"
 
 // sharedRotatePaths is roles/<name>/rotate: replace a rotated role's shared credential now,
 // without waiting for its period.

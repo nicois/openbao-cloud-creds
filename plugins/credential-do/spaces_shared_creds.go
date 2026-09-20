@@ -2,6 +2,7 @@ package credentialdo
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -61,17 +62,80 @@ func (b *backend) serveSharedSpacesKey(ctx context.Context, req *logical.Request
 	if err != nil {
 		return credenvelope.InternalResponse(b.Logger().Warn, "loading the role's shared credential", err), nil
 	}
-	if reason := rotationReason(state, role, now); reason != "" {
-		rotated, errResp := b.rotateSharedSpacesKey(ctx, req.Storage, rotationRequest{
+	if reason := rotationReason(state, role, now); reason != causeNone {
+		// One value describes the rotation to both the attempt and the fallback, so they cannot
+		// disagree about which key was being replaced or why.
+		attempt := rotationRequest{
 			role: role, roleName: roleName, state: state, now: now, reason: reason,
-		})
+		}
+		rotated, errResp := b.rotateSharedSpacesKey(ctx, req.Storage, attempt)
 		if errResp != nil {
+			if fallback := b.serveOverdueKey(attempt, errResp); fallback != nil {
+				return fallback, nil
+			}
 			return errResp, nil
 		}
 		state = rotated
 	}
 
 	return b.buildSharedSpacesResponse(role, roleName, state.Current, now), nil
+}
+
+// serveOverdueKey hands back the key the role already has when the rotation that should have
+// replaced it FAILED, or nil when it must not be served.
+//
+// The defect this closes: a read that found the key due either rotated or returned an error, and
+// on error it returned NO credential — while a valid, non-expiring Spaces key sat in the record
+// unreturned. A transient upstream fault at the moment a key came due therefore denied a client
+// the credential it had a moment earlier, and every subsequent read denied it again, for as long
+// as DigitalOcean was unreachable. Nothing about the credential had changed.
+//
+// Three conditions, each of them a refusal in its own right:
+//
+//   - the cause must be causeAge. A key whose GRANTS no longer match the role carries privilege
+//     the operator has revoked, and serving that because the replacement failed would hand out
+//     exactly what they narrowed; an unminted role has nothing to serve at all.
+//   - there must be a key. causeAge implies one, but the read is cheap and the alternative is a
+//     nil dereference at the least convenient moment.
+//   - now must be before servableUntil: inside the promise `rotation_period` makes, and inside
+//     the window where a lease can still be issued that cannot outlive the credential.
+//
+// Past that the refusal is the rotation's OWN error response, unchanged, because its code says
+// what is actually wrong upstream — which is what a client needs in order to decide whether to
+// retry, and more useful than a code invented here to say "too late".
+func (b *backend) serveOverdueKey(attempt rotationRequest,
+	rotationErr *logical.Response,
+) *logical.Response {
+	role, roleName, state, now := attempt.role, attempt.roleName, attempt.state, attempt.now
+	if attempt.reason != causeAge || state == nil || state.Current == nil {
+		return nil
+	}
+	until := state.Current.servableUntil(role)
+	if !now.Before(until) {
+		b.Logger().Error("the shared Spaces key is past the age its role promises and cannot be "+
+			"replaced; refusing to serve it",
+			"role", roleName, "access_key", state.Current.AccessKey,
+			"minted_at", state.Current.MintedAt.UTC().Format(time.RFC3339),
+			"servable_until", until.UTC().Format(time.RFC3339),
+			"rotation_error", rotationErr.Error())
+		return nil
+	}
+
+	// Warn rather than Info: the rotation is failing, and the only thing keeping this role
+	// serving is a window that is closing. An operator who sees this has until servable_until to
+	// fix the upstream, and after that the role stops issuing.
+	b.Logger().Warn("serving the shared Spaces key that is overdue for rotation, because the "+
+		"rotation failed and the key still works",
+		"role", roleName, "access_key", state.Current.AccessKey,
+		"servable_until", until.UTC().Format(time.RFC3339),
+		"rotation_error", rotationErr.Error())
+
+	resp := b.buildSharedSpacesResponse(role, roleName, state.Current, now)
+	resp.Warnings = append(resp.Warnings, fmt.Sprintf(
+		"this credential is overdue for rotation and the rotation is failing (%s); it will be "+
+			"served until %s and refused after that", rotationErr.Error(),
+		until.UTC().Format(time.RFC3339)))
+	return resp
 }
 
 func (b *backend) buildSharedSpacesResponse(role *doRole, roleName string,

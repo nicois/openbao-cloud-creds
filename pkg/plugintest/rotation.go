@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -38,6 +39,8 @@ func RunRotationSuite(t *testing.T, h Harness) {
 		{"AnOverdueCredentialIsReplacedOnTheNextRead", rotOverdueIsReplaced},
 		{"TheReplacedCredentialKeepsWorkingThroughTheOverlap", rotReplacedSurvivesTheOverlap},
 		{"TheReplacedCredentialIsDeletedOnceTheOverlapHasPassed", rotReplacedIsDeletedAfterwards},
+		{"AnOverdueCredentialIsStillServedWhileTheRotationFails", rotOverdueServedWhenRotationFails},
+		{"PastTheAgeTheRolePromisesTheReadIsRefused", rotPastTheCeilingIsRefused},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.run(t, h) })
 	}
@@ -255,6 +258,97 @@ func rotReplacedIsDeletedAfterwards(t *testing.T, h Harness) {
 // servedCredentialID reads the issuing path and returns the id of the credential it served.
 // Read from the envelope rather than from storage, because it is what a client compares to
 // decide whether it has anything new to install.
+// rotOverdueServedWhenRotationFails: a rotation that CANNOT happen must not cost a client the
+// credential it already holds.
+//
+// The credential is shared, it has no upstream expiry, and the reader had a working copy of it a
+// moment ago — so an upstream fault at the instant the key comes due changes nothing about the
+// credential itself. Refusing the read denies a client a credential that works, and denies it again
+// on every subsequent read for as long as the cloud is unreachable. The window is bounded, which is
+// what the next case asserts; inside it, the answer is the credential.
+func rotOverdueServedWhenRotationFails(t *testing.T, h Harness) {
+	if h.DenyMint == nil || h.AllowMint == nil {
+		t.Skipf("%s declares no mint-refusal knob, so a FAILING rotation cannot be produced", h.Cloud)
+	}
+	b, storage := newConfiguredBackend(t, h)
+	served := servedCredentialID(t, b, storage, h)
+	// Counted AFTER the first read, which is what mints the role's credential: the number this
+	// case is about is what a FAILED rotation adds to a mount that already has one.
+	before := h.ProvisionedCount()
+
+	forceRotationDue(t, h, b, storage)
+	h.DenyMint()
+	t.Cleanup(h.AllowMint)
+
+	resp, err := issue(t, b, storage, h.IssuePath)
+	if err != nil {
+		t.Fatalf("reading %s returned a transport error: %v", h.IssuePath, err)
+	}
+	if resp == nil || resp.IsError() {
+		t.Fatalf("a read was refused because the ROTATION failed, while a working credential sat "+
+			"in storage unreturned: %v", resp)
+	}
+	if got := credentialID(t, resp); got != served {
+		t.Errorf("the read served %q, want the credential the role already had (%q): a failed "+
+			"rotation must fall back to what exists, not invent something", got, served)
+	}
+	if got := h.ProvisionedCount(); got != before {
+		t.Errorf("the cloud holds %d credentials after a FAILED rotation, want %d: a refusal "+
+			"upstream must leave nothing behind", got, before)
+	}
+	// The client is told, because it is holding a credential whose replacement is overdue and
+	// whose window is closing — which is invisible from a successful response otherwise.
+	if len(resp.Warnings) == 0 {
+		t.Errorf("the response carries no warning, so a client cannot tell it was served an " +
+			"overdue credential on a failing rotation")
+	}
+
+	// And the fallback is not a new steady state: once the cloud recovers, the next read rotates.
+	h.AllowMint()
+	if got := servedCredentialID(t, b, storage, h); got == served {
+		t.Errorf("the credential was still %q after the cloud recovered: the fallback has to end "+
+			"at the first successful rotation, or the key never rotates again", got)
+	}
+}
+
+// rotPastTheCeilingIsRefused: the fallback above is a WINDOW, not a licence.
+//
+// A rotation period reads as a promise about the maximum age of a credential — which is why the
+// jitter is subtracted rather than added — so serving indefinitely because rotation keeps failing
+// would quietly convert "rotate every 90 days" into "rotate when the cloud lets us". Past the age
+// the role promises, the read is refused and the operator is left with an unambiguous failure
+// rather than a credential older than their policy allows.
+func rotPastTheCeilingIsRefused(t *testing.T, h Harness) {
+	if h.DenyMint == nil || h.AllowMint == nil {
+		t.Skipf("%s declares no mint-refusal knob, so a FAILING rotation cannot be produced", h.Cloud)
+	}
+	if h.ForcePastRotationCeiling == nil {
+		t.Skipf("%s declares no ForcePastRotationCeiling, so the far side of the window cannot be "+
+			"reached; the case inside the window still runs", h.Cloud)
+	}
+	b, storage := newConfiguredBackend(t, h)
+	servedCredentialID(t, b, storage, h)
+
+	if err := h.ForcePastRotationCeiling(t, b, storage); err != nil {
+		t.Fatalf("ageing the credential past its ceiling failed: %v", err)
+	}
+	h.DenyMint()
+	t.Cleanup(h.AllowMint)
+
+	resp, err := issue(t, b, storage, h.IssuePath)
+	if err != nil {
+		t.Fatalf("reading %s returned a transport error: %v", h.IssuePath, err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("a credential older than the age its role promises was served anyway: %v", resp)
+	}
+	// The code is the ROTATION's own, because what a client must decide is whether the upstream
+	// failure is worth retrying — not that this mount has a window and it closed.
+	if _, known := credenvelope.CodeOf(resp.Error().Error()); !known {
+		t.Errorf("the refusal carries no recognised error_code: %q", resp.Error())
+	}
+}
+
 func servedCredentialID(t *testing.T, b logical.Backend, storage logical.Storage, h Harness) string {
 	t.Helper()
 	resp, err := issue(t, b, storage, h.IssuePath)

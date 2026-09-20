@@ -253,22 +253,64 @@ func (k *sharedSpacesKey) deadline(role *doRole) time.Time {
 	return k.dueAt(role).Add(role.OverlapTTL)
 }
 
-// rotationReason says why the role's key must be replaced before it can be served, or "" if
-// it can be served as it is. A string rather than a bool because it is logged: a rotation is
-// the one event an operator will want to correlate with a role write or an incident.
-func rotationReason(state *sharedSpacesState, role *doRole, now time.Time) string {
+// servableUntil is the last moment this key may still be handed out once it is OVERDUE and the
+// rotation that should have replaced it is failing.
+//
+// Two bounds, and it is the earlier of them:
+//
+//   - minted_at + rotation_period. `rotation_period` reads as a promise about the maximum age of
+//     a credential — that is why the jitter is subtracted rather than added — so the retry window
+//     has to fit INSIDE it. An operator who wrote 90 days must not get 91 because DigitalOcean
+//     was unreachable on day 90, and the window's length is therefore the jitter they chose.
+//   - deadline(). A lease may never outlive the credential it names (techrfc OBC-002), and
+//     deadline() is the earliest moment this key could be deleted. Past it there is no positive
+//     TTL left to hand out that keeps that true.
+//
+// Which one binds depends on whether the role's overlap_ttl exceeds its jitter, so both are
+// computed rather than one assumed.
+func (k *sharedSpacesKey) servableUntil(role *doRole) time.Time {
+	ceiling := k.MintedAt.Add(role.RotationPeriod)
+	if lease := k.deadline(role); lease.Before(ceiling) {
+		return lease
+	}
+	return ceiling
+}
+
+// rotationCause says why the role's key must be replaced before it can be served. Its values are
+// the strings the rotation log carries, so `string(cause)` is the log field and comparison is
+// still typed — the read path has to distinguish the causes, because only ONE of them may fall
+// back to serving the existing key.
+type rotationCause string
+
+const (
+	// causeNone: the key can be served exactly as it is.
+	causeNone rotationCause = ""
+	// causeUnminted: there is nothing to serve, so nothing to fall back to.
+	causeUnminted rotationCause = "no key has been minted for this role yet"
+	// causeGrants: the key that exists carries privilege the role no longer authorises, so
+	// serving it when the rotation fails would hand out exactly what the operator revoked.
+	// This cause must NEVER fall back.
+	causeGrants rotationCause = "the role's grants no longer match the key's"
+	// causeAge: the key is merely old. It still works, DigitalOcean does not expire it, and a
+	// reader held a valid copy of it a moment ago — so this is the one cause where a failed
+	// rotation must not cost the client its credential.
+	causeAge rotationCause = "the key reached its rotation age"
+)
+
+// rotationReason says why the role's key must be replaced before it can be served, or causeNone.
+func rotationReason(state *sharedSpacesState, role *doRole, now time.Time) rotationCause {
 	switch {
 	case state == nil || state.Current == nil:
-		return "no key has been minted for this role yet"
+		return causeUnminted
 	case !grantsMatch(state.Current.Grants, role.Grants):
 		// The key already handed out carries the grants it was minted with, and DigitalOcean
 		// cannot change them (PUT/PATCH alter the name and nothing else). So a narrowed role
 		// and its live credential disagree about privilege until the key is replaced.
-		return "the role's grants no longer match the key's"
+		return causeGrants
 	case !state.Current.dueAt(role).After(now):
-		return "the key reached its rotation age"
+		return causeAge
 	default:
-		return ""
+		return causeNone
 	}
 }
 
@@ -295,7 +337,7 @@ type rotationRequest struct {
 	roleName string
 	state    *sharedSpacesState
 	now      time.Time
-	reason   string
+	reason   rotationCause
 }
 
 func (b *backend) rotateSharedSpacesKey(ctx context.Context, storage logical.Storage,
@@ -391,7 +433,7 @@ func (b *backend) rotateSharedSpacesKey(ctx context.Context, storage logical.Sto
 // logRotation is an operator's only account of a rotation: metrics do not reach anybody in
 // this deployment (A12), and this is the event that explains why a client saw a new
 // credential and when the old one stops working.
-func (b *backend) logRotation(roleName, reason string, replaced, minted *sharedSpacesKey, overlap time.Duration) {
+func (b *backend) logRotation(roleName string, reason rotationCause, replaced, minted *sharedSpacesKey, overlap time.Duration) {
 	fields := []any{
 		fieldCloud, cloudName, fieldRole, roleName, "reason", reason,
 		"access_key", minted.AccessKey, "next_rotation", minted.RotateAt.UTC().Format(time.RFC3339),
@@ -598,7 +640,7 @@ func (b *backend) rotateRoleIfOverdue(ctx context.Context, storage logical.Stora
 		return nil
 	}
 	reason := rotationReason(state, &role, now)
-	if reason == "" {
+	if reason == causeNone {
 		return nil
 	}
 	if _, errResp := b.rotateSharedSpacesKey(ctx, storage, rotationRequest{

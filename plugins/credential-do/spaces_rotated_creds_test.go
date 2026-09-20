@@ -360,3 +360,68 @@ func TestRotatedSpacesCreds_DisabledRoleNeitherServesNorMints(t *testing.T) {
 		t.Errorf("the worker minted %d keys for a disabled role", n)
 	}
 }
+
+// A key whose GRANTS no longer match the role must NOT be served when its replacement fails.
+//
+// This is the one cause of rotation that may not fall back, and it is the case a reasonable
+// implementation gets wrong: the fallback exists so a transient upstream fault does not cost a
+// client a credential that works, and a key with the old grants does still work. But it works with
+// privilege the operator has just revoked — so serving it turns a narrowed role into an unchanged
+// one for as long as DigitalOcean is unreachable, silently, on the exact path an operator uses to
+// reduce blast radius.
+//
+// Worse than silently: the envelope's `scope` is rendered from the ROLE's grants, not the key's, so
+// a fallback here would hand out a credential carrying `backups:read` while reporting `archive:read`.
+// That is exactly what was observed when the cause check was removed to confirm this test catches it.
+//
+// Not expressible in the shared rotation suite: grants are DigitalOcean's own privilege vocabulary,
+// so the suite has no way to narrow a role's privilege.
+func TestRotatedSpacesCreds_NarrowedGrantsAreNotServedWhenRotationFails(t *testing.T) {
+	srv := fakes.NewDOServer()
+	defer srv.Close()
+	b, storage := setupRotatedBackend(t, srv)
+
+	wide := accessKeyOf(t, issueFrom(t, b, storage, rotatedRoleName, nil))
+
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.UpdateOperation, Path: "roles/" + rotatedRoleName, Storage: storage,
+		Data: map[string]any{"grants": "archive:read"},
+	})
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("narrowing the grants was refused: err=%v resp=%v", err, resp)
+	}
+
+	// The cloud now refuses to mint the replacement, which is what makes this the interesting
+	// case rather than the ordinary grant-change rotation.
+	srv.SetForbidSpacesKeyCreate(true)
+	t.Cleanup(func() { srv.SetForbidSpacesKeyCreate(false) })
+
+	refused, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.ReadOperation, Path: "creds/" + rotatedRoleName, Storage: storage,
+	})
+	if err != nil {
+		t.Fatalf("the read returned a transport error: %v", err)
+	}
+	if refused == nil || !refused.IsError() {
+		t.Fatalf("the role served a credential while its replacement was failing: %v", refused)
+	}
+	if served := credentialIDOf(refused); served == wide {
+		t.Fatalf("the key minted with the wider grants (%q) was served after the role was "+
+			"narrowed: the operator's reduction of privilege was silently undone", wide)
+	}
+
+	// And the key itself is untouched: refusing to SERVE it is not a containment action, and
+	// deleting it here would break every client still inside its overlap.
+	if !srv.HasSpacesKey(wide) {
+		t.Error("the wider key was deleted; refusing to serve it must not destroy it")
+	}
+}
+
+// credentialIDOf reads the served credential id out of a response, or "" from an error response.
+func credentialIDOf(resp *logical.Response) string {
+	if resp == nil {
+		return ""
+	}
+	id, _ := resp.Data["credential_id"].(string)
+	return id
+}
