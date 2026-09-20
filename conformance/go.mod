@@ -7,16 +7,16 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/mintledger v0.3.0
 	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.3.0
 	github.com/nicois/openbao-cloud-creds/pkg/plugintest v0.3.0
-	github.com/nicois/openbao-cloud-creds/plugins/credential-akamai v0.2.1
-	github.com/nicois/openbao-cloud-creds/plugins/credential-aws v0.2.1
-	github.com/nicois/openbao-cloud-creds/plugins/credential-azure v0.2.1
-	github.com/nicois/openbao-cloud-creds/plugins/credential-do v0.2.1
-	github.com/nicois/openbao-cloud-creds/plugins/credential-exoscale v0.2.1
-	github.com/nicois/openbao-cloud-creds/plugins/credential-gcp v0.2.1
-	github.com/nicois/openbao-cloud-creds/plugins/credential-oci v0.2.1
-	github.com/nicois/openbao-cloud-creds/plugins/credential-ovh v0.2.1
-	github.com/nicois/openbao-cloud-creds/plugins/credential-upcloud v0.2.1
-	github.com/nicois/openbao-cloud-creds/plugins/credential-vultr v0.2.1
+	github.com/nicois/openbao-cloud-creds/plugins/credential-akamai v0.3.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-aws v0.3.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-azure v0.3.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-do v0.3.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-exoscale v0.3.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-gcp v0.3.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-oci v0.3.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-ovh v0.3.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-upcloud v0.3.0
+	github.com/nicois/openbao-cloud-creds/plugins/credential-vultr v0.3.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
 
