@@ -2,6 +2,7 @@ package credentialvultr
 
 import (
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 )
 
@@ -23,6 +24,10 @@ const (
 	// fieldRequireCallerIdentity is the role field demanding that a credential is only issued
 	// to a caller this mount can name. Spelled once, in pkg/requester, so all clouds agree.
 	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
+	// fieldRequireCallerLineage is the role field that refuses to issue to a caller whose
+	// PARENT this mount cannot establish. Aliased from pkg/lineage for the same reason:
+	// one spelling per plugin, so a report reads one vocabulary across ten clouds.
+	fieldRequireCallerLineage = lineage.FieldRequireCallerLineage
 
 	// fieldDefaultTTL / fieldMaxTTL are the role TTL field names.
 	fieldDefaultTTL  = "default_ttl"

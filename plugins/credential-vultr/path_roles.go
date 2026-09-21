@@ -7,6 +7,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -29,6 +30,11 @@ type vultrRole struct {
 	// RequireCallerIdentity is empty on every role written before the field existed, which
 	// parses as "none": such a role keeps issuing exactly as it did.
 	RequireCallerIdentity string `json:"require_caller_identity,omitempty"`
+
+	// RequireCallerLineage is how much of the caller's PARENT this role insists on before
+	// it will hand over a credential. Empty is lineage.RequireNone, so a role persisted
+	// before the field existed loads and keeps issuing exactly what it issued.
+	RequireCallerLineage string `json:"require_caller_lineage,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -76,6 +82,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: requester.RoleFieldDescription(),
 				},
+				fieldRequireCallerLineage: {
+					Type:        framework.TypeString,
+					Description: lineage.RoleFieldDescription(),
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -122,6 +132,10 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
+	requireCallerLineage := d.Get(fieldRequireCallerLineage).(string)
+	if _, err := lineage.ParseRequirement(requireCallerLineage); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 	exists, err := b.minterSetExists(ctx, req.Storage, minterSet)
 	if err != nil {
 		return credenvelope.InternalResponse(b.Logger().Warn, "a storage operation", err), nil
@@ -154,6 +168,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		Disabled:    d.Get(fieldDisabled).(bool),
 
 		RequireCallerIdentity: requireCallerIdentity,
+		RequireCallerLineage:  requireCallerLineage,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -204,6 +219,7 @@ func roleData(role *vultrRole) map[string]any {
 		fieldMinterSet:             role.MinterSet,
 		fieldDisabled:              role.Disabled,
 		fieldRequireCallerIdentity: role.RequireCallerIdentity,
+		fieldRequireCallerLineage:  role.RequireCallerLineage,
 	}
 }
 
