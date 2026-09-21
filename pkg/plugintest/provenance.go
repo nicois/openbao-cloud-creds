@@ -47,7 +47,7 @@ func RunProvenanceSuite(t *testing.T, h Harness) {
 
 // provRecordsRequester: the record the plugin writes at mint time names the caller.
 func provRecordsRequester(t *testing.T, h Harness) {
-	requireTrackingRecords(t, h)
+	requireTrackingRecords(t, h, "provenance")
 	b, storage := newConfiguredBackend(t, h)
 
 	if resp := issueAsCaller(t, b, storage, h.IssuePath, nil); resp == nil || resp.IsError() {
@@ -67,7 +67,7 @@ func provRecordsRequester(t *testing.T, h Harness) {
 // recording nothing, because an incident responder chases the named service while the compromised
 // one keeps its access.
 func provCannotBeForged(t *testing.T, h Harness) {
-	requireTrackingRecords(t, h)
+	requireTrackingRecords(t, h, "provenance")
 	b, storage := newConfiguredBackend(t, h)
 
 	forged := map[string]any{
@@ -168,12 +168,16 @@ func provRefusalMintsNothing(t *testing.T, h Harness) {
 
 // requireTrackingRecords skips a case that needs a per-read tracking record to inspect, printing
 // the reason rather than being silently absent.
-func requireTrackingRecords(t *testing.T, h Harness) {
+//
+// what names the thing the record would have carried ("provenance", "lineage"), because two suites
+// share this helper and a skip line naming the wrong feature sends a reader to the wrong contract —
+// which is the only signal a skipped case emits.
+func requireTrackingRecords(t *testing.T, h Harness, what string) {
 	t.Helper()
 	if h.TrackingPrefix == "" {
 		t.Skipf("%s declares no TrackingPrefix, so there is no per-credential record to carry "+
-			"provenance (a subject serving a pre-provisioned slot writes one at rotation, not "+
-			"at read)", h.Cloud)
+			"%s (a subject serving a pre-provisioned slot writes one at rotation, not "+
+			"at read)", h.Cloud, what)
 	}
 	if h.SharesOneCredential || h.IssuesFromPreprovisionedSlots {
 		t.Skipf("%s serves ONE credential to every reader, so no single caller obtained it: the "+

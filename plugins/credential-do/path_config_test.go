@@ -8,10 +8,18 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
-func getTestBackend(t *testing.T) (logical.Backend, logical.Storage) {
+// backendOption adjusts the BackendConfig before the backend is constructed. Variadic so the
+// existing callers are untouched; it exists because the identity view core would supply is part of
+// that config, and a test asserting on WHOSE unit obtained a credential cannot set it afterwards.
+type backendOption func(*logical.BackendConfig)
+
+func getTestBackend(t *testing.T, opts ...backendOption) (logical.Backend, logical.Storage) {
 	t.Helper()
 	config := logical.TestBackendConfig()
 	config.StorageView = &logical.InmemStorage{}
+	for _, opt := range opts {
+		opt(config)
+	}
 	b, err := credentialdo.Factory(t.Context(), config)
 	if err != nil {
 		t.Fatalf("unable to create backend: %v", err)

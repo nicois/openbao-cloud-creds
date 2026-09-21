@@ -12,9 +12,9 @@ import (
 // setupSpacesBackend returns a backend configured against srv with a `spaces` role that
 // mints Spaces keys, alongside the token role setupConfiguredBackend already creates —
 // so every test here also proves the two credential types coexist on one mount.
-func setupSpacesBackend(t *testing.T, srv *fakes.DOServer) (logical.Backend, logical.Storage) {
+func setupSpacesBackend(t *testing.T, srv *fakes.DOServer, opts ...backendOption) (logical.Backend, logical.Storage) {
 	t.Helper()
-	b, storage := setupConfiguredBackend(t, srv.URL)
+	b, storage := setupConfiguredBackend(t, srv.URL, opts...)
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/spaces", Storage: storage,
 		Data: map[string]any{

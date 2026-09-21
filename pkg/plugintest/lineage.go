@@ -90,13 +90,14 @@ func issueAsUnparented(t *testing.T, b logical.Backend, storage logical.Storage,
 }
 
 // RunLineageSuite covers WHOSE unit obtained a credential: that a role can demand the caller's
-// parent, that the demand is checked before anything is minted, that a parent an operator has
-// disabled stops issuance at once, that the caller cannot supply its own lineage, and that the
+// parent, that an operator can read that demand back, that the demand is checked before anything is
+// minted, that a parent an operator has disabled stops issuance at once, that the caller cannot
+// supply its own lineage — neither to satisfy the demand nor to land in the record — and that the
 // record names it.
 //
-// Four of the five cases apply to every subject, because refusing to issue to an unclaimed unit is
-// not a question about a cloud. Only the recording case needs a per-read tracking record, and it
-// gates on the same helper the provenance suite uses so there is ONE way to say "this subject
+// Five of the seven cases apply to every subject, because refusing to issue to an unclaimed unit is
+// not a question about a cloud. Only the two that read a record need a per-read tracking record, and
+// they gate on the same helper the provenance suite uses so there is ONE way to say "this subject
 // records nothing per read".
 func RunLineageSuite(t *testing.T, h Harness) {
 	for _, c := range []struct {
@@ -104,12 +105,41 @@ func RunLineageSuite(t *testing.T, h Harness) {
 		run  func(*testing.T, Harness)
 	}{
 		{"ARoleCanRequireTheCallersParent", lineageRequireParent},
+		{"ARoleReportsWhatLineageItRequires", lineageRequirementIsVisible},
 		{"ADisabledParentStopsIssuanceAtOnce", lineageDisabledParentStopsIssuance},
 		{"LineageCannotBeForgedByTheCaller", lineageCannotBeForged},
+		{"AForgedLineageDoesNotLandInTheRecord", lineageRecordCannotBeForged},
 		{"RefusingAnUnparentedCallerCostsTheUpstreamNothing", lineageRefusalMintsNothing},
 		{"AnIssuedCredentialRecordsWhoseUnitObtainedIt", lineageRecordsTheParent},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.run(t, h) })
+	}
+}
+
+// lineageRequirementIsVisible: an operator can read back what lineage the role demands.
+//
+// The same reasoning as the provenance suite's case — a requirement nobody can read is one nobody can
+// audit — plus a hazard specific to how roles are written here. cloudconfig.PrefillRoleWrite fills a
+// PARTIAL role write from the plugin's own role-read output, so a plugin that reported everything
+// except this field would turn any later partial write (disabled=true, a TTL change) into a silent
+// ERASE of an operator's containment requirement. requireLiveParent's own write cannot catch that:
+// the field is in the request either way.
+func lineageRequirementIsVisible(t *testing.T, h Harness) {
+	h, _ = withLineageIdentity(h)
+	b, storage := newConfiguredBackend(t, h)
+	requireLiveParent(t, b, storage, h.RolePath)
+
+	role := roleDefinition(t, b, storage, h.RolePath)
+	got, present := role[lineage.FieldRequireCallerLineage]
+	if !present {
+		t.Fatalf("the role read reports no %q field, so an operator cannot audit whose units it "+
+			"issues to — and a later partial write would silently erase the requirement, because "+
+			"a prefilled write can only carry back what the read reported",
+			lineage.FieldRequireCallerLineage)
+	}
+	if got != string(lineage.RequireLiveParent) {
+		t.Errorf("the role reports %s=%v, want %q",
+			lineage.FieldRequireCallerLineage, got, lineage.RequireLiveParent)
 	}
 }
 
@@ -172,6 +202,40 @@ func lineageCannotBeForged(t *testing.T, h Harness) {
 		"issuing to an unparented caller that supplied a parent of its own in the request")
 }
 
+// lineageRecordCannotBeForged: what the caller supplied does not reach the record either.
+//
+// A different property from the case above, and the one that matters on day one. That case proves a
+// forged parent cannot SATISFY a requirement; this proves it cannot be RECORDED — on a role with the
+// default requirement, which is every role until an operator decides to refuse anyone, and the
+// configuration the feature's "recording is not conditional on enforcing" argument is about.
+//
+// Without it, the forgery is only fenced where pkg/lineage reads the identity store. A plugin that
+// merged req.Data into its tracking map would keep every enforcement case green while writing
+// whatever the caller asked for — and a record naming a service that never asked for the credential
+// is worse than one naming nobody, because a responder chases it.
+func lineageRecordCannotBeForged(t *testing.T, h Harness) {
+	requireTrackingRecords(t, h, "lineage")
+	h, _ = withLineageIdentity(h)
+	b, storage := newConfiguredBackend(t, h)
+
+	// No requireLiveParent call: this runs on the role's DEFAULT requirement.
+	forged := map[string]any{
+		lineage.FieldParentEntityID: "forged-parent-entity",
+		lineage.FieldUnitID:         "forged-unit",
+		lineage.FieldSource:         "forged-source",
+		lineage.MetaParentEntityID:  "forged-parent-entity",
+		lineage.MetaUnitID:          "forged-unit",
+	}
+	if resp := issueAsCaller(t, b, storage, h.IssuePath, forged); resp == nil || resp.IsError() {
+		t.Fatalf("the role could not issue, so this case would prove nothing: %v", resp)
+	}
+
+	record := soleTrackingRecord(t, storage, h.TrackingPrefix)
+	assertRecordField(t, record, lineage.FieldParentEntityID, suiteParentEntityID)
+	assertRecordField(t, record, lineage.FieldUnitID, suiteUnitID)
+	assertRecordField(t, record, lineage.FieldSource, string(lineage.SourceAliasCustomMetadata))
+}
+
 // lineageRefusalMintsNothing: the check happens before a minter is selected.
 //
 // Placement is the whole assertion, exactly as it is for provenance: a requirement checked after the
@@ -204,7 +268,7 @@ func lineageRefusalMintsNothing(t *testing.T, h Harness) {
 // enforcing. An operator who has not yet decided to refuse anyone still gets a report that answers
 // whose unit holds each credential, which is the half of this feature that is useful on day one.
 func lineageRecordsTheParent(t *testing.T, h Harness) {
-	requireTrackingRecords(t, h)
+	requireTrackingRecords(t, h, "lineage")
 	h, _ = withLineageIdentity(h)
 	b, storage := newConfiguredBackend(t, h)
 

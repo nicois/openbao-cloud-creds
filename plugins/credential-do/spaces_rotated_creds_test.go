@@ -22,9 +22,9 @@ const (
 // setupRotatedBackend returns a backend whose `shared` role serves ONE Spaces key to every
 // reader, beside the per-lease `spaces` role and the token role — so these tests also prove
 // the three lifecycles coexist on one mount.
-func setupRotatedBackend(t *testing.T, srv *fakes.DOServer) (logical.Backend, logical.Storage) {
+func setupRotatedBackend(t *testing.T, srv *fakes.DOServer, opts ...backendOption) (logical.Backend, logical.Storage) {
 	t.Helper()
-	b, storage := setupSpacesBackend(t, srv)
+	b, storage := setupSpacesBackend(t, srv, opts...)
 	resp, err := b.HandleRequest(t.Context(), &logical.Request{
 		Operation: logical.UpdateOperation, Path: "roles/" + rotatedRoleName, Storage: storage,
 		Data: map[string]any{

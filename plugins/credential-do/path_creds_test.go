@@ -11,9 +11,9 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
-func setupConfiguredBackend(t *testing.T, doURL string) (logical.Backend, logical.Storage) {
+func setupConfiguredBackend(t *testing.T, doURL string, opts ...backendOption) (logical.Backend, logical.Storage) {
 	t.Helper()
-	b, storage := getTestBackend(t)
+	b, storage := getTestBackend(t, opts...)
 
 	// config: operational settings only
 	req := &logical.Request{
