@@ -2,10 +2,12 @@ package issuedlist
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
@@ -310,5 +312,16 @@ func TestAMangledCursorIsRefused(t *testing.T) {
 				t.Fatalf("cursor %q was accepted", cursor)
 			}
 		})
+	}
+}
+
+func TestFieldsPublishesLineage(t *testing.T) {
+	for _, field := range []string{
+		lineage.FieldParentEntityID, lineage.FieldUnitID, lineage.FieldSource,
+	} {
+		if !slices.Contains(Fields(), field) {
+			t.Errorf("Fields() omits %q, so issued/ cannot answer whose unit holds a credential",
+				field)
+		}
 	}
 }

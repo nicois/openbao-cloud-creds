@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.5.0
+	github.com/nicois/openbao-cloud-creds/pkg/lineage v0.5.0
 	github.com/nicois/openbao-cloud-creds/pkg/requester v0.5.0
 	github.com/openbao/openbao/sdk/v2 v2.6.2
 )
@@ -61,5 +62,7 @@ require (
 )
 
 replace github.com/nicois/openbao-cloud-creds/pkg/credenvelope => ../credenvelope
+
+replace github.com/nicois/openbao-cloud-creds/pkg/lineage => ../lineage
 
 replace github.com/nicois/openbao-cloud-creds/pkg/requester => ../requester

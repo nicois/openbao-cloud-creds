@@ -36,6 +36,7 @@ import (
 	"strings"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -72,13 +73,14 @@ const MaxLimit = 1000
 // will report, and nothing else.
 //
 // It is a union across clouds rather than a per-cloud set, so one report reads every mount the same
-// way and a cloud that lacks a field simply omits it. The provenance keys are the point of the
-// endpoint; the rest is what makes an entry actionable — which role issued it, which minter, when,
-// and for Azure which application holds the password.
+// way and a cloud that lacks a field simply omits it. The provenance and lineage keys are the point
+// of the endpoint; the rest is what makes an entry actionable — which role issued it, which minter,
+// when, and for Azure which application holds the password.
 func Fields() []string {
 	return []string{
 		"role", "minter", "minter_set", "created", "expires_at", "app_object_id",
 		requester.FieldTokenAccessor, requester.FieldEntityID,
+		lineage.FieldParentEntityID, lineage.FieldUnitID, lineage.FieldSource,
 	}
 }
 

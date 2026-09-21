@@ -114,3 +114,34 @@ func TestResolveCustomMetadataWinsOverMetadataInTheSameAlias(t *testing.T) {
 		t.Errorf("Source = %q, want %q", got.Source, SourceAliasCustomMetadata)
 	}
 }
+
+func TestStampAddsOnlyWhatResolved(t *testing.T) {
+	view := &mapSystemView{entities: map[string]*logical.Entity{
+		"child": aliasWithCustom("child", map[string]string{
+			MetaParentEntityID: "service", MetaUnitID: "unit-7",
+		}),
+	}}
+
+	record := map[string]any{"role": "reader"}
+	Stamp(record, &logical.Request{EntityID: "child"}, view)
+
+	for key, want := range map[string]any{
+		"role": "reader", FieldParentEntityID: "service", FieldUnitID: "unit-7",
+		FieldSource: string(SourceAliasCustomMetadata),
+	} {
+		if record[key] != want {
+			t.Errorf("record[%q] = %v, want %v", key, record[key], want)
+		}
+	}
+}
+
+func TestStampAddsNothingWhenNothingResolved(t *testing.T) {
+	record := map[string]any{"role": "reader"}
+	Stamp(record, &logical.Request{}, &mapSystemView{})
+
+	if len(record) != 1 {
+		t.Errorf("record = %v, want only its original key: an absent parent must not be "+
+			"recorded as an empty one, which a report would read as a unit with no service",
+			record)
+	}
+}

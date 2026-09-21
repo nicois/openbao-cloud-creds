@@ -244,3 +244,22 @@ func RoleFieldDescription() string {
 		"then metadata) or the entity itself, and there is no request parameter for it. " +
 		"Defaults to " + string(RequireNone)
 }
+
+// Stamp copies the resolvable lineage fields into an existing tracking record.
+//
+// Takes the record rather than returning a new map, for the reason requester.Stamp does: a plugin
+// must not be able to build its record from lineage alone and lose its own fields. Writes nothing
+// when nothing resolved — an empty parent recorded as a field would read, in a report, as a unit
+// whose service is the empty string rather than as a unit nobody has claimed.
+func Stamp(record map[string]any, req *logical.Request, view logical.SystemView) map[string]any {
+	found := Resolve(req, view)
+	if found.ParentEntityID == "" {
+		return record
+	}
+	record[FieldParentEntityID] = found.ParentEntityID
+	record[FieldSource] = string(found.Source)
+	if found.UnitID != "" {
+		record[FieldUnitID] = found.UnitID
+	}
+	return record
+}

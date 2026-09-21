@@ -734,7 +734,7 @@ git commit -m "feat(lineage): refuse a caller whose parent is missing, deleted o
 - Modify: `pkg/lineage/lineage.go` (add `Stamp`), `pkg/issuedlist/issuedlist.go:78-83`, `pkg/issuedlist/go.mod`
 - Test: `pkg/lineage/lineage_test.go`, `pkg/issuedlist/issuedlist_test.go`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `pkg/lineage/lineage_test.go`:
 
@@ -789,12 +789,12 @@ func TestFieldsPublishesLineage(t *testing.T) {
 Add the imports that file needs (`slices`, and
 `github.com/nicois/openbao-cloud-creds/pkg/lineage`).
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `go test github.com/nicois/openbao-cloud-creds/pkg/lineage/... github.com/nicois/openbao-cloud-creds/pkg/issuedlist/...`
 Expected: FAIL — `undefined: Stamp`; and the issuedlist module cannot resolve `pkg/lineage`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Append to `pkg/lineage/lineage.go`:
 
@@ -839,12 +839,12 @@ extend `Fields()` so the returned slice reads:
 	}
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `go test -race github.com/nicois/openbao-cloud-creds/pkg/lineage/... github.com/nicois/openbao-cloud-creds/pkg/issuedlist/...`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pkg/lineage pkg/issuedlist
