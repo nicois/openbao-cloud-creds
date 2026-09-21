@@ -1035,7 +1035,7 @@ git commit -m "test(plugintest): let a harness supply the system view"
 - Modify: `pkg/plugintest/harness.go` (category const), `pkg/plugintest/conformance.go` (register), all twelve `conformance/harness_*_test.go`
 - Test: `make test-conformance`
 
-- [ ] **Step 1: Declare the category**
+- [x] **Step 1: Declare the category**
 
 In `pkg/plugintest/harness.go`, after `CategoryInventory`:
 
@@ -1049,7 +1049,7 @@ In `pkg/plugintest/harness.go`, after `CategoryInventory`:
 Add `CategoryLineage` to whatever list `conformance.go` iterates (find it with
 `grep -n "CategoryInventory" pkg/plugintest/conformance.go`).
 
-- [ ] **Step 2: Write the identity double**
+- [x] **Step 2: Write the identity double**
 
 Create `pkg/plugintest/lineage.go`. Note what it does NOT need: no harness file changes. Each case
 copies the `Harness` (a struct, so a copy is free) and sets its own `SystemView`, which is why the
@@ -1146,7 +1146,7 @@ func issueAsUnparented(t *testing.T, b logical.Backend, storage logical.Storage,
 }
 ```
 
-- [ ] **Step 3: Write the five cases**
+- [x] **Step 3: Write the five cases**
 
 Append to `pkg/plugintest/lineage.go`:
 
@@ -1283,7 +1283,7 @@ func lineageRecordsTheParent(t *testing.T, h Harness) {
 
 Add the `pkg/lineage` require and `replace ... => ../lineage` to `pkg/plugintest/go.mod`.
 
-- [ ] **Step 4: Register the category**
+- [x] **Step 4: Register the category**
 
 In `pkg/plugintest/conformance.go`, add to the category table after the `CategoryInventory` entry:
 
@@ -1298,14 +1298,14 @@ In `pkg/plugintest/conformance.go`, add to the category table after the `Categor
 	},
 ```
 
-- [ ] **Step 5: Run it — `do` passes, the other eleven fail**
+- [x] **Step 5: Run it — `do` passes, the other eleven fail**
 
 Run: `make test-conformance`
 Expected: `do` PASSES all five cases; the other eleven subjects FAIL on
 `ARoleCanRequireTheCallersParent` because their role write path does not accept the field yet. That is
 the failing test for Task 8.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pkg/plugintest conformance
@@ -1336,7 +1336,7 @@ Plugins and their credential path, for the `Enforce` insertion point:
 | `credential-akamai` | `plugins/credential-akamai/path_creds.go` |
 | `credential-oci` | `plugins/credential-oci/path_creds.go` |
 
-- [ ] **Step 1: For each plugin, add the const**
+- [x] **Step 1: For each plugin, add the const**
 
 In `consts.go`, beside `fieldRequireCallerIdentity`:
 
@@ -1344,7 +1344,7 @@ In `consts.go`, beside `fieldRequireCallerIdentity`:
 	fieldRequireCallerLineage = lineage.FieldRequireCallerLineage
 ```
 
-- [ ] **Step 2: For each plugin, add the role field**
+- [x] **Step 2: For each plugin, add the role field**
 
 In `path_roles.go`: the struct field
 `RequireCallerLineage string \`json:"require_caller_lineage"\``; the schema entry
@@ -1367,7 +1367,7 @@ the write-path validation
 
 persisting it onto the role, and the read-path response entry beside `require_caller_identity`.
 
-- [ ] **Step 3: For each plugin, enforce and stamp**
+- [x] **Step 3: For each plugin, enforce and stamp**
 
 In `path_creds.go`, after the existing `requester.Enforce` block:
 
@@ -1390,12 +1390,12 @@ through where one exists and do not invent one where it does not — follow exac
 `requester.Stamp` does there today (`grep -n "requester.Stamp" plugins/credential-oci/`), including
 passing nil if that is what the rotation path does.
 
-- [ ] **Step 4: For each plugin, add the dependency**
+- [x] **Step 4: For each plugin, add the dependency**
 
 In `go.mod`: `github.com/nicois/openbao-cloud-creds/pkg/lineage v0.5.0` and
 `replace github.com/nicois/openbao-cloud-creds/pkg/lineage => ../../pkg/lineage`.
 
-- [ ] **Step 5: For each plugin, test and commit**
+- [x] **Step 5: For each plugin, test and commit**
 
 Run: `go test -race github.com/nicois/openbao-cloud-creds/plugins/credential-<name>/...`
 Expected: PASS.
@@ -1414,7 +1414,7 @@ git add plugins/credential-<name>
 git commit -m "feat(<cloud>): record and enforce the caller's lineage"
 ```
 
-- [ ] **Step 6: Verify all ten are wired, not nine**
+- [x] **Step 6: Verify all ten are wired, not nine**
 
 Run:
 

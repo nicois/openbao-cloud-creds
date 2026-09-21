@@ -76,6 +76,10 @@ const (
 	// present in storage. It also fences the one place a tracking record becomes public — no
 	// credential material may appear in a listing.
 	CategoryInventory Category = "inventory"
+	// CategoryLineage covers WHOSE unit obtained a credential: a role can demand the caller's
+	// parent, the refusal is a stable code, the recorded parent comes only from fields a client
+	// cannot write, and a parent that is disabled or deleted stops issuance at once.
+	CategoryLineage Category = "lineage"
 )
 
 // Harness is supplied by the conformance table, one per plugin. Fields are

@@ -165,6 +165,14 @@ var suites = []suite{
 		// that could opt out would be one whose inventory nobody ever asked for.
 		requires: func(_ Harness) []string { return nil },
 	},
+	{
+		name: CategoryLineage,
+		run:  RunLineageSuite,
+		// Nothing cloud-specific and nothing to wire per subject: each case supplies its own
+		// identity by copying the harness, so no cloud can opt out by omitting a field. The one
+		// case needing a per-read tracking record gates itself and prints why.
+		requires: func(_ Harness) []string { return nil },
+	},
 }
 
 // fieldRolePath names the harness field three categories need. A const because more than two
