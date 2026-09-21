@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/minteraffinity"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintledger"
@@ -187,11 +188,11 @@ func (b *backend) trackActiveKey(ctx context.Context, req *logical.Request, a tr
 			"automatically reclaimable if it leaks", "cloud", cloudName, "id", a.keyID, "error", err)
 	}
 	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+a.keyID,
-		requester.Stamp(map[string]any{
+		lineage.Stamp(requester.Stamp(map[string]any{
 			fieldRole: a.roleName,
 			"minter":  a.minterID,
 			"created": a.now.UTC().Format(time.RFC3339),
-		}, req))
+		}, req), req, b.System()))
 	if activeEntry == nil {
 		return nil
 	}
@@ -439,6 +440,13 @@ func (b *backend) preflight(ctx context.Context, req *logical.Request, d *framew
 	// Before the capacity scan and before a minter is chosen: a role that will not issue to
 	// this caller must cost neither storage work nor an upstream call.
 	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return nil, mintercapacity.State{}, resp
+	}
+
+	// Checked here, beside the identity requirement and before a minter is selected, so a
+	// refused request costs the upstream nothing. Orthogonal to the requirement above rather
+	// than stricter than it: this one asks WHOSE unit the caller is, which core does not say.
+	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
 		return nil, mintercapacity.State{}, resp
 	}
 	capacity, errResp := b.capacitySnapshot(ctx, req)
