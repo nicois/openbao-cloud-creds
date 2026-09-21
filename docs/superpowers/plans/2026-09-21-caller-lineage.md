@@ -496,7 +496,7 @@ git commit -m "feat(errors): add caller_unparented to the code vocabulary"
 - Modify: `pkg/lineage/lineage.go`, `pkg/lineage/go.mod` (no change if Task 1 already requires credenvelope)
 - Test: `pkg/lineage/lineage_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `pkg/lineage/lineage_test.go`:
 
@@ -578,12 +578,12 @@ func TestParseRequirementTreatsEmptyAsNone(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `go test github.com/nicois/openbao-cloud-creds/pkg/lineage/... -run 'Enforce|ParseRequirement'`
 Expected: FAIL — `undefined: RequireNone`, `undefined: Enforce`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `pkg/lineage/lineage.go`, delete the two `var _ =` placeholder lines from Task 1 and append:
 
@@ -714,12 +714,12 @@ grep -n "ErrEntityUnavailable" pkg/credenvelope/errors.go
 
 If it does not, use `credenvelope.ErrInternal` instead and drop that branch's distinct wording.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `go test -race github.com/nicois/openbao-cloud-creds/pkg/lineage/...`
 Expected: PASS (all cases, including the eight `Enforce` subtests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pkg/lineage
