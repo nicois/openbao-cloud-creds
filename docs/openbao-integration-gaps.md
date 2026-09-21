@@ -302,6 +302,35 @@ The plan for the rest (disposable accounts, CI secrets, record/replay so real
 interactions become durable fixtures) remains
 [`free-account-viability.md`](free-account-viability.md).
 
+### G10 — the identity store was read by every in-process test through a double — CLOSED for the key that matters (2026-09-21)
+
+Caller lineage (see [`decisions.md`](decisions.md), "Why lineage is read from the identity store and
+enforced at issuance") rests on one factual claim about OpenBao: that `custom_metadata` written onto
+an entity ALIAS is returned by `SystemView.EntityInfo` to a plugin running in **another process**.
+
+Nothing in the conformance layer could check that, and the shape of the gap is worth naming because
+it is the same one G1 and G6 describe. Every in-process case supplies its own `logical.SystemView`
+via `Harness.SystemView`, so twelve subjects × five lineage cases fence the plugin's USE of the
+interface and say nothing whatever about core's implementation of it. Had real aliases dropped
+`custom_metadata` across the plugin gRPC boundary, all sixty cases would have stayed green while the
+feature recorded nothing on any cloud — an absent field looking exactly like a passing test, which is
+this repository's characteristic failure.
+
+`pkg/baotest/scenario.go` therefore writes the claim for real against a live `bao`: create a parent
+entity, log in as a unit over AppRole, write `cloud_creds_parent_entity_id` and `cloud_creds_unit_id`
+onto the login's entity alias, read a credential as that unit, and assert the plugin published the
+parent through `issued/`. It runs on all eight driven subjects that keep a per-credential record
+(`do-spaces-rotated` gates out: a shared credential's record was written by the rotation that minted
+it, so it names no caller). It confirms empirically what `identity.ToSDKAlias` promises by
+inspection, and it asserts `requested_by_lineage_source=alias_custom_metadata` rather than merely
+non-empty — because a login rewrites alias `metadata` on every use, so silently falling back to that
+source would substitute a volatile value for a deliberate claim and still look correct.
+
+**What remains unproven.** That a real fleet can carry it: the assertion writes one claim for one
+unit against a dev-mode server, and says nothing about the cost of one privileged identity write per
+unit at scale, nor about `identity/entity/merge` making a recorded parent id vanish legitimately —
+which a `live_parent` role would read as a deleted parent and refuse. Fail-closed, and not exercised.
+
 ## Summary
 
 | Gap | Status | Tracked |
@@ -315,6 +344,7 @@ interactions become durable fixtures) remains
 | G7 no `Invalidate`/`SpecialPaths`/`PeriodicFunc` | partly closed (`InitializeFunc` landed); rest open, accepted | here |
 | G8 AWS/GCP/OCI not e2e-reachable | open | e2e registry skips |
 | G9 `cloud_real` tag unused | **partly closed** (DO probe found KI-009 — the reference plugin cannot mint against real DO; AWS probe found KI-010 and confirmed STS honours requested TTLs exactly); eight clouds open, no CI | audit #7, [`free-account-viability.md`](free-account-viability.md), [`do-api-verification-2026-08-21.md`](do-api-verification-2026-08-21.md), [`known-issues.md`](known-issues.md) |
+| G10 identity metadata assumed to reach a plugin | **closed for alias `custom_metadata`** (`pkg/baotest` writes a real claim and asserts it reaches `issued/`); a real fleet has never run it | here, [`decisions.md`](decisions.md) |
 
 Two of the three live defects this audit found (G2/KI-007, G5/KI-008) were
 invisible to every pre-existing test and were found within an hour of the `e2e/`

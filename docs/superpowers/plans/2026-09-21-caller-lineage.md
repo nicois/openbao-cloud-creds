@@ -1477,7 +1477,7 @@ git commit -m "test(e2e): prove lineage crosses the plugin RPC boundary"
 **Files:**
 - Modify: `docs/ttl-semantics.md` (no change — verify), `docs/design.md`, `docs/techrfc.md`, `docs/decisions.md`, `docs/openbao-integration-gaps.md`, `CLAUDE.md`, every `go.mod` (version bump)
 
-- [ ] **Step 1: Write the rationale note**
+- [x] **Step 1: Write the rationale note**
 
 In `docs/decisions.md`, under the 2026-09-21 lineage section already present, add a subsection "Why
 lineage is read from the identity store and enforced at issuance" covering: why the identity store is
@@ -1486,7 +1486,7 @@ the only substrate (barrier-isolated mount storage), why there is no request par
 why `live_parent` costs a second `EntityInfo` and is worth it (it is a MemDB read, and it is what makes
 disabling a service a cross-cloud containment lever), and why conflicting aliases resolve to nothing.
 
-- [ ] **Step 2: Update the contract docs**
+- [x] **Step 2: Update the contract docs**
 
 - `docs/design.md`: the worked example for a credential read gains the three `requested_by_*` lineage
   fields; the error table row was added in Task 2 — check it is still accurate.
@@ -1496,7 +1496,7 @@ disabling a service a cross-cloud containment lever), and why conflicting aliase
 - `docs/openbao-integration-gaps.md`: record what the e2e layer now proves (custom metadata reaches an
   external plugin) and what remains unproven (no real fleet has run it).
 
-- [ ] **Step 3: Verify every layer**
+- [x] **Step 3: Verify every layer**
 
 ```bash
 go build github.com/nicois/openbao-cloud-creds/...
@@ -1510,7 +1510,11 @@ make smoke-test
 
 Expected: all green. `make lint` must report 0 issues including the tagged pass.
 
-- [ ] **Step 4: Release**
+- [ ] **Step 4: Release** — NOT DONE, deliberately. Tagging is irreversible (the module proxy
+caches a version's content permanently) and releasing is the human's decision, so this step was
+left for the maintainer. `TestEveryModuleAgreesOnOneVersion` passes as-is: `pkg/lineage` and every
+new require name `v0.5.0`, the version the rest of the set already names. What the release owes:
+**33** module paths, not 32 — `pkg/lineage` is new.
 
 `pkg/lineage` is a **new module**, so the module count goes from 32 to 33 and the new path must be
 tagged with the rest. Follow the existing release process and let its guards check the result:
@@ -1523,7 +1527,7 @@ Bump every internal `require` to the new version (including the nine plugins' ne
 `pkg/lineage` requires and `pkg/issuedlist`'s), then tag all 33 module paths at one commit. The
 unreleased rotation fix noted in `CLAUDE.md` ships in the same bump.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A

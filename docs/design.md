@@ -110,6 +110,17 @@ a caller core cannot name and answers `caller_unidentified`. `token_accessor` is
 refuses a **batch token**: it has no accessor, and its identity entity belongs to the service
 token that created it, so the accessor is the only field naming one unit.
 
+And `require_caller_lineage` (`none` default / `parent` / `live_parent`, added 2026-09-21), which
+refuses to issue to a caller whose **parent** this mount cannot establish, answering
+`caller_unparented`. Orthogonal to `require_caller_identity` rather than stricter than it: that one
+asks which session core resolved, this one asks whose unit the caller is. `parent` refuses a caller
+no parent is recorded for; `live_parent` additionally re-reads the parent's own entity and refuses
+when it is **absent or disabled** — which is what makes disabling one service's entity stop every
+unit beneath it from obtaining new credentials, on all ten clouds, immediately. Lineage is read only
+from `cloud_creds_parent_entity_id` on the caller's entity alias (`custom_metadata`, then
+`metadata`) or the entity itself; there is no request parameter, so a caller cannot claim a parent.
+Both requirements are checked before a minter is selected, so a refusal leaves nothing upstream.
+
 Cloud-specific fields (not exhaustive):
 - AWS: `iam_role_arn`, `policy_arns[]`, `inline_policy`
 - GCP: `service_account_email`, `scopes[]`
@@ -123,9 +134,12 @@ bao list cloud-creds/<cloud>/issued
 ```
 
 One entry per credential this mount has issued and not yet revoked, keyed by the upstream id the
-cloud's own console shows. `key_info` carries the role, the minter, the timestamps, and **who
+cloud's own console shows. `key_info` carries the role, the minter, the timestamps, **who
 obtained it** (`requested_by_token_accessor`, `requested_by_entity_id`, read from what core
-populated from the presented token — there is no parameter a caller could use to set them).
+populated from the presented token — there is no parameter a caller could use to set them) and
+**whose unit that caller is** (`requested_by_parent_entity_id`, `requested_by_unit_id`, and
+`requested_by_lineage_source` naming which of the three metadata sources answered, since a login
+rewrites alias `metadata` on every use while `custom_metadata` is written deliberately).
 Fields are published by an allowlist in `pkg/issuedlist`, so no credential material can reach a
 listing; pages with `after`/`limit`, looping while `more` is true.
 
@@ -163,6 +177,14 @@ runtime `minter_insufficient_privilege` idea was deliberately not pursued (see
 | `lease_revoke_failed` | 500 | Couldn't revoke upstream cleanly | Operator alert |
 | `internal` | 500 | Plugin bug, or a failure none of the above describes | No |
 
+> **Revised 2026-09-21.** `caller_unparented` added with the role field
+> `require_caller_lineage`. It earns a code because it is the one refusal in this table that
+> neither a different token nor a config change resolves: core named the caller correctly, and
+> what is missing is the provisioner's record of whose unit it is — or an operator has disabled
+> the parent deliberately, in which case being refused is the system working as designed.
+> Additive, so no `api_version` bump; a role field and a tracking-record field are not envelope
+> changes.
+>
 > **Revised 2026-09-20.** `caller_unidentified` added with the role field
 > `require_caller_identity`. It earns a code because the action is the *caller's* and is
 > specific: every other `do not retry` code needs an operator, while this one is resolved by

@@ -2054,6 +2054,97 @@ but revokes no lease, so the cloud credential Y already holds works until its le
 plugin's revoke fires. Reaching the cloud sooner is the plugin's lever, and on AWS/GCP/OVH nothing
 reaches it at all.
 
+### Why lineage is read from the identity store and enforced at issuance (2026-09-21, implemented)
+
+The notes above establish where a parent CAN be recorded. This one records what was built on top of
+them: `pkg/lineage`, the `require_caller_lineage` role field, three `requested_by_*` fields on every
+tracking record, and a thirteenth conformance category. It closes the one hop that can be closed
+inside these plugins, and only that hop.
+
+**The identity store is the only substrate, not the preferred one.** Mount storage is
+barrier-isolated, so a registry kept by another mount is unreadable from here — a credential plugin
+cannot see what an auth plugin wrote, however well they agree. `SystemView.EntityInfo` is readable by
+every plugin (`pkg/clusterrole` already takes the same interface), which makes it the only place ten
+mounts and any provisioner can meet. That is also why the contract is substrate-NEUTRAL: anything
+that writes the two agreed keys satisfies it, so the ten credential plugins never depend on a
+particular auth method existing.
+
+**There is no request parameter, and there never will be.** The same reasoning `pkg/requester`
+documents: a forgeable parent would let one unit claim a live service and be served, and the
+credential would then be recorded against a service that never asked for it. A responder chases the
+named service while the compromised one keeps its access. Misattribution is worse than a gap, which
+is also why **two aliases naming different parents resolve to nothing** — picking one is a coin flip
+between two services, and the honest answer to "whose unit is this" is sometimes "this mount cannot
+say".
+
+**Which source won is recorded, because the three differ in who could have written them.** A login
+rewrites alias `metadata` on every use, so on a SHARED alias that value is whichever unit logged in
+last — the confident misattribution the note above warns against. `custom_metadata` is written
+deliberately and stays put. Resolution order is alias `custom_metadata`, then alias `metadata`, then
+entity `metadata`, and `requested_by_lineage_source` says which answered, so a report can tell a
+deliberate claim from a volatile one instead of assuming.
+
+**`require_caller_lineage` is a separate field from `require_caller_identity`, not a fourth value on
+it.** The two are orthogonal rather than a ladder: a batch-token caller has no accessor and may still
+have a perfectly good parent, while a service token with an accessor may have none. One field would
+force an operator to choose between two unrelated demands.
+
+**`live_parent` costs a second `EntityInfo` and is worth it.** That read is MemDB-resident in the
+core process, not an upstream call, and what it buys is the only cross-cloud containment lever in
+this repo that needs no sweep, no worker and no per-mount action: disabling ONE service's entity
+stops every unit beneath it from obtaining new credentials on all ten clouds at once, immediately,
+without any mount being told. It is enforced BEFORE a minter is selected, the same placement rule the
+`provenance` category already fences, so a refusal leaves no orphaned credential upstream.
+
+**Recording is not conditional on enforcing.** The default is `none`, because every role written
+before this field existed must keep issuing what it issued — and lineage is still stamped when it
+resolves. An operator who has not yet decided to refuse anybody still gets a report that answers
+whose unit holds each credential, which is the half of the feature that is useful on day one.
+
+**What the e2e layer proves that conformance structurally cannot.** Every in-process case installs
+its own `logical.SystemView`, so twelve conformance subjects fence the plugin's USE of `EntityInfo`
+and say nothing about OpenBao's implementation of it. `pkg/baotest/scenario.go` therefore writes the
+claim for real — a parent entity, an AppRole login, `cloud_creds_parent_entity_id` onto the login's
+entity alias — and asserts the parent reaches a client through `issued/`. It confirms empirically
+what `identity.ToSDKAlias` promises by inspection: an alias's `custom_metadata` survives the plugin
+RPC boundary. Had it not, all twelve conformance subjects would have stayed green while the feature
+recorded nothing anywhere.
+
+**What remains unproven.** No real fleet has run this. The e2e layer writes one claim for one unit
+against a dev-mode server; it says nothing about the operational cost of one privileged identity
+write per unit at fleet scale, nor about what happens when `identity/entity/merge` makes a recorded
+parent id vanish legitimately (`Resolve` returns nothing and a `live_parent` role refuses, which is
+fail-closed and may be the wrong default for that case — it has not been exercised).
+
+**Deviations from the implementation plan, and why.** Recorded here because the plan was written from
+source investigation, so each of these is a place the plan and the source disagreed:
+
+- **The plan's per-plugin test asserted `resp.Data["error_code"]`.** No error response in this repo
+  carries that key: `credenvelope.ErrorResponse` puts the code in the error STRING, because OpenBao
+  surfaces only `resp.Error()` on an error response and drops `Data` side-channels — the reason
+  `ErrorCode`'s own doc comment gives for why `api_version` cannot version the vocabulary. The test
+  uses `credenvelope.CodeOf`, which is what `plugintest.assertCode` and every real client use.
+- **`credential-do` has TWO tracking-record sites, and the plan named one.** `trackSpacesKey` in
+  `spaces_shared.go` is the funnel for both Spaces credential types, and the conformance table drives
+  `do`, `do-spaces` and `do-spaces-rotated` as separate subjects. Stamping only `path_creds.go` would
+  have left `do-spaces` recording a credential with no parent while the matrix looked green.
+- **Tasks 7 and 8 landed in the opposite order.** The plan registers the conformance category and
+  then wires nine plugins, which leaves the matrix red between commits. All ten plugins were wired
+  first, so registering the category fails nothing and every commit is green.
+- **The plan's `requireLineage` helper took a requirement parameter with one possible value**, which
+  `unparam` rejects in `pkg/plugintest` (linted as non-test code). It is `requireLiveParent` now:
+  `none` is the default a role already has and `parent` is the strictly weaker half that
+  `Enforce`'s own table tests cover.
+- **Azure's `pathRoleWrite` crossed `funlen` at 81 lines** once the second requirement check landed.
+  The two caller requirements are now read by one named `callerRequirements` helper — they are asked
+  at the same moment and answer the same question in two orthogonal halves.
+- **The plan's `Enforce` used `credenvelope.ErrEntityUnavailable`**, which does exist, so the
+  fallback it offered was not needed.
+
+No `api_version` bump. A tracking-record field and a role field are not envelope changes, no
+`metadata.*` key was added, and the error code is additive — the rule stated at the top of
+`credenvelope.ErrorCode`.
+
 ### What a batch-token caller means for a lease and a credential (2026-09-20)
 
 The accessor gap above is one consequence of a token type worth stating in full, because two of its

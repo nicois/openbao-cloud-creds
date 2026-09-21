@@ -17,13 +17,46 @@ OpenBao plugins that issue short-lived, role-scoped cloud credentials with a uni
 - [`docs/free-account-viability.md`](docs/free-account-viability.md) — per-cloud free/trial account viability for a real-cloud pass (what privilege each minter needs, cost, confidence), plus the CI-secrets + record/replay design for validating the fakes. Akamai is the one cloud that cannot be obtained free. **This is the next piece of work** — see the audit doc below for why it outranks further code review.
 - [`docs/audit-2026-08-22.md`](docs/audit-2026-08-22.md) — **read this first when picking the project back up.** The enterprise-readiness audit (three parallel lenses, 31 findings A1–A31, all addressed in 27 commits) with, per finding, what was wrong, what was done, and — for A28/A29/A30 — exactly which part was deliberately left and why. Also holds the cross-cutting diagnosis (most security findings were inversions of a control that already existed elsewhere in the repo), the verified-clean list, and one finding the exercise *created*: the Exoscale client may be using the wrong auth scheme entirely, which no fake can settle.
 
-**Where the work stands (2026-09-21).** Released as **v0.5.0**, all 32 module paths tagged at one commit and verified served by the proxy from outside the checkout — which is the only thing that exercises the require versions, since every module reaches its siblings through a `replace` directive. Every layer green: build, `go test -race`, `make lint` (0 issues, including the tagged `e2e`/`cloud_real` passes), conformance (12 categories × 12 subjects), e2e, `make build-standalone`, `make smoke-test`.
+**Where the work stands (2026-09-21).** Released as **v0.5.0**, all 32 module paths tagged at one commit and verified served by the proxy from outside the checkout — which is the only thing that exercises the require versions, since every module reaches its siblings through a `replace` directive. Every layer green: build, `go test -race`, `make lint` (0 issues, including the tagged `e2e`/`cloud_real` passes), conformance (13 categories × 12 subjects), e2e, `make build-standalone`, `make smoke-test`.
 
-What v0.5.0 carried: credential provenance on all ten plugins, the `require_caller_identity` role field, the `issued/` inventory endpoint (`pkg/issuedlist`), two new conformance categories, the release-tag guards on both sides of a push, and `go fix` across every package. Since the tag: the rotated Spaces key's failed-rotation fallback (a correctness fix — see the two 2026-09-20 notes and the 2026-09-21 rotation note in [`decisions.md`](docs/decisions.md)), which is therefore **unreleased** and due in the next bump.
+What v0.5.0 carried: credential provenance on all ten plugins, the `require_caller_identity` role field, the `issued/` inventory endpoint (`pkg/issuedlist`), two new conformance categories, the release-tag guards on both sides of a push, and `go fix` across every package. Since the tag, both **unreleased** and due in the next bump: the rotated Spaces key's failed-rotation fallback (a correctness fix — see the two 2026-09-20 notes and the 2026-09-21 rotation note in [`decisions.md`](docs/decisions.md)), and caller lineage below, which adds a **33rd module path** (`pkg/lineage`) that must be tagged with the rest.
 
 What remains, in the order it matters: the eight clouds no real credential has ever touched (outranking everything); the three remaining fleet-scale items on the rotated type, all optimisations now; the report's missing `SecretID accessor -> token accessor` link; and what is named inside A28/A29/A30.
 
-The newest work is **credential provenance (2026-09-20)**: every tracking record now says WHO obtained
+The newest work is **caller lineage (2026-09-21)**: a tracking record now says whose UNIT obtained the
+credential and which SERVICE that unit belongs to, and a role can refuse to issue when that service is
+gone. Provenance stopped one hop short of the question an incident asks — on the commonest auth method
+an entity is not a unit, because approle sets `Alias.Name` to the RoleID, so every unit sharing a role
+collapses to one entity. `pkg/lineage` reads the caller's PARENT from the identity store through
+`SystemView.EntityInfo`, which is the only substrate every mount can read (mount storage is
+barrier-isolated, so a registry kept by another mount is invisible here). Every record gains
+`requested_by_parent_entity_id`, `requested_by_unit_id` and `requested_by_lineage_source`, published
+through the `issued/` allowlist.
+
+Read only from fields a client cannot write — an alias's `custom_metadata`, an alias's `metadata`, or
+the entity's `metadata`, in that order — with **no request parameter**, for the reason `pkg/requester`
+gives. Two aliases naming DIFFERENT parents resolve to **nothing**: naming one of two services is
+misattribution, which sends a responder to the wrong place while the compromised unit keeps its
+access. The winning source is recorded because a login REWRITES alias `metadata` on every use, so on a
+shared alias that value is whichever unit logged in last, while `custom_metadata` is written
+deliberately and stays put.
+
+The role field is **`require_caller_lineage`** (`none` default / `parent` / `live_parent`), refused
+with **`caller_unparented`** before a minter is selected. It is a separate field from
+`require_caller_identity`, not a fourth value on it: the two are ORTHOGONAL, since a batch-token
+caller has no accessor and may still have a perfectly good parent. `live_parent` is the load-bearing
+value — it re-reads the parent's own entity and refuses when it is absent or `Disabled`, so disabling
+ONE service's entity stops every unit beneath it from obtaining new credentials on all ten clouds at
+once, with no sweep, no worker and no cross-mount read. It costs one extra `EntityInfo`, which is a
+MemDB read in the core process. A thirteenth conformance category, `lineage`, fences all of it against
+every subject with no `Harness` field to wire and therefore no way to opt out; `pkg/baotest`'s scenario
+writes a real alias claim over HTTP, which is the only layer that can prove `custom_metadata` survives
+the plugin RPC boundary. **`api_version` is unchanged** (still `"4"`): a role field and a
+tracking-record field are not envelope changes, and no new `metadata.*` key was added. What is NOT
+built, deliberately: the reference substrate that would give each unit its own alias — see the
+follow-up plan at the end of [`docs/superpowers/plans/2026-09-21-caller-lineage.md`](docs/superpowers/plans/2026-09-21-caller-lineage.md).
+
+Before that, the newest work was **credential provenance (2026-09-20)**: every tracking record now says WHO obtained
 the credential, not just what was issued and by which minter, so a leaked cloud credential is traceable
 to a unit rather than only to this mount and this role. `pkg/requester` reads the two fields core
 populates from the presented token (`ClientTokenAccessor`, `EntityID`) and there is **no override
