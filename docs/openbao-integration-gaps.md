@@ -310,9 +310,9 @@ an entity ALIAS is returned by `SystemView.EntityInfo` to a plugin running in **
 
 Nothing in the conformance layer could check that, and the shape of the gap is worth naming because
 it is the same one G1 and G6 describe. Every in-process case supplies its own `logical.SystemView`
-via `Harness.SystemView`, so twelve subjects × five lineage cases fence the plugin's USE of the
+via `Harness.SystemView`, so twelve subjects × seven lineage cases fence the plugin's USE of the
 interface and say nothing whatever about core's implementation of it. Had real aliases dropped
-`custom_metadata` across the plugin gRPC boundary, all sixty cases would have stayed green while the
+`custom_metadata` across the plugin gRPC boundary, every one of those cases would have stayed green while the
 feature recorded nothing on any cloud — an absent field looking exactly like a passing test, which is
 this repository's characteristic failure.
 

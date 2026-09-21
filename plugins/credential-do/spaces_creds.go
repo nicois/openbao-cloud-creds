@@ -39,10 +39,6 @@ func (b *backend) secretDOSpacesKey() *framework.Secret {
 	}
 }
 
-// issueSpacesKey mints one Spaces access key for a spaces_key role. It mirrors
-// pathCredsRead's decide-then-mint shape rather than sharing it, because almost nothing
-// downstream of the mint is common: a different upstream call, a different identifier, a
-// different credential block, a different tracking prefix and a different lease type.
 // admitted is what pathCredsRead established before dispatching to a credential type: the role that
 // will serve this read, its name, and the caller's lineage resolved ONCE so the tracking record cannot
 // name a different parent from the one the role's requirement weighed. Bundled rather than passed
@@ -53,6 +49,10 @@ type admitted struct {
 	lineage  lineage.Lineage
 }
 
+// issueSpacesKey mints one Spaces access key for a spaces_key role. It mirrors
+// pathCredsRead's decide-then-mint shape rather than sharing it, because almost nothing
+// downstream of the mint is common: a different upstream call, a different identifier, a
+// different credential block, a different tracking prefix and a different lease type.
 func (b *backend) issueSpacesKey(ctx context.Context, req *logical.Request, d *framework.FieldData,
 	adm admitted,
 ) (*logical.Response, error) {
