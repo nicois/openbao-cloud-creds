@@ -8,6 +8,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -45,6 +46,11 @@ type gcpRole struct {
 	// will issue. Empty means "none", so a role written before the field existed keeps issuing
 	// exactly what it issued.
 	RequireCallerIdentity string `json:"require_caller_identity,omitempty"`
+
+	// RequireCallerLineage is how much of the caller's PARENT this role insists on before
+	// it will hand over a credential. Empty is lineage.RequireNone, so a role persisted
+	// before the field existed loads and keeps issuing exactly what it issued.
+	RequireCallerLineage string `json:"require_caller_lineage,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -92,6 +98,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: requester.RoleFieldDescription(),
 				},
+				fieldRequireCallerLineage: {
+					Type:        framework.TypeString,
+					Description: lineage.RoleFieldDescription(),
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -123,6 +133,44 @@ func validateRoleShape(serviceAccountEmail string, defaultTTL, maxTTL time.Durat
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "default_ttl must not exceed 43200 seconds (12 hours) per GCP limits")
 	}
 	return nil
+}
+
+// callerRequirements reads and validates the two demands a role makes of its CALLER.
+//
+// Both are refused here rather than at issuance: an unparseable requirement fails closed on every
+// credential read, so persisting one would hand an operator a role that looks enforceable and fails
+// the first caller that read credentials from it. Read together because they are asked at the same
+// moment and answer the same question in two orthogonal halves — which session core resolved, and
+// whose unit that caller is.
+func callerRequirements(d *framework.FieldData) (identity, parent string, errResp *logical.Response) {
+	identity = d.Get(fieldRequireCallerIdentity).(string)
+	if _, err := requester.ParseRequirement(identity); err != nil {
+		return "", "", credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error())
+	}
+	parent = d.Get(fieldRequireCallerLineage).(string)
+	if _, err := lineage.ParseRequirement(parent); err != nil {
+		return "", "", credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error())
+	}
+	return identity, parent, nil
+}
+
+// roleScopes reads the role's scope list and refuses an empty one.
+//
+// Required rather than defaulted, because an impersonated access token's scope list is the only
+// privilege boundary this cloud offers: a role that omitted it would have to be granted everything
+// the target service account can do, and that is a decision an operator states rather than inherits.
+func roleScopes(d *framework.FieldData) ([]string, *logical.Response) {
+	var scopes []string
+	if scopesRaw, ok := d.GetOk(fieldScopes); ok && scopesRaw != nil {
+		scopes = scopesRaw.([]string)
+	}
+	if len(scopes) == 0 {
+		return nil, credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
+			"scopes is required: an impersonated access token's scope list is the only privilege "+
+				"boundary this cloud offers, so a role must state it. Pass %q explicitly to grant "+
+				"everything the target service account can do", fullAccessScope)
+	}
+	return scopes, nil
 }
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
@@ -169,22 +217,14 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
 
-	var scopes []string
-	if scopesRaw, ok := d.GetOk(fieldScopes); ok && scopesRaw != nil {
-		scopes = scopesRaw.([]string)
-	}
-	if len(scopes) == 0 {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid,
-			"scopes is required: an impersonated access token's scope list is the only privilege "+
-				"boundary this cloud offers, so a role must state it. Pass %q explicitly to grant "+
-				"everything the target service account can do", fullAccessScope), nil
+	scopes, errResp := roleScopes(d)
+	if errResp != nil {
+		return errResp, nil
 	}
 
-	// Refused here rather than at issuance: a role that names a requirement nothing can parse
-	// would otherwise look enforceable and fail the first caller that read credentials from it.
-	requireCallerIdentity := d.Get(fieldRequireCallerIdentity).(string)
-	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	requireCallerIdentity, requireCallerLineage, callerErr := callerRequirements(d)
+	if callerErr != nil {
+		return callerErr, nil
 	}
 
 	gcpR := &gcpRole{
@@ -196,6 +236,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MinterSet:             minterSet,
 		Disabled:              d.Get(fieldDisabled).(bool),
 		RequireCallerIdentity: requireCallerIdentity,
+		RequireCallerLineage:  requireCallerLineage,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -246,6 +287,7 @@ func roleData(role *gcpRole) map[string]any {
 		fieldMinterSet:             role.MinterSet,
 		fieldDisabled:              role.Disabled,
 		fieldRequireCallerIdentity: role.RequireCallerIdentity,
+		fieldRequireCallerLineage:  role.RequireCallerLineage,
 	}
 }
 

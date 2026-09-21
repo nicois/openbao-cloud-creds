@@ -11,6 +11,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/minteraffinity"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/recovery"
@@ -118,12 +119,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	// Track active credential for metrics (no upstream entity to clean up)
 	activeEntry, _ := logical.StorageEntryJSON(activeTrackingPrefix+credentialID,
-		requester.Stamp(map[string]any{
+		lineage.Stamp(requester.Stamp(map[string]any{
 			fieldRole:    roleName,
 			"minter":     minterID,
 			"created":    now.UTC().Format(time.RFC3339),
 			"expires_at": expiresAt.UTC().Format(time.RFC3339),
-		}, req))
+		}, req), req, b.System()))
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
 			// Tracking is metrics-only here: access tokens auto-expire and the
@@ -368,6 +369,13 @@ func (b *backend) preflight(ctx context.Context, req *logical.Request, d *framew
 	// Before capacity is counted and before a minter is selected: a role that demands a caller
 	// it can name must cost the upstream nothing when it refuses one it cannot.
 	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return nil, mintercapacity.State{}, resp
+	}
+
+	// Checked here, beside the identity requirement and before a minter is selected, so a
+	// refused request costs the upstream nothing. Orthogonal to the requirement above rather
+	// than stricter than it: this one asks WHOSE unit the caller is, which core does not say.
+	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
 		return nil, mintercapacity.State{}, resp
 	}
 	capacity, errResp := b.capacitySnapshot(ctx, req)
