@@ -2134,7 +2134,9 @@ source investigation, so each of these is a place the plan and the source disagr
 - **The plan's `requireLineage` helper took a requirement parameter with one possible value**, which
   `unparam` rejects in `pkg/plugintest` (linted as non-test code). It is `requireLiveParent` now:
   `none` is the default a role already has and `parent` is the strictly weaker half that
-  `Enforce`'s own table tests cover.
+  `pkg/lineage`'s own `TestEnforce` covers — which is where every branch of the decision is
+  exercised, including the two the conformance category structurally cannot reach (a parent entity
+  that no longer exists, and an identity store that fails to answer).
 - **Azure's `pathRoleWrite` crossed `funlen` at 81 lines** once the second requirement check landed.
   The two caller requirements are now read by one named `callerRequirements` helper — they are asked
   at the same moment and answer the same question in two orthogonal halves.

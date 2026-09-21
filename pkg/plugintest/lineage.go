@@ -63,8 +63,8 @@ func withLineageIdentity(h Harness) (Harness, *lineageView) {
 // set by rewriting the whole role is not one they can add to a role that is already live.
 //
 // live_parent rather than a parameter, because it is the only value these cases want: `none` is the
-// default a role already has, and `parent` is the strictly weaker half that lineage.Enforce's own
-// table tests cover. A knob with one setting is a knob nobody turns.
+// default a role already has, and `parent` is the strictly weaker half that pkg/lineage's own
+// TestEnforce covers, branch by branch. A knob with one setting is a knob nobody turns.
 func requireLiveParent(t *testing.T, b logical.Backend, storage logical.Storage, rolePath string) {
 	t.Helper()
 	resp := TryWrite(t, b, storage, rolePath, map[string]any{
