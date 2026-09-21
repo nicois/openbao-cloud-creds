@@ -8,6 +8,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -48,6 +49,11 @@ type awsRole struct {
 	// before it will issue. Empty means none, so a role written before the field
 	// existed keeps issuing exactly as it did.
 	RequireCallerIdentity string `json:"require_caller_identity,omitempty"`
+
+	// RequireCallerLineage is how much of the caller's PARENT this role insists on before
+	// it will hand over a credential. Empty is lineage.RequireNone, so a role persisted
+	// before the field existed loads and keeps issuing exactly what it issued.
+	RequireCallerLineage string `json:"require_caller_lineage,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -106,6 +112,10 @@ func (b *backend) rolePaths() []*framework.Path {
 				fieldRequireCallerIdentity: {
 					Type:        framework.TypeString,
 					Description: requester.RoleFieldDescription(),
+				},
+				fieldRequireCallerLineage: {
+					Type:        framework.TypeString,
+					Description: lineage.RoleFieldDescription(),
 				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -214,6 +224,10 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
+	requireCallerLineage := d.Get(fieldRequireCallerLineage).(string)
+	if _, err := lineage.ParseRequirement(requireCallerLineage); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 
 	role := &cloudconfig.Role{
 		Name:       name,
@@ -244,6 +258,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		InlinePolicy: inlinePolicy,
 
 		RequireCallerIdentity: requireCallerIdentity,
+		RequireCallerLineage:  requireCallerLineage,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -293,6 +308,7 @@ func roleData(role *awsRole) map[string]any {
 		fieldMinterSet:             role.MinterSet,
 		fieldDisabled:              role.Disabled,
 		fieldRequireCallerIdentity: role.RequireCallerIdentity,
+		fieldRequireCallerLineage:  role.RequireCallerLineage,
 	}
 	// An unset optional field is omitted rather than reported empty, so a role that
 	// never had one is not prefilled with one either.

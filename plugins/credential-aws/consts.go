@@ -2,6 +2,7 @@ package credentialaws
 
 import (
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 )
 
@@ -31,6 +32,10 @@ const (
 	// issued to a caller this mount can name. Spelled by pkg/requester rather than here,
 	// so the field a report looks for is the same on every cloud.
 	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
+	// fieldRequireCallerLineage is the role field that refuses to issue to a caller whose
+	// PARENT this mount cannot establish. Aliased from pkg/lineage for the same reason:
+	// one spelling per plugin, so a report reads one vocabulary across ten clouds.
+	fieldRequireCallerLineage = lineage.FieldRequireCallerLineage
 
 	// fieldDefaultTTL / fieldMaxTTL are the role TTL field names.
 	fieldDefaultTTL = "default_ttl"
