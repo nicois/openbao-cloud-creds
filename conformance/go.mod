@@ -68,6 +68,7 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/cloudconfig v0.5.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.5.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/issuedlist v0.5.0
+	github.com/nicois/openbao-cloud-creds/pkg/lineage v0.5.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/localexpiry v0.5.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.5.0 // indirect
 	github.com/nicois/openbao-cloud-creds/pkg/mintercapacity v0.5.0 // indirect
@@ -147,3 +148,5 @@ replace github.com/nicois/openbao-cloud-creds/pkg/upstreampurge => ../pkg/upstre
 replace github.com/nicois/openbao-cloud-creds/pkg/requester => ../pkg/requester
 
 replace github.com/nicois/openbao-cloud-creds/pkg/issuedlist => ../pkg/issuedlist
+
+replace github.com/nicois/openbao-cloud-creds/pkg/lineage => ../pkg/lineage
