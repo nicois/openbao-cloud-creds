@@ -7,6 +7,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -35,6 +36,11 @@ type azureRole struct {
 	MinterSet             string        `json:"minter_set"`
 	Disabled              bool          `json:"disabled,omitempty"`
 	RequireCallerIdentity string        `json:"require_caller_identity,omitempty"`
+
+	// RequireCallerLineage is how much of the caller's PARENT this role insists on before
+	// it will hand over a credential. Empty is lineage.RequireNone, so a role persisted
+	// before the field existed loads and keeps issuing exactly what it issued.
+	RequireCallerLineage string `json:"require_caller_lineage,omitempty"`
 }
 
 func (b *backend) rolePaths() []*framework.Path {
@@ -84,6 +90,10 @@ func (b *backend) rolePaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: requester.RoleFieldDescription(),
 				},
+				fieldRequireCallerLineage: {
+					Type:        framework.TypeString,
+					Description: lineage.RoleFieldDescription(),
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{Callback: b.pathRoleWrite},
@@ -98,6 +108,24 @@ func (b *backend) rolePaths() []*framework.Path {
 			},
 		},
 	}
+}
+
+// callerRequirements reads and validates the two demands a role makes of its CALLER.
+//
+// Both are refused here rather than at issuance: an unparseable requirement fails closed on every
+// credential read, so persisting one would hand an operator a role that looks written and refuses
+// everybody. Read together because they are asked at the same moment and answer the same question
+// in two orthogonal halves — which session core resolved, and whose unit that caller is.
+func callerRequirements(d *framework.FieldData) (identity, parent string, errResp *logical.Response) {
+	identity = d.Get(fieldRequireCallerIdentity).(string)
+	if _, err := requester.ParseRequirement(identity); err != nil {
+		return "", "", credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error())
+	}
+	parent = d.Get(fieldRequireCallerLineage).(string)
+	if _, err := lineage.ParseRequirement(parent); err != nil {
+		return "", "", credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error())
+	}
+	return identity, parent, nil
 }
 
 func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
@@ -119,11 +147,9 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "client_id is required"), nil
 	}
 
-	// Refused here rather than at issuance: an operator who mistypes the requirement finds
-	// out on the write they made, not through a role that turns out to refuse every caller.
-	requireCallerIdentity := d.Get(fieldRequireCallerIdentity).(string)
-	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	requireCallerIdentity, requireCallerLineage, errResp := callerRequirements(d)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	minterSet := d.Get(fieldMinterSet).(string)
@@ -167,6 +193,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MinterSet:             minterSet,
 		Disabled:              d.Get(fieldDisabled).(bool),
 		RequireCallerIdentity: requireCallerIdentity,
+		RequireCallerLineage:  requireCallerLineage,
 	}
 
 	// Prove the bound set's minters can actually mint what this role asks for,
@@ -218,6 +245,7 @@ func roleData(role *azureRole) map[string]any {
 		fieldMinterSet:             role.MinterSet,
 		fieldDisabled:              role.Disabled,
 		fieldRequireCallerIdentity: role.RequireCallerIdentity,
+		fieldRequireCallerLineage:  role.RequireCallerLineage,
 	}
 }
 

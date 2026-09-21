@@ -32,6 +32,7 @@ require (
 	github.com/nicois/openbao-cloud-creds/pkg/clusterrole v0.5.0
 	github.com/nicois/openbao-cloud-creds/pkg/credenvelope v0.5.0
 	github.com/nicois/openbao-cloud-creds/pkg/issuedlist v0.5.0
+	github.com/nicois/openbao-cloud-creds/pkg/lineage v0.5.0
 	github.com/nicois/openbao-cloud-creds/pkg/minteraffinity v0.5.0
 	github.com/nicois/openbao-cloud-creds/pkg/mintercapacity v0.5.0
 	github.com/nicois/openbao-cloud-creds/pkg/ownertag v0.5.0
@@ -99,3 +100,5 @@ replace github.com/nicois/openbao-cloud-creds/pkg/upstreampurge => ../../pkg/ups
 replace github.com/nicois/openbao-cloud-creds/pkg/requester => ../../pkg/requester
 
 replace github.com/nicois/openbao-cloud-creds/pkg/issuedlist => ../../pkg/issuedlist
+
+replace github.com/nicois/openbao-cloud-creds/pkg/lineage => ../../pkg/lineage

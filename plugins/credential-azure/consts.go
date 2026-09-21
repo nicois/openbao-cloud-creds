@@ -2,6 +2,7 @@ package credentialazure
 
 import (
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 )
 
@@ -23,10 +24,14 @@ const (
 	// issued to a caller this mount can name, refused before anything is minted. Aliased
 	// from pkg/requester rather than respelled so every cloud answers to one field name.
 	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
-	fieldCloud                 = "cloud"
-	fieldTenantID              = "tenant_id"
-	fieldClientID              = "client_id"
-	fieldAppObjectID           = "app_object_id"
+	// fieldRequireCallerLineage is the role field that refuses to issue to a caller whose
+	// PARENT this mount cannot establish. Aliased from pkg/lineage for the same reason:
+	// one spelling per plugin, so a report reads one vocabulary across ten clouds.
+	fieldRequireCallerLineage = lineage.FieldRequireCallerLineage
+	fieldCloud                = "cloud"
+	fieldTenantID             = "tenant_id"
+	fieldClientID             = "client_id"
+	fieldAppObjectID          = "app_object_id"
 
 	// fieldDefaultTTL / fieldMaxTTL are the role TTL field names.
 	fieldDefaultTTL = "default_ttl"
