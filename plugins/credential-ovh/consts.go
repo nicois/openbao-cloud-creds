@@ -2,6 +2,7 @@ package credentialovh
 
 import (
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 )
 
@@ -25,7 +26,11 @@ const (
 	// that asked for it. Aliased rather than respelled: pkg/requester owns the name so a
 	// report can join every cloud's records on one key.
 	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
-	fieldCloud                 = "cloud"
+	// fieldRequireCallerLineage is the role field that refuses to issue to a caller whose
+	// PARENT this mount cannot establish. Aliased from pkg/lineage for the same reason:
+	// one spelling per plugin, so a report reads one vocabulary across ten clouds.
+	fieldRequireCallerLineage = lineage.FieldRequireCallerLineage
+	fieldCloud                = "cloud"
 	// fieldMinterID names the minter targeted by the rotate endpoint.
 	fieldMinterID = "minter_id"
 	// fieldMinterRetireGrace is the config field/response key for the retirement
