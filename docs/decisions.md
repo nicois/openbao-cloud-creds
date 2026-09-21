@@ -1838,9 +1838,9 @@ middle link established before a report can claim to show a service's credential
 has proven it. `sys/leases/lookup` does not expose the creating token.
 
 **Enumeration is no longer the blocker, though: that is what `issued/` is.** See the note below. What
-remains open is only the middle link, and note what the probe found about the alias — an entity's
-AppRole alias metadata already carries `role_name`, so the chain may not need SecretID accessors at
-all.
+remains open is the middle link, and the AppRole alias does **not** supply it: its name is the RoleID,
+so it identifies a role rather than an instance of one, and its metadata is last-writer-wins across
+every unit sharing that role. The probe note below has the detail; don't reach for the alias.
 
 ## Why the issued-credential inventory publishes by allowlist, and refuses where it cannot answer (2026-09-20)
 
@@ -1901,12 +1901,158 @@ provenance fields in the request body. Findings, all observed rather than inferr
 - `req.DisplayName` is the auth method's name (`"approle"`, `"token"`), not an identity. It is not
   worth recording.
 
-**This shortens the open question above.** The chain does not have to run through SecretID
-accessors: an entity's AppRole alias already names the role a unit logged in as, resolvable at mint
-time from inside the plugin. What remains genuinely missing is enumeration — no plugin exposes a
-`ListOperation` over its `active-*/` prefix, so there is still nothing to join against. Note also
-that an entity can be renamed or merged after issuance, so a report wanting stable text must
-snapshot the resolved name at mint time rather than resolve the ID later.
+**The alias does NOT shorten the open question, and an earlier version of this note said it did
+(corrected 2026-09-21).** The alias names a ROLE, never an instance of one, and the identity chain
+collapses with it. `Alias{Name: role.RoleID}`
+([`builtin/credential/approle/path_login.go`](https://github.com/openbao/openbao/blob/main/builtin/credential/approle/path_login.go),
+the login handler) means there is **one alias, and therefore one entity, per AppRole role per
+mount** — every SecretID of that role, so every unit holding one, resolves to the *same* `entity_id`
+and the same `role_name`. So `entity_id` is not a per-unit identifier either; two units sharing a
+role are indistinguishable from inside the plugin.
+
+**And per-unit SecretID metadata read off the alias is actively misleading, not merely absent.** The
+alias metadata is the *presenting* SecretID's metadata plus `role_name` (`metadata = entry.Metadata`
+in the same handler), and core **overwrites** it whenever a login's metadata differs from what the
+alias holds (`ChangedAliasIndex` → `a.Metadata = alias.Metadata`, `vault/identity/store.go`). So a
+plugin resolving the alias at mint time reads whichever unit logged in most recently *anywhere in
+the fleet*, not the caller — confident misattribution, which is the failure this design exists to
+prevent (see the shared-credential note above, which refuses to stamp the wrong unit for the same
+reason). Never join a report on alias metadata.
+
+**The correct per-login copy exists and is exactly what an external plugin cannot reach.** The token
+entry's `Meta` is `auth.Metadata` (`vault/request_handling.go`), i.e. that login's SecretID metadata
+plus `role_name` — per-login and correct — but `req.TokenEntry()` is nil in an external plugin, and
+`logical.SystemView` offers no lookup-by-accessor (only `EntityInfo`/`GroupsForEntity`). The SecretID
+accessor itself never travels on the token at all: approle puts only `role_name` in `InternalData`
+and only the SecretID's own metadata in `Metadata`.
+
+So the middle link stays open, and it cannot be closed inside a plugin. What the probe did close is
+**enumeration** — `issued/` (see the note below) is the thing to join against. Two ways the link
+could be closed *outside* the plugin, neither built: a privileged client resolving each recorded
+token accessor via `auth/token/lookup-accessor`, whose response includes `meta` (so a unit id stamped
+into `secret_id_metadata` arrives per-login and uncorrupted, unlike via the alias) — invisible for
+batch-token callers, which have no accessor; or the SecretID-issuing service publishing its own
+accessor→unit map for the report to join on. Note also that an entity can be renamed or merged after
+issuance, so a report wanting stable text must snapshot the resolved name at mint time rather than
+resolve the ID later.
+
+### Where a parent identity CAN be recorded, if the provisioner stamps it (2026-09-21)
+
+Read against OpenBao's source, answering: when a service X uses its token to create the AppRole
+credential a unit Y will log in with, can X's accessor end up associated with Y?
+
+**Implicitly, nowhere.** `secretIDStorageEntry` has no creator field (accessor, num-uses, TTL, three
+timestamps, metadata, CIDRs), and the secret-id write path never reads `req.ClientTokenAccessor` or
+`req.EntityID`. Y's entity is not created by X at all — it is created by the identity store at Y's
+FIRST LOGIN, from the RoleID alone, so X is not in scope at that moment. (And if X merely adds a
+SecretID to an existing role, no new entity exists: same RoleID, same entity.) Token→token lineage
+*is* implicit (`te.Parent` plus the parent/child index) but that is tokens, not entities, and it dies
+with the token. The only implicit trace is the **audit log** — the creation request carries X's
+`client_token_accessor` and the response the new `secret_id_accessor` — HMAC'd unless the mount sets
+`audit_non_hmac_response_keys`, a log rather than queryable state, and unreadable by a plugin.
+
+**Explicitly, three slots, and only one of them reaches a plugin:**
+
+- **`secret_id_metadata`** (the `metadata` param, a string parsed as `k=v,k=v` or a JSON object — so
+  no commas in values, and settable only at creation) is **per SecretID, hence per instance**. It is
+  readable later by accessor (`role/<r>/secret-id-accessor/lookup` returns `metadata`) and rides onto
+  every token Y mints (`auth.Metadata` → token `Meta`). This is the slot that closes the middle link
+  above — but from the REPORT's side, not the plugin's: the join is provenance's token accessor →
+  `auth/token/lookup-accessor` → `meta`. Prefer a caller-chosen `unit_id` to an accessor as the join
+  key: the SecretID accessor is generated server-side, so a SecretID cannot carry its own.
+- **Alias `custom_metadata`** (`identity/entity-alias`) is the only slot a plugin can read at mint
+  time: login overwrites `Metadata` only, and `identity.ToSDKAlias` copies `CustomMetadata` into what
+  `EntityInfo` returns. Its price is that it is per ALIAS = per RoleID, so it identifies a unit only
+  if every unit has its **own role**, plus identity-store privileges to write it and a pre-created
+  alias before first login. Entity `metadata` has the same granularity and the same reach.
+
+Two constraints on all of it: the value is **self-asserted** — approle validates nothing, so anything
+that may create SecretIDs on a role may claim any parent, and enforcement needs a wrapper in front of
+the mint — and a **batch-token** caller has no accessor, so the `lookup-accessor` join cannot see it
+at all and only the role-scoped `entity_id` remains (see the note below).
+
+**A proposed sweep over unparented approles closes the staleness half only.** The idea: periodically
+delete approle credentials whose stamped parent no longer resolves to a valid, enabled identity. It is
+worth having — it turns a field asserted once into a reconciled invariant, which is what makes a
+report *current* rather than merely populated. It does not close the other two halves:
+
+- **Not authenticity.** It checks that the named parent EXISTS, not that it CREATED the child, so it
+  confirms a forgery as readily as a fact. That needs the creation path to derive the parent from
+  `req.ClientTokenAccessor` — the same wrapper the self-assertion already needed.
+- **Not containment**, which is the load-bearing one, and it is this repo's own rule one layer up.
+  Renewal re-reads only the ROLE (`pathLoginRenew`) and never the SecretID, so deleting a SecretID
+  affects no live token; and `pathRoleDelete` flushes the SecretIDs, the RoleID index and the role
+  while revoking **no tokens**. A swept unit therefore keeps its token to its current TTL, keeps its
+  leases, and keeps its cloud credentials — it merely stops being renewable. Cutting it off means
+  revoking the descendant tokens, enumerable via `auth/token/accessors` filtered on `meta.role_name`
+  (which is why approle stamps it: "Always include the role name, for later filtering"), except batch
+  tokens are neither listable nor individually revocable.
+
+And it introduces a mass-deletion path, so it inherits the reconciler's discipline: **never key it on
+an accessor** (a parent rotating its own SecretID changes its accessor and would orphan its whole
+fleet in one pass — so the parent key must be a stable id, which is what makes the caller-chosen
+`unit_id` above load-bearing rather than preferable), fail OPEN when the parent cannot be determined,
+and keep `dry_run`, a minimum age covering the create-then-stamp window, a per-pass delete bound and a
+reasoned log line per deletion. The *sweep* cannot live in a plugin — deleting approle state means
+writing another mount — but see the next note: the ADOPTION half can.
+
+**A custom action CAN infer the parent, and that is where authenticity comes from (2026-09-21).** A
+backend defines whatever paths it likes — this repo already ships `revoke-upstream`, two `rotate`
+actions and `issued/` — and `req.EntityID`/`req.ClientTokenAccessor` are set by core from the
+presented token, not from the body (probed above). So an `adopt` write path INFERS its caller instead
+of being told, which is exactly the authenticity `secret_id_metadata` cannot have, and
+`require_caller_identity`/`pkg/requester` are already the primitives for refusing an unidentifiable
+one. What it may write is its own keyspace: `adopted/<child> -> {parent entity, parent accessor,
+adopted_at}`, the same shape as `issued/`. It may NOT write the identity store — `logical.SystemView`
+has no identity-write method, and `ForwardGenericRequest` is `ErrReadOnly` on the in-process extended
+view and absent from the gRPC system view client entirely, so an external plugin cannot forward a
+request at all. (It does receive the caller's `client_token`, proto field 9, so acting as an API client
+with the caller's own rights is technically open — at the cost of a plugin making privileged calls
+back into OpenBao over the network.)
+
+**And the alias collapse is an approle choice, not an OpenBao constraint.** `CreateOrFetchEntity` keys
+on `(mount_accessor, alias_name)` and the name is whatever the auth method returns, so a custom AUTH
+method setting `Alias.Name` to a per-unit id gets one entity per unit — `entity_id` finally naming an
+instance, `Alias.Metadata` carrying the parent stably (no other unit shares that alias, so
+last-writer-wins stops mattering), and the parent readable by a credential plugin at mint time via
+`EntityInfo`, including for batch-token callers. That closes the chain with no external join. Its
+costs: an auth method to operate, and one entity per unit forever — identity is MemDB-resident on every
+node with no TTL, so the tidy problem moves there. Cheaper middle option: express adoption as GROUP
+membership, since `GroupsForEntity` is already plugin-visible — role-scoped while units share a role,
+and it needs identity-store writes by the provisioner.
+
+**Adopt-plus-sweep at the ENTITY layer is containment, unlike at the approle layer (2026-09-21).** The
+design evaluated: X creates Y, then an `adopt` action records Y against the caller it infers, and a
+sweep deletes anything unadopted past a grace period or whose parent is disabled/deleted. Two facts
+make the entity the right object for it — `entity.Disabled` returns `ErrPermissionDenied` on EVERY
+request (`vault/request_handling.go`, and again at login), and a token whose entity was DELETED is
+refused by the same handler (`te.EntityID != "" && entity == nil` → "the entity on the token is
+invalid"). Both bite immediately and cover batch tokens, which carry an entity id. So sweeping an
+entity stops the unit, where flushing its SecretID or role stops nothing.
+
+Four things that design still has to get right:
+
+- **Key the map on the ENTITY ID.** Entities have no accessor: a token accessor is stale after the next
+  login (the sweep would then delete a live unit) and a SecretID accessor changes on rotation (making
+  routine rotation a mass-deletion event). And an entity id names a UNIT only under the per-unit-alias
+  choice above — with a shared approle role there is no Y to adopt, since every unit of the role is one
+  entity. The `adopt` action therefore belongs to the same auth method that mints Y.
+- **Make create-and-adopt one action.** Two calls create an "unadopted but fully functional" state, a
+  grace period tuned against provisioner liveness, and a silent delayed kill if X dies in between. One
+  call makes the state unrepresentable and leaves the grace period covering only skew and standby lag.
+- **Sweep from the backend's own registry, and disable before deleting.** "Any entity of a type that
+  needs a parent" is an inference about foreign objects — the registry is the ownership marker, which is
+  the reconciler's owner-tag invariant one layer up. Disable at T and delete at T+N: `Disabled` already
+  denies every request so containment is not delayed, but it is reversible and it keeps the lineage
+  record, whereas after a delete a false positive is indistinguishable from a unit that never existed.
+- **Fail open when the parent cannot be found.** `identity/entity/merge` deletes the merged-from entity,
+  so a parent id can vanish legitimately; treat that as unknown and alert rather than cascading. Exempt
+  root types, refuse cycles at adopt, and never let a transiently unreadable root delete its tree.
+
+**It is still not `revoke-upstream`.** Deleting Y's entity refuses Y's further OpenBao access at once
+but revokes no lease, so the cloud credential Y already holds works until its lease TTL ends and the
+plugin's revoke fires. Reaching the cloud sooner is the plugin's lever, and on AWS/GCP/OVH nothing
+reaches it at all.
 
 ### What a batch-token caller means for a lease and a credential (2026-09-20)
 
