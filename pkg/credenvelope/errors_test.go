@@ -1,6 +1,7 @@
 package credenvelope_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,5 +31,12 @@ func TestErrorCodeRoundTrips(t *testing.T) {
 	got := resp.Error().Error()
 	if !strings.HasPrefix(got, "upstream_auth_failed: ") {
 		t.Fatalf("unexpected: %q", got)
+	}
+}
+
+func TestCallerUnparentedIsInTheVocabulary(t *testing.T) {
+	if !slices.Contains(credenvelope.AllCodes(), credenvelope.ErrCallerUnparented) {
+		t.Errorf("AllCodes() omits %q, so the conformance taxonomy cannot accept it",
+			credenvelope.ErrCallerUnparented)
 	}
 }

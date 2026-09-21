@@ -158,6 +158,7 @@ runtime `minter_insufficient_privilege` idea was deliberately not pursued (see
 | `unsupported` | 501 | This cloud cannot do it and never will (minter rotation on DO/OVH/Vultr/OCI; `revoke-upstream` on AWS/GCP/OVH/OCI, where the message names the containment the operator does have) | No — never |
 | `credential_kind_unsupported` | 400 | The caller pinned a `credential_kind` this role does not serve, or one this binary does not know | **Yes, asking for a different shape** — the one refusal a client can resolve without an operator |
 | `caller_unidentified` | 403 | The role sets `require_caller_identity` and core resolved no acceptable caller from the presented token | **Yes, under a different token** — a batch token has no accessor, so re-present under a service token |
+| `caller_unparented` | 403 | The role sets `require_caller_lineage` and this mount could not establish the caller's parent, or the parent's entity is absent or disabled | **No** — the caller's provisioner must record its lineage, or an operator has disabled the parent deliberately |
 | `pool_exhausted` | 503 | All slots simultaneously unavailable | Yes, short backoff |
 | `lease_revoke_failed` | 500 | Couldn't revoke upstream cleanly | Operator alert |
 | `internal` | 500 | Plugin bug, or a failure none of the above describes | No |

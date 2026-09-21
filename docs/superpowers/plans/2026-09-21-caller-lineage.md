@@ -100,7 +100,7 @@ resolver and is deliberately deferred).
 - Create: `pkg/lineage/go.mod`, `pkg/lineage/lineage.go`, `pkg/lineage/lineage_test.go`, `pkg/lineage/systemview_test.go`
 - Modify: `go.work:22` area (add `./pkg/lineage` in sorted position)
 
-- [ ] **Step 1: Create the module and add it to the workspace**
+- [x] **Step 1: Create the module and add it to the workspace**
 
 ```bash
 mkdir -p pkg/lineage
@@ -130,7 +130,7 @@ grep -h "openbao/sdk/v2 v" pkg/requester/go.mod
 
 Use whatever version that prints.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `pkg/lineage/systemview_test.go`:
 
@@ -200,12 +200,12 @@ func TestResolveIsEmptyWithoutAnEntity(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run: `go test github.com/nicois/openbao-cloud-creds/pkg/lineage/...`
 Expected: FAIL — `undefined: MetaParentEntityID`, `undefined: Resolve`.
 
-- [ ] **Step 4: Write the minimal implementation**
+- [x] **Step 4: Write the minimal implementation**
 
 Create `pkg/lineage/lineage.go`:
 
@@ -340,12 +340,12 @@ func fromMetadata(meta map[string]string, source Source) Lineage {
 Note the import block has only `logical` at this point. Task 3 adds `fmt` and `credenvelope` along
 with the first code that uses them; do not import them early, or `make lint` fails on unused imports.
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `go test github.com/nicois/openbao-cloud-creds/pkg/lineage/...`
 Expected: PASS (2 tests).
 
-- [ ] **Step 6: Add the cases the first two do not reach**
+- [x] **Step 6: Add the cases the first two do not reach**
 
 Append to `pkg/lineage/lineage_test.go`:
 
@@ -399,12 +399,12 @@ func TestResolveRefusesToChooseBetweenTwoParents(t *testing.T) {
 }
 ```
 
-- [ ] **Step 7: Run and verify all four pass**
+- [x] **Step 7: Run and verify all four pass**
 
 Run: `go test -race github.com/nicois/openbao-cloud-creds/pkg/lineage/...`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add go.work pkg/lineage
@@ -423,7 +423,7 @@ The code is a spec change (CLAUDE.md: techrfc + `docs/design.md` table + `AllCod
 because the client's action differs from `caller_unidentified`: re-presenting under a service token does
 not help, the caller's provisioner has to record its lineage.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `pkg/credenvelope/errors_test.go`:
 
@@ -438,12 +438,12 @@ func TestCallerUnparentedIsInTheVocabulary(t *testing.T) {
 
 Add `"slices"` to that file's imports if it is not already there.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `go test github.com/nicois/openbao-cloud-creds/pkg/credenvelope/... -run Unparented`
 Expected: FAIL — `undefined: ErrCallerUnparented`.
 
-- [ ] **Step 3: Add the code**
+- [x] **Step 3: Add the code**
 
 In `pkg/credenvelope/errors.go`, directly after the `ErrCallerUnidentified` declaration:
 
@@ -463,12 +463,12 @@ And in `AllCodes()`, extend the second line so it reads:
 		ErrCredentialKindUnsupported, ErrCallerUnidentified, ErrCallerUnparented,
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `go test github.com/nicois/openbao-cloud-creds/pkg/credenvelope/...`
 Expected: PASS.
 
-- [ ] **Step 5: Record the spec change**
+- [x] **Step 5: Record the spec change**
 
 In `docs/design.md`, add a row to the error-code table immediately below the `caller_unidentified` row:
 
@@ -481,7 +481,7 @@ sentence, add — `and `require_caller_lineage` (`none` default / `parent` / `li
 2026-09-21) which refuses a caller whose parent this mount cannot establish, or whose parent entity is
 absent or disabled; refusals carry `caller_unparented`.`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pkg/credenvelope docs/design.md docs/techrfc.md

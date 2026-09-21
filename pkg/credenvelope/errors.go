@@ -35,7 +35,7 @@ import (
 // That is the test for adding one. The current set maps onto four actions:
 //
 //	retry with backoff        upstream_unavailable, upstream_timeout, upstream_quota_exceeded
-//	do not retry, fix config  config_invalid, upstream_request_invalid, role_not_found, role_disabled, unsupported
+//	do not retry, fix config  config_invalid, upstream_request_invalid, role_not_found, role_disabled, unsupported, caller_unparented
 //	ask for a different shape credential_kind_unsupported
 //	do not retry, fix creds   upstream_auth_failed, caller_unidentified
 //	do not retry, page someone internal, lease_revoke_failed, entity_unavailable, pool_exhausted
@@ -64,6 +64,14 @@ const (
 	// role that records who obtained each credential.
 	ErrCallerUnidentified ErrorCode = "caller_unidentified"
 
+	// ErrCallerUnparented: the role requires the caller's LINEAGE and this mount could not
+	// establish it — no parent recorded against the caller's entity, or a parent that is now
+	// absent or disabled. Its own code rather than reusing ErrCallerUnidentified because the
+	// remedy is different and not the caller's to apply with a different token: core named the
+	// caller fine, and what is missing is the provisioner's record of whose unit it is (or the
+	// parent has been disabled deliberately, in which case the refusal is the system working).
+	ErrCallerUnparented ErrorCode = "caller_unparented"
+
 	// Upstream-shaped: the cloud answered, or failed to answer.
 	ErrUpstreamAuthFailed     ErrorCode = "upstream_auth_failed"
 	ErrUpstreamQuotaExceeded  ErrorCode = "upstream_quota_exceeded"
@@ -85,7 +93,7 @@ const (
 func AllCodes() []ErrorCode {
 	return []ErrorCode{
 		ErrRoleNotFound, ErrRoleDisabled, ErrConfigInvalid, ErrUnsupported,
-		ErrCredentialKindUnsupported, ErrCallerUnidentified,
+		ErrCredentialKindUnsupported, ErrCallerUnidentified, ErrCallerUnparented,
 		ErrUpstreamAuthFailed, ErrUpstreamQuotaExceeded, ErrUpstreamTimeout,
 		ErrUpstreamUnavailable, ErrUpstreamRequestInvalid, ErrEntityUnavailable,
 		ErrPoolExhausted, ErrLeaseRevokeFailed, ErrInternal,
