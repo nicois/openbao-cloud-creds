@@ -1439,7 +1439,7 @@ no others.
 An assertion added here reaches every driven subject at once, which is why the scenario lives in
 `pkg/baotest` rather than in `e2e/`.
 
-- [ ] **Step 1: Extend the scenario**
+- [x] **Step 1: Extend the scenario**
 
 In `pkg/baotest/scenario.go`, find where the scenario LISTs `issued/` and asserts the entry names the
 role and the caller. Add, in the same place, an assertion that when the case declares lineage the entry
@@ -1454,7 +1454,7 @@ creating a second entity to be the parent (`identity/entity` write, name `baotes
 one layer that proves the whole substrate contract rather than a stub of it: it shows a real OpenBao
 returns that custom metadata through `EntityInfo` to an out-of-process plugin.
 
-- [ ] **Step 2: Run the e2e suite**
+- [x] **Step 2: Run the e2e suite**
 
 Run: `make test-e2e`
 Expected: PASS for all nine driven subjects. If `EntityInfo` returns no custom metadata across the
@@ -1463,7 +1463,7 @@ to alias `metadata` (written by the auth method) and the plan's substrate table 
 against `helper/identity/identity.go`'s `ToSDKAlias` before concluding — it does copy
 `CustomMetadata`, so a failure here is more likely a missing entity/alias write in the scenario.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add pkg/baotest e2e

@@ -269,6 +269,8 @@ func RunScenario(t *testing.T, c *Cluster, tc Case) {
 	want += tc.mintsPerRead()
 	assertReloadThenIssue(t, c, tc, want)
 
+	want = assertLineageReachesTheInventory(t, c, tc, want)
+
 	want = assertTokenRevocationCascade(t, c, tc, want)
 
 	assertPurgeUpstream(t, c, tc, want)
@@ -315,6 +317,187 @@ func assertInventoryListsWhatIsOutstanding(t *testing.T, c *Cluster, tc Case, is
 			"traced to the unit that obtained it: %v", fieldRequestedByTokenAccessor, entry)
 	}
 	assertNoMaterialListed(t, issued, listed)
+}
+
+// The lineage substrate this layer writes for real. The keys are spelled here rather than imported
+// from pkg/lineage for the reason fieldRequestedBy* are: what this layer proves is that a PROVISIONER
+// writing these two strings, and a CLIENT reading those three, agree with an out-of-process plugin.
+// Importing the constants would let the contract rename itself and stay green.
+const (
+	lineageAuthMount   = "approle-lineage"
+	lineageRole        = "claimed-unit"
+	lineagePolicy      = "lineage-reader"
+	lineageParentName  = "baotest-parent"
+	metaParentEntityID = "cloud_creds_parent_entity_id"
+	metaUnitID         = "cloud_creds_unit_id"
+	lineageUnitID      = "baotest-unit-7"
+
+	fieldRequestedByParentEntityID = "requested_by_parent_entity_id"
+	fieldRequestedByUnitID         = "requested_by_unit_id"
+	fieldRequestedByLineageSource  = "requested_by_lineage_source"
+	sourceAliasCustomMetadata      = "alias_custom_metadata"
+)
+
+// assertLineageReachesTheInventory proves the whole substrate contract against a running server:
+// custom metadata an operator writes onto an entity ALIAS is returned by EntityInfo to a plugin in
+// another process, and the parent it names reaches a client through `issued/`.
+//
+// This is the one layer that can prove it. Every in-process case supplies its own logical.SystemView,
+// so what they fence is the plugin's use of the interface, not OpenBao's implementation of it — if
+// real aliases did not carry custom_metadata across the plugin RPC boundary, twelve conformance
+// subjects would still be green and the feature would record nothing anywhere.
+//
+// Gated exactly like the inventory assertion above, and for the same two reasons: a subject that
+// keeps no per-credential record has nothing to carry lineage, and a shared credential's record was
+// written by the rotation that minted it, so it names no caller and no caller's parent.
+func assertLineageReachesTheInventory(t *testing.T, c *Cluster, tc Case, want int) int {
+	t.Helper()
+	if !tc.TracksIssuedCredentials || tc.SharesOneCredential {
+		return want
+	}
+	ctx := t.Context()
+	parentEntityID := Str(t, c.WriteWithContext(ctx, "identity/entity",
+		map[string]any{"name": lineageParentName}).Data, "id")
+	t.Cleanup(func() {
+		if _, err := c.Client().Logical().DeleteWithContext(
+			context.WithoutCancel(ctx), "identity/entity/id/"+parentEntityID); err != nil {
+			t.Errorf("leaving parent entity %s behind: %v", parentEntityID, err)
+		}
+	})
+
+	token := lineageClaimedUnit(ctx, t, c, tc, parentEntityID)
+	want += readCredentialAs(ctx, t, c, tc, token)
+	AssertUpstream(t, tc, want)
+
+	assertInventoryNamesTheParent(t, c, tc, parentEntityID)
+	return want
+}
+
+// lineageClaimedUnit logs in as a unit over AppRole and then CLAIMS it: the parent is written onto
+// the login's entity alias as custom_metadata, which is the privileged one-time write per unit that
+// the substrate contract asks a provisioner for.
+//
+// The alias is read back from the entity rather than assumed, because its id is assigned by core at
+// first login and is the only handle the write endpoint takes.
+func lineageClaimedUnit(
+	ctx context.Context, t *testing.T, c *Cluster, tc Case, parentEntityID string,
+) string {
+	t.Helper()
+	if err := c.Client().Sys().EnableAuthWithOptionsWithContext(ctx, lineageAuthMount,
+		&api.EnableAuthOptions{Type: "approle"}); err != nil {
+		t.Fatalf("enabling approle at %s: %v", lineageAuthMount, err)
+	}
+	// Removed with a context that outlives the test, as the cascade's mount is: t.Context() is
+	// already cancelled by the time cleanups run, and a mount left behind fails the NEXT plugin's
+	// run at enable time, which is a confusing place to learn about it.
+	t.Cleanup(func() {
+		if err := c.Client().Sys().DisableAuthWithContext(
+			context.WithoutCancel(ctx), lineageAuthMount); err != nil {
+			t.Errorf("leaving %s mounted: %v", lineageAuthMount, err)
+		}
+	})
+	c.WriteWithContext(ctx, "sys/policies/acl/"+lineagePolicy, map[string]any{
+		"policy": fmt.Sprintf("path %q {\n  capabilities = [\"read\"]\n}\n", tc.issuePath()),
+	})
+	t.Cleanup(func() {
+		if err := c.Client().Sys().DeletePolicyWithContext(
+			context.WithoutCancel(ctx), lineagePolicy); err != nil {
+			t.Errorf("leaving policy %s behind: %v", lineagePolicy, err)
+		}
+	})
+
+	rolePath := "auth/" + lineageAuthMount + "/role/" + lineageRole
+	c.WriteWithContext(ctx, rolePath, map[string]any{
+		"token_policies": lineagePolicy, "token_period": "1h",
+		"secret_id_num_uses": 0, "secret_id_ttl": 0,
+	})
+	roleID := Str(t, c.ReadWithContext(ctx, rolePath+"/role-id").Data, "role_id")
+	secretID := Str(t, c.WriteWithContext(ctx, rolePath+"/secret-id", nil).Data, "secret_id")
+
+	login := c.WriteWithContext(ctx, "auth/"+lineageAuthMount+"/login",
+		map[string]any{"role_id": roleID, "secret_id": secretID})
+	if login.Auth == nil || login.Auth.EntityID == "" {
+		t.Fatalf("AppRole login resolved no entity, so there is no alias to claim: %+v", login)
+	}
+	claimUnitsAlias(ctx, t, c, login.Auth.EntityID, parentEntityID)
+	return login.Auth.ClientToken
+}
+
+// claimUnitsAlias writes the parent onto the caller's entity alias and reads it back.
+//
+// The read-back is the assertion that matters before the credential is ever issued: if OpenBao did
+// not persist custom_metadata on an alias, the failure would otherwise surface as a missing
+// inventory field and read as a plugin defect.
+func claimUnitsAlias(ctx context.Context, t *testing.T, c *Cluster, entityID, parentEntityID string) {
+	t.Helper()
+	aliases, ok := c.ReadWithContext(ctx, "identity/entity/id/"+entityID).Data["aliases"].([]any)
+	if !ok || len(aliases) == 0 {
+		t.Fatalf("entity %s carries no alias, so a per-unit claim has nowhere to go", entityID)
+	}
+	alias, ok := aliases[0].(map[string]any)
+	if !ok {
+		t.Fatalf("the entity's alias is %T, want an object", aliases[0])
+	}
+	aliasID := Str(t, alias, "id")
+	custom := map[string]any{metaParentEntityID: parentEntityID, metaUnitID: lineageUnitID}
+	c.WriteWithContext(ctx, "identity/entity-alias/id/"+aliasID, map[string]any{
+		"canonical_id":    entityID,
+		"mount_accessor":  Str(t, alias, "mount_accessor"),
+		"name":            Str(t, alias, "name"),
+		"custom_metadata": custom,
+	})
+
+	stored := Nested(t, c.ReadWithContext(ctx, "identity/entity-alias/id/"+aliasID).Data,
+		"custom_metadata")
+	if stored[metaParentEntityID] != parentEntityID {
+		t.Fatalf("alias %s reports custom_metadata[%s]=%v, want %q. The substrate contract rests "+
+			"on an operator being able to write this key and a plugin reading it back through "+
+			"EntityInfo; if OpenBao does not keep it on an alias, the contract has to move to "+
+			"alias metadata written by the auth method",
+			aliasID, metaParentEntityID, stored[metaParentEntityID], parentEntityID)
+	}
+}
+
+// assertInventoryNamesTheParent is the client's half: the three lineage fields reach a caller of
+// `issued/` through core's JSON layer, naming the parent, the unit and which source won.
+//
+// The source is asserted, not merely present: a login REWRITES alias metadata every time, so a
+// parent that resolved from there on a shared alias is whichever unit logged in last. An entry that
+// said alias_metadata where custom_metadata was written would mean the deliberate claim had been
+// lost and a volatile value substituted for it.
+func assertInventoryNamesTheParent(t *testing.T, c *Cluster, tc Case, parentEntityID string) {
+	t.Helper()
+	listed := c.List(tc.inventoryPath())
+	if listed == nil {
+		t.Fatalf("%s lists nothing while the claimed unit's credential is outstanding",
+			tc.inventoryPath())
+	}
+	info, ok := listed.Data["key_info"].(map[string]any)
+	if !ok {
+		t.Fatalf("the inventory carries no key_info: %v", listed.Data)
+	}
+
+	var claimed map[string]any
+	for _, raw := range info {
+		entry, isObject := raw.(map[string]any)
+		if isObject && entry[fieldRequestedByParentEntityID] == parentEntityID {
+			claimed = entry
+			break
+		}
+	}
+	if claimed == nil {
+		t.Fatalf("no %s entry names %s=%q. Either the alias's custom_metadata did not reach the "+
+			"plugin through EntityInfo across the RPC boundary, or the record is not published: %v",
+			tc.inventoryPath(), fieldRequestedByParentEntityID, parentEntityID, info)
+	}
+	if got := claimed[fieldRequestedByUnitID]; got != lineageUnitID {
+		t.Errorf("the entry says %s=%v, want %q: a report names the parent but not the unit "+
+			"beneath it", fieldRequestedByUnitID, got, lineageUnitID)
+	}
+	if got := claimed[fieldRequestedByLineageSource]; got != sourceAliasCustomMetadata {
+		t.Errorf("the entry says %s=%v, want %q", fieldRequestedByLineageSource, got,
+			sourceAliasCustomMetadata)
+	}
 }
 
 // fieldRequestedByTokenAccessor is spelled here rather than imported, for the reason the purge
