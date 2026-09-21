@@ -83,8 +83,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Checked here, beside the identity requirement and before a minter is selected, so a
 	// refused request costs the upstream nothing. Orthogonal to the requirement above rather
 	// than stricter than it: this one asks WHOSE unit the caller is, which core does not say.
-	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
-		return resp, nil
+	// The resolved lineage comes back so the tracking record below names exactly the parent this
+	// check weighed, rather than whatever a second read of the identity store would say later.
+	callerLineage, refusal := lineage.Enforce(req, b.System(), role.RequireCallerLineage)
+	if refusal != nil {
+		return refusal, nil
 	}
 
 	now := time.Now()
@@ -123,7 +126,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	return b.buildCredsResponse(ctx, req, credsResponseArgs{
 		role: role, roleName: roleName, sel: sel, accessToken: accessToken,
-		expiresIn: expiresIn, now: now,
+		expiresIn: expiresIn, now: now, lineage: callerLineage,
 	}), nil
 }
 
@@ -136,6 +139,9 @@ type credsResponseArgs struct {
 	accessToken string
 	expiresIn   int
 	now         time.Time
+	// lineage is what pathCredsRead resolved about the caller's parent, carried rather than
+	// re-resolved so the record cannot name a different parent from the one the role approved.
+	lineage lineage.Lineage
 }
 
 // buildCredsResponse assembles the envelope, records the tracking entry and returns the
@@ -184,7 +190,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 			"minter":     minterID,
 			"created":    now.UTC().Format(time.RFC3339),
 			"expires_at": expiresAt.UTC().Format(time.RFC3339),
-		}, req), req, b.System()))
+		}, req), args.lineage))
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
 			// Tracking is metrics-only here: OAuth2 tokens auto-expire and the

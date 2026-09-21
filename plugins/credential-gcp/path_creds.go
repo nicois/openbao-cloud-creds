@@ -62,10 +62,11 @@ func (b *backend) secretGCP() *framework.Secret {
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
 
-	role, capacity, errResp := b.preflight(ctx, req, d, roleName)
+	adm, capacity, errResp := b.preflight(ctx, req, d, roleName)
 	if errResp != nil {
 		return errResp, nil
 	}
+	role := adm.role
 
 	now := time.Now()
 
@@ -124,7 +125,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 			"minter":     minterID,
 			"created":    now.UTC().Format(time.RFC3339),
 			"expires_at": expiresAt.UTC().Format(time.RFC3339),
-		}, req), req, b.System()))
+		}, req), adm.lineage))
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
 			// Tracking is metrics-only here: access tokens auto-expire and the
@@ -350,39 +351,51 @@ func classifyGCPError(err error) int {
 	return credenvelope.StatusNone
 }
 
+// admitted is what preflight established about a request it is letting through: the role that will
+// serve it, and the caller's lineage resolved ONCE so the tracking record cannot name a different
+// parent from the one the requirement weighed. Bundled with the role rather than returned beside it,
+// because a fourth return value is more than the result-count lint allows.
+type admitted struct {
+	role    *gcpRole
+	lineage lineage.Lineage
+}
+
 // preflight runs the checks that must pass before anything is minted: that the caller can parse what
 // this role serves, that the role exists and may issue, and that there is room for another credential
 // somewhere in its set. Grouped because every one of them must happen before a mint and none costs an
 // upstream call.
 func (b *backend) preflight(ctx context.Context, req *logical.Request, d *framework.FieldData,
 	roleName string,
-) (*gcpRole, mintercapacity.State, *logical.Response) {
+) (admitted, mintercapacity.State, *logical.Response) {
 	// Checked first, and before any mint — see RequireCredentialKind for why.
 	if errResp := credenvelope.RequireCredentialKind(
 		d.Get(fieldCredentialKind).(string), servedCredentialKind); errResp != nil {
-		return nil, mintercapacity.State{}, errResp
+		return admitted{}, mintercapacity.State{}, errResp
 	}
 	role, errResp := b.loadRole(ctx, req, roleName)
 	if errResp != nil {
-		return nil, mintercapacity.State{}, errResp
+		return admitted{}, mintercapacity.State{}, errResp
 	}
 	// Before capacity is counted and before a minter is selected: a role that demands a caller
 	// it can name must cost the upstream nothing when it refuses one it cannot.
 	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
-		return nil, mintercapacity.State{}, resp
+		return admitted{}, mintercapacity.State{}, resp
 	}
 
 	// Checked here, beside the identity requirement and before a minter is selected, so a
 	// refused request costs the upstream nothing. Orthogonal to the requirement above rather
 	// than stricter than it: this one asks WHOSE unit the caller is, which core does not say.
-	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
-		return nil, mintercapacity.State{}, resp
+	// The resolved lineage is carried out with the role, so the tracking record names exactly the
+	// parent this check weighed rather than whatever a second read of the identity store would say.
+	callerLineage, refusal := lineage.Enforce(req, b.System(), role.RequireCallerLineage)
+	if refusal != nil {
+		return admitted{}, mintercapacity.State{}, refusal
 	}
 	capacity, errResp := b.capacitySnapshot(ctx, req)
 	if errResp != nil {
-		return nil, capacity, errResp
+		return admitted{}, capacity, errResp
 	}
-	return role, capacity, nil
+	return admitted{role: role, lineage: callerLineage}, capacity, nil
 }
 
 // capacitySnapshot counts outstanding credentials before selection, so a minter with no room is

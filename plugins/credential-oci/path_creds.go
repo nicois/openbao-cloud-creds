@@ -98,8 +98,12 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Checked here, beside the identity requirement and before a minter is selected, so a
 	// refused request costs the upstream nothing. Orthogonal to the requirement above rather
 	// than stricter than it: this one asks WHOSE unit the caller is, which core does not say.
-	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
-		return resp, nil
+	// The resolved lineage is discarded rather than recorded: a read here serves a rotation SLOT
+	// this mount provisioned earlier, so there is no per-read tracking record to stamp and no single
+	// caller who obtained the credential. The requirement is still enforced — whose unit is asking
+	// is a question about the reader, not about how the credential was minted.
+	if _, refusal := lineage.Enforce(req, b.System(), role.RequireCallerLineage); refusal != nil {
+		return refusal, nil
 	}
 
 	// Load all slots and find the freshest active one

@@ -68,6 +68,9 @@ type issuedUser struct {
 	userID   string
 	client   *vultrClient
 	now      time.Time
+	// lineage is what pathCredsRead resolved about the caller's parent, carried rather than
+	// re-resolved so the record cannot name a different parent from the one the role approved.
+	lineage lineage.Lineage
 }
 
 // recordIssuedUser writes the mint ledger entry and the active-user tracking record, and revokes the
@@ -90,7 +93,7 @@ func (b *backend) recordIssuedUser(ctx context.Context, req *logical.Request,
 			fieldRole: u.roleName,
 			"minter":  u.minterID,
 			"created": u.now.UTC().Format(time.RFC3339),
-		}, req), req, b.System()))
+		}, req), u.lineage))
 	if activeEntry == nil {
 		return nil
 	}
@@ -128,8 +131,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Checked here, beside the identity requirement and before a minter is selected, so a
 	// refused request costs the upstream nothing. Orthogonal to the requirement above rather
 	// than stricter than it: this one asks WHOSE unit the caller is, which core does not say.
-	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
-		return resp, nil
+	// The resolved lineage comes back so the tracking record below names exactly the parent this
+	// check weighed, rather than whatever a second read of the identity store would say later.
+	callerLineage, refusal := lineage.Enforce(req, b.System(), role.RequireCallerLineage)
+	if refusal != nil {
+		return refusal, nil
 	}
 
 	now := time.Now()
@@ -180,7 +186,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	if errResp := b.recordIssuedUser(ctx, req, issuedUser{
 		roleName: roleName, minterID: minterID, userID: userResp.User.ID,
-		client: client, now: now,
+		client: client, now: now, lineage: callerLineage,
 	}); errResp != nil {
 		return errResp, nil
 	}

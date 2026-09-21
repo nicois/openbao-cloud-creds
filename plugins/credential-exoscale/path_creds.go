@@ -82,10 +82,11 @@ func (b *backend) loadIssuableRole(ctx context.Context, req *logical.Request, ro
 func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	roleName := d.Get(fieldRole).(string)
 
-	role, capacity, errResp := b.preflight(ctx, req, d, roleName)
+	adm, capacity, errResp := b.preflight(ctx, req, d, roleName)
 	if errResp != nil {
 		return errResp, nil
 	}
+	role := adm.role
 
 	now := time.Now()
 
@@ -146,6 +147,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		minterID: minterID,
 		keyID:    keyResp.KeyID,
 		now:      now,
+		lineage:  adm.lineage,
 	}); errResp != nil {
 		return errResp, nil
 	}
@@ -170,6 +172,9 @@ type trackArgs struct {
 	minterID string
 	keyID    string
 	now      time.Time
+	// lineage is what preflight resolved about the caller's parent, carried rather than
+	// re-resolved so the record cannot name a different parent from the one the role approved.
+	lineage lineage.Lineage
 }
 
 // trackActiveKey persists the active-key tracking record the reconciler relies
@@ -192,7 +197,7 @@ func (b *backend) trackActiveKey(ctx context.Context, req *logical.Request, a tr
 			fieldRole: a.roleName,
 			"minter":  a.minterID,
 			"created": a.now.UTC().Format(time.RFC3339),
-		}, req), req, b.System()))
+		}, req), a.lineage))
 	if activeEntry == nil {
 		return nil
 	}
@@ -421,39 +426,51 @@ func (b *backend) credentialName(ctx context.Context, req *logical.Request, role
 	return ownertag.CredentialName(instanceID, roleName, suffix), nil
 }
 
+// admitted is what preflight established about a request it is letting through: the role that will
+// serve it, and the caller's lineage resolved ONCE so the tracking record cannot name a different
+// parent from the one the requirement weighed. Bundled with the role rather than returned beside it,
+// because a fourth return value is more than the result-count lint allows.
+type admitted struct {
+	role    *exoscaleRole
+	lineage lineage.Lineage
+}
+
 // preflight runs the checks that must pass before anything is minted: the caller can parse what
 // this role serves, the role exists and may issue, and there is room for another credential
 // somewhere in its set. Grouped because they share one property — every one of them must happen
 // before a mint, and none of them costs an upstream call.
 func (b *backend) preflight(ctx context.Context, req *logical.Request, d *framework.FieldData,
 	roleName string,
-) (*exoscaleRole, mintercapacity.State, *logical.Response) {
+) (admitted, mintercapacity.State, *logical.Response) {
 	// Checked first, and before any mint — see RequireCredentialKind for why.
 	if errResp := credenvelope.RequireCredentialKind(
 		d.Get(fieldCredentialKind).(string), servedCredentialKind); errResp != nil {
-		return nil, mintercapacity.State{}, errResp
+		return admitted{}, mintercapacity.State{}, errResp
 	}
 	role, errResp := b.loadIssuableRole(ctx, req, roleName)
 	if errResp != nil {
-		return nil, mintercapacity.State{}, errResp
+		return admitted{}, mintercapacity.State{}, errResp
 	}
 	// Before the capacity scan and before a minter is chosen: a role that will not issue to
 	// this caller must cost neither storage work nor an upstream call.
 	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
-		return nil, mintercapacity.State{}, resp
+		return admitted{}, mintercapacity.State{}, resp
 	}
 
 	// Checked here, beside the identity requirement and before a minter is selected, so a
 	// refused request costs the upstream nothing. Orthogonal to the requirement above rather
 	// than stricter than it: this one asks WHOSE unit the caller is, which core does not say.
-	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
-		return nil, mintercapacity.State{}, resp
+	// The resolved lineage is carried out with the role, so the tracking record names exactly the
+	// parent this check weighed rather than whatever a second read of the identity store would say.
+	callerLineage, refusal := lineage.Enforce(req, b.System(), role.RequireCallerLineage)
+	if refusal != nil {
+		return admitted{}, mintercapacity.State{}, refusal
 	}
 	capacity, errResp := b.capacitySnapshot(ctx, req)
 	if errResp != nil {
-		return nil, capacity, errResp
+		return admitted{}, capacity, errResp
 	}
-	return role, capacity, nil
+	return admitted{role: role, lineage: callerLineage}, capacity, nil
 }
 
 // capacitySnapshot counts outstanding credentials before selection, so a minter with no room is

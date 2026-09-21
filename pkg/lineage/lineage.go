@@ -76,25 +76,62 @@ type Lineage struct {
 //
 // Two aliases naming DIFFERENT parents resolve to nothing. Picking one would be a coin flip between
 // two services, and a credential attributed to the wrong service is worse than one attributed to
-// none — a responder chases the wrong unit while the real one keeps its access.
+// none — a responder chases the wrong unit while the real one keeps its access. The same rule applies
+// to the unit name, scoped to it: two aliases that agree on the parent and disagree on the unit keep
+// the parent and report no unit.
 func Resolve(req *logical.Request, view logical.SystemView) Lineage {
+	// The identity store's own failure is dropped here rather than surfaced: a caller that only
+	// wants to RECORD lineage has nothing to do with it, and "no lineage established" is the honest
+	// answer whether the store said so or failed to answer. Enforce uses the form that keeps it,
+	// because there the two absences deserve different error codes.
+	found, _ := resolveCaller(req, view)
+	return found
+}
+
+// resolveCaller is Resolve with the identity-store read's failure kept, so Enforce can tell a caller
+// nobody has CLAIMED (the provisioner must fix it) from an identity store that did not ANSWER
+// (retry, and page someone). Only the caller's own read is reported: an absent entity is not an
+// error, it is a caller with no lineage.
+func resolveCaller(req *logical.Request, view logical.SystemView) (Lineage, error) {
 	if req == nil || req.EntityID == "" || view == nil {
-		return Lineage{}
+		return Lineage{}, nil
 	}
 	entity, err := view.EntityInfo(req.EntityID)
-	if err != nil || entity == nil {
-		return Lineage{}
+	if err != nil {
+		return Lineage{}, fmt.Errorf("reading the caller's entity %q: %w", req.EntityID, err)
 	}
+	if entity == nil {
+		return Lineage{}, nil
+	}
+	if found, agreed := fromAliases(entity.Aliases); agreed {
+		if found.ParentEntityID != "" {
+			return found, nil
+		}
+		// Fallback: entity metadata when no alias carried a parent at all.
+		return fromMetadata(entity.Metadata, SourceEntityMetadata), nil
+	}
+	// The aliases DISAGREED, which is a refusal to guess rather than an absence — so the entity's
+	// own metadata is deliberately not consulted as a tie-break. A third opinion cannot turn two
+	// contradictory claims into one true one, and treating it as one would make the attribution
+	// depend on which alias the caller happened to log in through.
+	return Lineage{}, nil
+}
 
-	// First pass: check all aliases. Within one alias, custom_metadata wins over metadata; conflict
-	// detection applies only ACROSS aliases (if two different aliases answer with different parent
-	// entity ids).
+// fromAliases resolves the lineage an entity's aliases agree on. agreed is false when two aliases
+// name DIFFERENT parents.
+//
+// Within one alias, custom_metadata wins over metadata; conflict detection applies only ACROSS
+// aliases, because one alias carrying both is a provisioner's deliberate claim overriding what a
+// login wrote, not a disagreement between two claimants.
+func fromAliases(aliases []*logical.Alias) (Lineage, bool) {
 	var found Lineage
-	for _, alias := range entity.Aliases {
+	// Tracked apart from found.UnitID so that a third alias agreeing with the first cannot refill a
+	// unit name two earlier aliases already contradicted each other about.
+	unitDisputed := false
+	for _, alias := range aliases {
 		if alias == nil {
 			continue
 		}
-		// Within this alias, take custom_metadata if it has the key, else metadata.
 		next := fromMetadata(alias.CustomMetadata, SourceAliasCustomMetadata)
 		if next.ParentEntityID == "" {
 			next = fromMetadata(alias.Metadata, SourceAliasMetadata)
@@ -102,19 +139,33 @@ func Resolve(req *logical.Request, view logical.SystemView) Lineage {
 		if next.ParentEntityID == "" {
 			continue
 		}
-		// Conflict detection: if two different aliases answer with DIFFERENT parents, return zero.
-		if found.ParentEntityID != "" && found.ParentEntityID != next.ParentEntityID {
-			return Lineage{}
-		}
 		if found.ParentEntityID == "" {
 			found = next
+			continue
+		}
+		if found.ParentEntityID != next.ParentEntityID {
+			return Lineage{}, false
+		}
+		// Same parent, and the unit names may still differ. An alias that named no unit is not a
+		// competing claim, so it fills a gap rather than creating one — which is also what makes
+		// the answer independent of the order the aliases happen to arrive in.
+		switch {
+		case next.UnitID == "" || next.UnitID == found.UnitID:
+			// Nothing said, or the same thing said twice.
+		case found.UnitID == "":
+			found.UnitID = next.UnitID
+		default:
+			unitDisputed = true
 		}
 	}
-	if found.ParentEntityID != "" {
-		return found
+	if unitDisputed {
+		// The same rule the parent conflict above applies, scoped to the field actually in dispute:
+		// a gap beats a misattribution, and a report naming the wrong unit sends a responder to the
+		// wrong host. The parent is kept because two aliases CORROBORATED it, and discarding a claim
+		// nothing contradicts would lose the answer this package exists to give.
+		found.UnitID = ""
 	}
-	// Fallback: entity metadata when no alias carried it.
-	return fromMetadata(entity.Metadata, SourceEntityMetadata)
+	return found, true
 }
 
 func fromMetadata(meta map[string]string, source Source) Lineage {
@@ -176,60 +227,83 @@ func ParseRequirement(value string) (Requirement, error) {
 		FieldRequireCallerLineage, RequireNone, RequireParent, RequireLiveParent, value)
 }
 
-// Enforce returns the refusal a role's stored requirement demands, or nil to proceed.
+// Enforce returns the refusal a role's stored requirement demands (or nil to proceed) together with
+// the lineage it resolved.
 //
-// Shaped exactly like requester.Enforce — it takes the raw stored string, parses it here so an
+// The Lineage comes back so Stamp can record exactly what was enforced. Resolving again at the
+// tracking site would read the identity store a second time and leave a window in which the parent a
+// role approved and the parent its record names could differ — and a record that disagrees with the
+// decision is worse than either, because it is the record an incident is read from. It is returned
+// even when the requirement is RequireNone, because recording is not conditional on enforcing.
+//
+// Shaped like requester.Enforce otherwise — it takes the raw stored string, parses it here so an
 // unrecognised value fails closed at one site, and returns the RESPONSE so ten plugins cannot drift
 // into ten wordings. Called BEFORE a minter is selected, so a refused request costs the upstream
 // nothing.
-func Enforce(req *logical.Request, view logical.SystemView, value string) *logical.Response {
+func Enforce(req *logical.Request, view logical.SystemView, value string,
+) (Lineage, *logical.Response) {
 	requirement, err := ParseRequirement(value)
 	if err != nil {
 		// Fail CLOSED on a value this binary does not understand: treating it as RequireNone would
 		// turn a role written by a newer binary into one that issues to anybody.
-		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error())
-	}
-	if requirement == RequireNone {
-		return nil
+		return Lineage{}, credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error())
 	}
 
-	found := Resolve(req, view)
+	found, resolveErr := resolveCaller(req, view)
+	if requirement == RequireNone {
+		// resolveErr is deliberately not refused on here: a role that demands nothing must keep
+		// issuing exactly what it issued before this field existed, and an identity store that did
+		// not answer means only that this one credential is recorded without a parent. Recording is
+		// best-effort; enforcing is not.
+		return found, nil
+	}
+	if resolveErr != nil {
+		// A different code from the unparented one below, because the two send an operator to
+		// different places and tell the client different things. A caller with no parent is a
+		// provisioner that never claimed its unit — do not retry, fix it. An identity store that did
+		// not answer is nobody's configuration: reporting it as caller_unparented would tell the
+		// client not to retry a request that would succeed, and send a responder to chase a
+		// provisioner that is fine.
+		return found, credenvelope.ErrorResponse(credenvelope.ErrEntityUnavailable,
+			"this role requires %s=%s and the caller's own entity could not be read",
+			FieldRequireCallerLineage, requirement)
+	}
 	if found.ParentEntityID == "" {
-		return credenvelope.ErrorResponse(credenvelope.ErrCallerUnparented,
+		return found, credenvelope.ErrorResponse(credenvelope.ErrCallerUnparented,
 			"this role requires %s=%s and no parent is recorded against this caller's identity "+
 				"(expected %s in an entity alias's custom_metadata or metadata, or on the entity); "+
 				"the unit's provisioner records it",
 			FieldRequireCallerLineage, requirement, MetaParentEntityID)
 	}
 	if requirement == RequireParent {
-		return nil
+		return found, nil
 	}
 
 	if found.ParentEntityID == req.EntityID {
 		// A unit that named itself is its own parent, which is a lineage of one and no lineage at
 		// all. Refused here rather than in Resolve so `parent` stays the cheap "is anything
 		// recorded" check and the cycle rule lives with the liveness rule it belongs to.
-		return credenvelope.ErrorResponse(credenvelope.ErrCallerUnparented,
+		return found, credenvelope.ErrorResponse(credenvelope.ErrCallerUnparented,
 			"this role requires %s=%s and the caller names ITSELF as its parent",
 			FieldRequireCallerLineage, RequireLiveParent)
 	}
 	parent, err := view.EntityInfo(found.ParentEntityID)
 	if err != nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrEntityUnavailable,
+		return found, credenvelope.ErrorResponse(credenvelope.ErrEntityUnavailable,
 			"this role requires %s=%s and the caller's parent entity could not be read",
 			FieldRequireCallerLineage, RequireLiveParent)
 	}
 	if parent == nil {
-		return credenvelope.ErrorResponse(credenvelope.ErrCallerUnparented,
+		return found, credenvelope.ErrorResponse(credenvelope.ErrCallerUnparented,
 			"this role requires %s=%s and the caller's parent entity no longer exists",
 			FieldRequireCallerLineage, RequireLiveParent)
 	}
 	if parent.Disabled {
-		return credenvelope.ErrorResponse(credenvelope.ErrCallerUnparented,
+		return found, credenvelope.ErrorResponse(credenvelope.ErrCallerUnparented,
 			"this role requires %s=%s and the caller's parent entity is disabled",
 			FieldRequireCallerLineage, RequireLiveParent)
 	}
-	return nil
+	return found, nil
 }
 
 // RoleFieldDescription is the help text for the role field, so an operator reads the same explanation
@@ -245,14 +319,18 @@ func RoleFieldDescription() string {
 		"Defaults to " + string(RequireNone)
 }
 
-// Stamp copies the resolvable lineage fields into an existing tracking record.
+// Stamp copies an already-resolved lineage into an existing tracking record.
+//
+// Takes the Lineage rather than resolving one of its own, so the record names exactly the parent
+// Enforce weighed (see Enforce) and one issuance reads the identity store once. A caller with no
+// lineage to hand passes the zero value and nothing is written — which is what the rotation of a
+// credential the whole ROLE shares does, since no single reader obtained it.
 //
 // Takes the record rather than returning a new map, for the reason requester.Stamp does: a plugin
 // must not be able to build its record from lineage alone and lose its own fields. Writes nothing
 // when nothing resolved — an empty parent recorded as a field would read, in a report, as a unit
 // whose service is the empty string rather than as a unit nobody has claimed.
-func Stamp(record map[string]any, req *logical.Request, view logical.SystemView) map[string]any {
-	found := Resolve(req, view)
+func Stamp(record map[string]any, found Lineage) map[string]any {
 	if found.ParentEntityID == "" {
 		return record
 	}

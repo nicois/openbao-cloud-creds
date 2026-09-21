@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/minteraffinity"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
@@ -42,9 +43,20 @@ func (b *backend) secretDOSpacesKey() *framework.Secret {
 // pathCredsRead's decide-then-mint shape rather than sharing it, because almost nothing
 // downstream of the mint is common: a different upstream call, a different identifier, a
 // different credential block, a different tracking prefix and a different lease type.
+// admitted is what pathCredsRead established before dispatching to a credential type: the role that
+// will serve this read, its name, and the caller's lineage resolved ONCE so the tracking record cannot
+// name a different parent from the one the role's requirement weighed. Bundled rather than passed
+// alongside, because a sixth parameter is more than the argument-count lint allows.
+type admitted struct {
+	role     *doRole
+	roleName string
+	lineage  lineage.Lineage
+}
+
 func (b *backend) issueSpacesKey(ctx context.Context, req *logical.Request, d *framework.FieldData,
-	role *doRole, roleName string,
+	adm admitted,
 ) (*logical.Response, error) {
+	role, roleName := adm.role, adm.roleName
 	now := time.Now()
 
 	// Counted under the SPACES prefix, so a minter's room for Spaces keys is independent
@@ -80,6 +92,7 @@ func (b *backend) issueSpacesKey(ctx context.Context, req *logical.Request, d *f
 
 	return b.buildSpacesResponse(ctx, req, spacesResponseArgs{
 		role: role, roleName: roleName, sel: sel, key: &created.Key, now: now,
+		lineage: adm.lineage,
 	}), nil
 }
 
@@ -89,6 +102,9 @@ type spacesResponseArgs struct {
 	sel      selectedMinter
 	key      *spacesKeyInfo
 	now      time.Time
+	// lineage is what pathCredsRead resolved about the caller's parent, carried rather than
+	// re-resolved so the record cannot name a different parent from the one the role approved.
+	lineage lineage.Lineage
 }
 
 func (b *backend) buildSpacesResponse(ctx context.Context, req *logical.Request, args spacesResponseArgs) *logical.Response {
@@ -131,6 +147,7 @@ func (b *backend) buildSpacesResponse(ctx context.Context, req *logical.Request,
 	// recorded with it: a leaked Spaces key otherwise traces to this mount and role, no further.
 	if err := b.trackSpacesKey(ctx, req.Storage, req, spacesKeyRecord{
 		roleName: roleName, minterID: minterID, accessKey: key.AccessKey, createdAt: now,
+		lineage: args.lineage,
 	}); err != nil {
 		// Same bargain as the token path (audit F6): never hand out a credential we
 		// cannot later track or reconcile. It matters more here — a Spaces key has no

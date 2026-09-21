@@ -115,6 +115,59 @@ func TestResolveCustomMetadataWinsOverMetadataInTheSameAlias(t *testing.T) {
 	}
 }
 
+func TestResolveWillNotChooseBetweenTwoUnitsOfOneService(t *testing.T) {
+	view := &mapSystemView{entities: map[string]*logical.Entity{"child": {
+		ID: "child",
+		Aliases: []*logical.Alias{
+			{Name: "a", CustomMetadata: map[string]string{
+				MetaParentEntityID: "service", MetaUnitID: "unit-a",
+			}},
+			{Name: "b", CustomMetadata: map[string]string{
+				MetaParentEntityID: "service", MetaUnitID: "unit-b",
+			}},
+		},
+	}}}
+
+	got := Resolve(&logical.Request{EntityID: "child"}, view)
+
+	if got.UnitID != "" {
+		t.Errorf("UnitID = %q, want empty: naming one of two units is the same misattribution "+
+			"as naming one of two services, and a report naming the wrong unit sends a responder "+
+			"to the wrong host", got.UnitID)
+	}
+	if got.ParentEntityID != "service" {
+		t.Errorf("ParentEntityID = %q, want %q: both aliases agreed on it, so the disputed unit "+
+			"must not cost the corroborated service", got.ParentEntityID, "service")
+	}
+}
+
+func TestResolveFillsAUnitNameNoAliasContradicts(t *testing.T) {
+	// Order-independence is the property: alias iteration is not ordered by anything a caller
+	// controls, so an alias that named no unit must not be able to hide one that did.
+	for _, order := range [][]*logical.Alias{
+		{
+			{Name: "a", CustomMetadata: map[string]string{MetaParentEntityID: "service"}},
+			{Name: "b", CustomMetadata: map[string]string{
+				MetaParentEntityID: "service", MetaUnitID: "unit-7",
+			}},
+		},
+		{
+			{Name: "b", CustomMetadata: map[string]string{
+				MetaParentEntityID: "service", MetaUnitID: "unit-7",
+			}},
+			{Name: "a", CustomMetadata: map[string]string{MetaParentEntityID: "service"}},
+		},
+	} {
+		view := &mapSystemView{entities: map[string]*logical.Entity{
+			"child": {ID: "child", Aliases: order},
+		}}
+		if got := Resolve(&logical.Request{EntityID: "child"}, view); got.UnitID != "unit-7" {
+			t.Errorf("UnitID = %q, want %q: an alias that named no unit is not a competing claim",
+				got.UnitID, "unit-7")
+		}
+	}
+}
+
 func TestStampAddsOnlyWhatResolved(t *testing.T) {
 	view := &mapSystemView{entities: map[string]*logical.Entity{
 		"child": aliasWithCustom("child", map[string]string{
@@ -123,7 +176,8 @@ func TestStampAddsOnlyWhatResolved(t *testing.T) {
 	}}
 
 	record := map[string]any{"role": "reader"}
-	Stamp(record, &logical.Request{EntityID: "child"}, view)
+	req := &logical.Request{EntityID: "child"}
+	Stamp(record, Resolve(req, view))
 
 	for key, want := range map[string]any{
 		"role": "reader", FieldParentEntityID: "service", FieldUnitID: "unit-7",
@@ -135,9 +189,17 @@ func TestStampAddsOnlyWhatResolved(t *testing.T) {
 	}
 }
 
+// TestStampAddsNothingWhenNothingResolved uses a caller the view KNOWS, whose identity simply
+// carries no parent. An entity-less request would short-circuit Resolve before it read the view, so
+// the case would pass with the metadata lookup entirely broken — which is the shape of an assertion
+// that proves nothing.
 func TestStampAddsNothingWhenNothingResolved(t *testing.T) {
+	view := &mapSystemView{entities: map[string]*logical.Entity{
+		"unclaimed": aliasWithCustom("unclaimed", map[string]string{"unrelated": "value"}),
+	}}
+
 	record := map[string]any{"role": "reader"}
-	Stamp(record, &logical.Request{}, &mapSystemView{})
+	Stamp(record, Resolve(&logical.Request{EntityID: "unclaimed"}, view))
 
 	if len(record) != 1 {
 		t.Errorf("record = %v, want only its original key: an absent parent must not be "+

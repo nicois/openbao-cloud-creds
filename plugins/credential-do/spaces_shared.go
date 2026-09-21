@@ -383,9 +383,11 @@ func (b *backend) rotateSharedSpacesKey(ctx context.Context, storage logical.Sto
 		return credenvelope.InternalResponse(b.Logger().Error, why, err)
 	}
 
-	// nil request, deliberately: a rotation is not somebody's read. The key it mints is served
-	// to every reader of the role until the next rotation, so there is no one caller who
-	// obtained it — and the worker that drives most rotations has no request in scope at all.
+	// nil request and no lineage, deliberately: a rotation is not somebody's read. The key it
+	// mints is served to every reader of the role until the next rotation, so there is no one
+	// caller who obtained it — and the worker that drives most rotations has no request in scope
+	// at all. Attributing it to whichever reader happened to trip the rotation would be the exact
+	// misattribution both stamps exist to prevent.
 	if err := b.trackSpacesKey(ctx, storage, nil, spacesKeyRecord{
 		roleName: roleName, minterID: sel.minterID, accessKey: key.AccessKey, createdAt: now,
 	}); err != nil {
@@ -456,6 +458,10 @@ type spacesKeyRecord struct {
 	minterID  string
 	accessKey string
 	createdAt time.Time
+	// lineage is whose unit obtained this key, resolved once per request by the caller that
+	// enforced the role's requirement. Left zero by the rotation, for the reason its nil request
+	// is: a key the whole role shares was obtained by nobody in particular.
+	lineage lineage.Lineage
 }
 
 // trackSpacesKey records an issued Spaces key, stamped with WHICH caller obtained it and whose
@@ -474,7 +480,7 @@ func (b *backend) trackSpacesKey(ctx context.Context, storage logical.Storage, r
 			fieldRole:         rec.roleName,
 			trackFieldMinter:  rec.minterID,
 			trackFieldCreated: rec.createdAt.UTC().Format(time.RFC3339),
-		}, req), req, b.System()))
+		}, req), rec.lineage))
 	if err != nil {
 		return err
 	}

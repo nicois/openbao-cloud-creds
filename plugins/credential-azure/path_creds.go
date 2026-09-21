@@ -68,6 +68,9 @@ type trackArgs struct {
 	keyID    string
 	client   *azureClient
 	now      time.Time
+	// lineage is what pathCredsRead resolved about the caller's parent, carried rather than
+	// re-resolved so the record cannot name a different parent from the one the role approved.
+	lineage lineage.Lineage
 }
 
 // trackIssuedCredential writes the active-credential record, and revokes the credential upstream if
@@ -82,7 +85,7 @@ func (b *backend) trackIssuedCredential(ctx context.Context, req *logical.Reques
 			"minter":         a.minterID,
 			fieldAppObjectID: a.role.AppObjectID,
 			"created":        a.now.UTC().Format(time.RFC3339),
-		}, req), req, b.System()))
+		}, req), a.lineage))
 	if activeEntry == nil {
 		return nil
 	}
@@ -119,8 +122,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Checked here, beside the identity requirement and before a minter is selected, so a
 	// refused request costs the upstream nothing. Orthogonal to the requirement above rather
 	// than stricter than it: this one asks WHOSE unit the caller is, which core does not say.
-	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
-		return resp, nil
+	// The resolved lineage comes back so the tracking record below names exactly the parent this
+	// check weighed, rather than whatever a second read of the identity store would say later.
+	callerLineage, refusal := lineage.Enforce(req, b.System(), role.RequireCallerLineage)
+	if refusal != nil {
+		return refusal, nil
 	}
 
 	now := time.Now()
@@ -173,7 +179,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	if errResp := b.trackIssuedCredential(ctx, req, trackArgs{
 		role: role, roleName: roleName, minterID: minterID, keyID: pwResp.KeyID,
-		client: client, now: now,
+		client: client, now: now, lineage: callerLineage,
 	}); errResp != nil {
 		return errResp, nil
 	}

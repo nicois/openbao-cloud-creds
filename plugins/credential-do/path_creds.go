@@ -72,8 +72,11 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// Checked here, beside the identity requirement and before a minter is selected, so a refused
 	// request costs the upstream nothing. Orthogonal to the requirement above, not stricter than
 	// it: this one asks WHOSE unit the caller is, which core does not answer.
-	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
-		return resp, nil
+	// The resolved lineage comes back so the tracking record below names exactly the parent this
+	// check weighed, rather than whatever a second read of the identity store would say later.
+	callerLineage, refusal := lineage.Enforce(req, b.System(), role.RequireCallerLineage)
+	if refusal != nil {
+		return refusal, nil
 	}
 
 	// Checked before any MINT, which is what RequireCredentialKind's contract is about.
@@ -93,7 +96,9 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 		return b.serveSharedSpacesKey(ctx, req, role, roleName)
 	}
 	if role.issuesSpacesKey() {
-		return b.issueSpacesKey(ctx, req, d, role, roleName)
+		return b.issueSpacesKey(ctx, req, d, admitted{
+			role: role, roleName: roleName, lineage: callerLineage,
+		})
 	}
 
 	now := time.Now()
@@ -135,6 +140,7 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 
 	return b.buildCredsResponse(ctx, req, credsResponseArgs{
 		role: role, roleName: roleName, sel: sel, token: tokenResp, now: now,
+		lineage: callerLineage,
 	}), nil
 }
 
@@ -146,6 +152,9 @@ type credsResponseArgs struct {
 	sel      selectedMinter
 	token    *tokenResponse
 	now      time.Time
+	// lineage is what pathCredsRead resolved about the caller's parent, carried rather than
+	// re-resolved so the record cannot name a different parent from the one the role approved.
+	lineage lineage.Lineage
 }
 
 // buildCredsResponse assembles the envelope, records the tracking entry and returns the
@@ -190,7 +199,7 @@ func (b *backend) buildCredsResponse(ctx context.Context, req *logical.Request, 
 			fieldRole:         roleName,
 			trackFieldMinter:  minterID,
 			trackFieldCreated: now.UTC().Format(time.RFC3339),
-		}, req), req, b.System()))
+		}, req), args.lineage))
 	if activeEntry != nil {
 		if err := req.Storage.Put(ctx, activeEntry); err != nil {
 			// Tracking write failed: revoke the just-minted upstream credential
