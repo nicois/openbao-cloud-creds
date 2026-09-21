@@ -988,7 +988,7 @@ git commit -m "feat(do): record and enforce the caller's lineage"
 - Modify: `pkg/plugintest/harness.go:302` area (add the field), `:325-365` (the three constructors)
 - Test: exercised by Task 7; no separate test (it is test infrastructure, and an unused hook would be dead code — Task 7 lands in the same PR)
 
-- [ ] **Step 1: Add the hook**
+- [x] **Step 1: Add the hook**
 
 In `pkg/plugintest/harness.go`, add to the `Harness` struct immediately before `Skips`:
 
@@ -1000,7 +1000,7 @@ In `pkg/plugintest/harness.go`, add to the `Harness` struct immediately before `
 	SystemView logical.SystemView
 ```
 
-- [ ] **Step 2: Honour it in all three constructors**
+- [x] **Step 2: Honour it in all three constructors**
 
 In `newBackendWithStorage`, `newBackend` and `Reload`, immediately after each
 `cfg := logical.TestBackendConfig()`:
@@ -1014,12 +1014,12 @@ In `newBackendWithStorage`, `newBackend` and `Reload`, immediately after each
 All three, deliberately: `Reload` builds a fresh backend from persisted storage, and a reload that
 lost the test's identity would fail the category for a reason that is not about the plugin.
 
-- [ ] **Step 3: Verify nothing broke**
+- [x] **Step 3: Verify nothing broke**
 
 Run: `make test-conformance`
 Expected: PASS, unchanged — no harness sets the field yet.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add pkg/plugintest/harness.go

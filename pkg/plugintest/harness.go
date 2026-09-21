@@ -299,6 +299,12 @@ type Harness struct {
 	// to break: the next rotation, not the next read.
 	IssuesFromPreprovisionedSlots bool
 
+	// SystemView, when set, replaces the default logical.TestBackendConfig() system view for
+	// every backend this harness builds. The lineage category needs it: the SDK's
+	// StaticSystemView answers EntityInfo with one entity for EVERY id, which cannot express
+	// "the caller's parent is a different entity" — the whole relationship under test.
+	SystemView logical.SystemView
+
 	// Skips declares categories this plugin cannot exercise, mapped to the reason. An
 	// empty reason, or a key that is not a known category, fails the conformance run.
 	Skips map[Category]string
@@ -326,6 +332,9 @@ func (f *failWritesUnder) Put(ctx context.Context, entry *logical.StorageEntry) 
 func newBackendWithStorage(t *testing.T, h Harness, storage logical.Storage) logical.Backend {
 	t.Helper()
 	cfg := logical.TestBackendConfig()
+	if h.SystemView != nil {
+		cfg.System = h.SystemView
+	}
 	cfg.StorageView = storage
 	b, err := h.Factory(t.Context(), cfg)
 	if err != nil {
@@ -352,6 +361,9 @@ func newConfiguredBackend(t *testing.T, h Harness) (logical.Backend, logical.Sto
 func newBackend(t *testing.T, h Harness) (logical.Backend, logical.Storage) {
 	t.Helper()
 	cfg := logical.TestBackendConfig()
+	if h.SystemView != nil {
+		cfg.System = h.SystemView
+	}
 	cfg.StorageView = &logical.InmemStorage{}
 	b, err := h.Factory(t.Context(), cfg)
 	if err != nil {
@@ -370,6 +382,9 @@ func newBackend(t *testing.T, h Harness) (logical.Backend, logical.Storage) {
 func Reload(t *testing.T, h Harness, storage logical.Storage) logical.Backend {
 	t.Helper()
 	cfg := logical.TestBackendConfig()
+	if h.SystemView != nil {
+		cfg.System = h.SystemView
+	}
 	cfg.StorageView = storage
 	b, err := h.Factory(t.Context(), cfg)
 	if err != nil {
