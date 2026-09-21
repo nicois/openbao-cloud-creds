@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -91,6 +92,13 @@ func (b *backend) pathCredsRead(ctx context.Context, req *logical.Request, d *fr
 	// to whoever obtained it afterwards — refusing an unidentifiable caller up front is
 	// the only attribution this cloud's shape allows.
 	if resp := requester.Enforce(req, role.RequireCallerIdentity); resp != nil {
+		return resp, nil
+	}
+
+	// Checked here, beside the identity requirement and before a minter is selected, so a
+	// refused request costs the upstream nothing. Orthogonal to the requirement above rather
+	// than stricter than it: this one asks WHOSE unit the caller is, which core does not say.
+	if resp := lineage.Enforce(req, b.System(), role.RequireCallerLineage); resp != nil {
 		return resp, nil
 	}
 

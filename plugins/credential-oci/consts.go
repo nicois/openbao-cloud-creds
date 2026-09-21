@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 )
 
@@ -47,6 +48,10 @@ const (
 	// than spelled again here, so a report joining credentials to identities finds
 	// the same field name on every cloud.
 	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
+	// fieldRequireCallerLineage is the role field that refuses to issue to a caller whose
+	// PARENT this mount cannot establish. Aliased from pkg/lineage for the same reason:
+	// one spelling per plugin, so a report reads one vocabulary across ten clouds.
+	fieldRequireCallerLineage = lineage.FieldRequireCallerLineage
 )
 
 // descRoleName is the shared field description for the role-name parameter.
