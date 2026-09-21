@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 )
 
@@ -29,6 +30,10 @@ const (
 	// mount cannot name. Aliased from pkg/requester rather than spelled again, so the field
 	// an operator sets here is provably the one every other cloud reads.
 	fieldRequireCallerIdentity = requester.FieldRequireCallerIdentity
+	// fieldRequireCallerLineage is the role field that refuses to issue to a caller whose
+	// PARENT this mount cannot establish. Aliased from pkg/lineage for the same reason:
+	// one spelling per plugin, so a report reads one vocabulary across ten clouds.
+	fieldRequireCallerLineage = lineage.FieldRequireCallerLineage
 
 	// fieldRotationParams is the per-minter rotation metadata map key (carries
 	// the authorizing username and, after rotation, the upstream client_id used
