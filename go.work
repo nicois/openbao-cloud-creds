@@ -19,6 +19,7 @@ use (
 	./pkg/reconciler
 	./pkg/recovery
 	./pkg/issuedlist
+	./pkg/lineage
 	./pkg/requester
 	./pkg/telemetry
 	./pkg/totp
