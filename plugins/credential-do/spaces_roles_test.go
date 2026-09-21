@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
@@ -278,5 +279,39 @@ func TestSpacesRole_EndpointOverrideIsKept(t *testing.T) {
 	}
 	if got := readRole(t, b, storage, "custom")["endpoint"]; got != "https://spaces.example.internal" {
 		t.Errorf("the endpoint override was not kept: %v", got)
+	}
+}
+
+// TestIssuanceRefusesAnUnparentedCallerWhenTheRoleDemandsLineage is the plugin-local half of the
+// wiring: that the role field reaches pathCredsRead at all. The positive path — a parent that
+// resolves — is the lineage conformance category's, which controls the identity.
+//
+// No system-view override is needed here: logical.TestBackendConfig() supplies a
+// logical.StaticSystemView, whose EntityInfo answers nil for every id, which is exactly "this
+// caller has no lineage" — the case under test.
+func TestIssuanceRefusesAnUnparentedCallerWhenTheRoleDemandsLineage(t *testing.T) {
+	b, storage := spacesRoleSetup(t)
+	if resp := writeRole(t, b, storage, "reader", map[string]any{
+		"credential_type":                 "spaces_key",
+		"region":                          "nyc3",
+		"grants":                          "backups:read",
+		lineage.FieldRequireCallerLineage: string(lineage.RequireLiveParent),
+	}); resp != nil && resp.IsError() {
+		t.Fatalf("writing a role with %s was refused: %v",
+			lineage.FieldRequireCallerLineage, resp.Error())
+	}
+
+	resp, err := b.HandleRequest(t.Context(), &logical.Request{
+		Operation: logical.ReadOperation, Path: "creds/reader", Storage: storage,
+		ClientTokenAccessor: "an-accessor", EntityID: "child-with-no-parent",
+	})
+	if err != nil {
+		t.Fatalf("request returned a hard error: %v", err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("issuance succeeded for an unparented caller; want a refusal: %v", resp)
+	}
+	if code, _ := credenvelope.CodeOf(resp.Error().Error()); code != credenvelope.ErrCallerUnparented {
+		t.Errorf("error_code = %v, want %q", code, credenvelope.ErrCallerUnparented)
 	}
 }

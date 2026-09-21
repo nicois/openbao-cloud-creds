@@ -16,6 +16,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/mintercapacity"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/nicois/openbao-cloud-creds/pkg/telemetry"
@@ -457,22 +458,23 @@ type spacesKeyRecord struct {
 	createdAt time.Time
 }
 
-// trackSpacesKey records an issued Spaces key, stamped with WHICH caller obtained it.
+// trackSpacesKey records an issued Spaces key, stamped with WHICH caller obtained it and whose
+// unit that caller is.
 //
 // req may be nil, and on one of the two callers it always is. A per-lease key was obtained by
 // the request that read the lease, so that request's identity belongs on the record — but a
 // rotated role's key is minted on a schedule and then served to every reader, so no single
-// caller obtained it and there is nobody to name. requester.Stamp omits what it is not given,
+// caller obtained it and there is nobody to name. Both stamps omit what they are not given,
 // which is the honest record in that case rather than a missing one.
 func (b *backend) trackSpacesKey(ctx context.Context, storage logical.Storage, req *logical.Request,
 	rec spacesKeyRecord,
 ) error {
 	entry, err := logical.StorageEntryJSON(spacesTrackingPrefix+rec.accessKey,
-		requester.Stamp(map[string]any{
+		lineage.Stamp(requester.Stamp(map[string]any{
 			fieldRole:         rec.roleName,
 			trackFieldMinter:  rec.minterID,
 			trackFieldCreated: rec.createdAt.UTC().Format(time.RFC3339),
-		}, req))
+		}, req), req, b.System()))
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/nicois/openbao-cloud-creds/pkg/cloudconfig"
 	"github.com/nicois/openbao-cloud-creds/pkg/credenvelope"
+	"github.com/nicois/openbao-cloud-creds/pkg/lineage"
 	"github.com/nicois/openbao-cloud-creds/pkg/requester"
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -43,6 +44,11 @@ type doRole struct {
 	// it will hand over a credential. Empty is requester.RequireNone, so a role written
 	// before the field existed keeps issuing exactly what it issued.
 	RequireCallerIdentity string `json:"require_caller_identity,omitempty"`
+
+	// RequireCallerLineage is how much of the caller's PARENT this role insists on before it
+	// will hand over a credential. Empty is lineage.RequireNone, so a role persisted before
+	// the field existed loads and keeps issuing exactly what it issued.
+	RequireCallerLineage string `json:"require_caller_lineage,omitempty"`
 
 	// CredentialType selects which of this cloud's two credential shapes the role
 	// issues. Empty means credentialTypeToken: roles written before this field existed
@@ -151,6 +157,10 @@ func roleFields() map[string]*framework.FieldSchema {
 		fieldRequireCallerIdentity: {
 			Type:        framework.TypeString,
 			Description: requester.RoleFieldDescription(),
+		},
+		fieldRequireCallerLineage: {
+			Type:        framework.TypeString,
+			Description: lineage.RoleFieldDescription(),
 		},
 	}
 	maps.Copy(fields, spacesRoleFields())
@@ -285,6 +295,10 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 	if _, err := requester.ParseRequirement(requireCallerIdentity); err != nil {
 		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
 	}
+	requireCallerLineage := d.Get(fieldRequireCallerLineage).(string)
+	if _, err := lineage.ParseRequirement(requireCallerLineage); err != nil {
+		return credenvelope.ErrorResponse(credenvelope.ErrConfigInvalid, "%s", err.Error()), nil
+	}
 
 	doR := &doRole{
 		Name:                  name,
@@ -294,6 +308,7 @@ func (b *backend) pathRoleWrite(ctx context.Context, req *logical.Request, d *fr
 		MinterSet:             minterSet,
 		Disabled:              d.Get(fieldDisabled).(bool),
 		RequireCallerIdentity: requireCallerIdentity,
+		RequireCallerLineage:  requireCallerLineage,
 		CredentialType:        typed.credentialType,
 		Grants:                typed.grants,
 		Region:                typed.region,
@@ -603,6 +618,7 @@ func roleData(role *doRole) map[string]any {
 		fieldMinterSet:             role.MinterSet,
 		fieldDisabled:              role.Disabled,
 		fieldRequireCallerIdentity: role.RequireCallerIdentity,
+		fieldRequireCallerLineage:  role.RequireCallerLineage,
 		fieldCredentialType:        role.credentialType(),
 	}
 	// Only the fields belonging to this role's credential type are reported. Emitting the

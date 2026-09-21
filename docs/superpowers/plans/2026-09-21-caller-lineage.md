@@ -862,7 +862,7 @@ git commit -m "feat(issued): publish the caller's lineage on the inventory"
 Do DO alone first and completely: it is the reference implementation, and the conformance category in
 Task 7 needs one subject that already passes before nine more are touched.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `plugins/credential-do/spaces_roles_test.go`, which already has the two helpers this needs —
 `spacesRoleSetup(t)` (a backend with the `default` minter set written) and
@@ -907,12 +907,12 @@ Copy the `credential_type`/`region`/`grants` values from a neighbouring test in 
 trusting these — they must be a role shape the plugin already accepts, or the test fails for the wrong
 reason.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `go test github.com/nicois/openbao-cloud-creds/plugins/credential-do/... -run Unparented`
 Expected: FAIL — the role field is unknown, so the write is rejected or ignored and issuance succeeds.
 
-- [ ] **Step 3: Add the role field**
+- [x] **Step 3: Add the role field**
 
 In `plugins/credential-do/consts.go`, beside the existing `fieldRequireCallerIdentity` const, add:
 
@@ -944,7 +944,7 @@ In `path_roles.go`, mirror the three places `require_caller_identity` appears:
    `require_caller_identity` — a field the read path omits is erased by the next partial write
    (the `PrefillRoleWrite` hazard named in `docs/decisions.md`).
 
-- [ ] **Step 4: Enforce and stamp**
+- [x] **Step 4: Enforce and stamp**
 
 In `path_creds.go`, immediately after the existing `requester.Enforce` block at `:67`:
 
@@ -968,12 +968,12 @@ stamps apply to the same map:
 Add `"github.com/nicois/openbao-cloud-creds/pkg/lineage"` to both files' imports, and to
 `plugins/credential-do/go.mod` add the require and `replace ... => ../../pkg/lineage`.
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 Run: `go test -race github.com/nicois/openbao-cloud-creds/plugins/credential-do/...`
 Expected: PASS, including the new test and every existing one.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugins/credential-do
