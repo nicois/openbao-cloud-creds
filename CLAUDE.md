@@ -33,13 +33,22 @@ barrier-isolated, so a registry kept by another mount is invisible here). Every 
 `requested_by_parent_entity_id`, `requested_by_unit_id` and `requested_by_lineage_source`, published
 through the `issued/` allowlist.
 
-Read only from fields a client cannot write — an alias's `custom_metadata`, an alias's `metadata`, or
-the entity's `metadata`, in that order — with **no request parameter**, for the reason `pkg/requester`
-gives. Two aliases naming DIFFERENT parents resolve to **nothing**: naming one of two services is
+Read only from the identity store — an alias's `custom_metadata`, an alias's `metadata`, or the
+entity's `metadata`, in that order — with **no request parameter**, for the reason `pkg/requester`
+gives. **What that guarantees is narrower than "a client cannot write it":** none of the three is
+writable through this mount's request path, and `custom_metadata` is not writable by a login either,
+but alias `metadata` IS — approle copies the presenting SecretID's own metadata into it, so wherever a
+unit may create its own SecretIDs (self-rotation; a CI job that both issues and consumes them) it can
+name any live service and `live_parent` will accept it. That is the same self-assertion `decisions.md`
+already records: authenticity needs the parent derived at the credential's CREATION, not checked at
+the mint. Restricting `live_parent` to `custom_metadata` is deliberately not done — it would make the
+requirement unusable on any substrate that publishes the parent at login — and is noted as a
+follow-up. Two aliases naming DIFFERENT parents resolve to **nothing**: naming one of two services is
 misattribution, which sends a responder to the wrong place while the compromised unit keeps its
-access. The winning source is recorded because a login REWRITES alias `metadata` on every use, so on a
-shared alias that value is whichever unit logged in last, while `custom_metadata` is written
-deliberately and stays put.
+access; two agreeing on the parent and disagreeing on the unit keep the parent and report no unit, the
+same rule scoped to the field in dispute. The winning source is recorded for exactly this reason: a
+login REWRITES alias `metadata` on every use, so on a shared alias that value is whichever unit logged
+in last, while `custom_metadata` is written deliberately and stays put.
 
 The role field is **`require_caller_lineage`** (`none` default / `parent` / `live_parent`), refused
 with **`caller_unparented`** before a minter is selected. It is a separate field from

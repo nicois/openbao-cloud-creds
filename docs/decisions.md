@@ -2140,6 +2140,12 @@ source investigation, so each of these is a place the plan and the source disagr
 - **Azure's `pathRoleWrite` crossed `funlen` at 81 lines** once the second requirement check landed.
   The two caller requirements are now read by one named `callerRequirements` helper — they are asked
   at the same moment and answer the same question in two orthogonal halves.
+- **GCP's `pathRoleWrite` crossed the same limit, and one extraction did not clear it.** It has the
+  same `callerRequirements` helper as Azure *and* a `roleScopes` helper beside it, because at 82 lines
+  the requirement pair alone left it over. So two of ten plugins now have a local
+  `callerRequirements` and eight read the two fields inline. That inconsistency is a local consequence
+  of a line limit, not a pattern to copy: a plugin under the limit should keep the two reads where the
+  other role fields are, since the helper says nothing the field names do not.
 - **The plan's `Enforce` used `credenvelope.ErrEntityUnavailable`**, which does exist, so the
   fallback it offered was not needed.
 

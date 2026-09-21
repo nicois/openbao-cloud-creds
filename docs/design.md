@@ -117,9 +117,17 @@ asks which session core resolved, this one asks whose unit the caller is. `paren
 no parent is recorded for; `live_parent` additionally re-reads the parent's own entity and refuses
 when it is **absent or disabled** — which is what makes disabling one service's entity stop every
 unit beneath it from obtaining new credentials, on all ten clouds, immediately. Lineage is read only
-from `cloud_creds_parent_entity_id` on the caller's entity alias (`custom_metadata`, then
-`metadata`) or the entity itself; there is no request parameter, so a caller cannot claim a parent.
-Both requirements are checked before a minter is selected, so a refusal leaves nothing upstream.
+from `cloud_creds_parent_entity_id` in the identity store — on the caller's entity alias
+(`custom_metadata`, then `metadata`) or on the entity itself. There is no request parameter, so a
+caller cannot claim a parent **in the request that asks for a credential**; that is the guarantee,
+and it is narrower than "a caller cannot claim a parent at all". Alias `metadata` is written by the
+auth method at login, and approle copies the presenting SecretID's own metadata into it — so
+wherever a unit may create its own SecretIDs, it can name any live parent there and `live_parent`
+will accept it. `custom_metadata` has no such path: only the identity endpoints write it, never a
+login, which is why `requested_by_lineage_source` is on every record. Authenticity needs the
+parent derived at the credential's **creation** (see `docs/decisions.md`); this field is
+self-asserted until then. Both requirements are checked before a minter is selected, so a refusal
+leaves nothing upstream.
 
 Cloud-specific fields (not exhaustive):
 - AWS: `iam_role_arn`, `policy_arns[]`, `inline_policy`

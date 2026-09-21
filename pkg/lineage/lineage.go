@@ -11,11 +11,32 @@
 //
 // # Where lineage may come from, and why nowhere else
 //
-// Only from fields the requesting client cannot write: an alias's custom_metadata (written by an
-// operator or provisioner, never touched by a login), an alias's metadata (written by the auth method
-// at login), or the entity's own metadata. There is NO request parameter, for the reason pkg/requester
-// gives: a forgeable value here would let one unit record another's lineage against a credential it
-// obtained, which is worse than recording nothing.
+// Only from the identity store: an alias's custom_metadata (written deliberately, through the
+// identity endpoints, and never touched by a login), an alias's metadata (written by the auth method
+// at login), or the entity's own metadata. There is NO request parameter, for the reason
+// pkg/requester gives: a forgeable value here would let one unit record another's lineage against a
+// credential it obtained, which is worse than recording nothing.
+//
+// # What that does and does not rule out
+//
+// None of the three is writable through THIS mount's request path, and custom_metadata is not
+// writable by a login either — so a client presenting a token cannot change what it resolves to.
+// That is the whole guarantee, and it is narrower than "a client cannot write it".
+//
+// Alias metadata is the gap, on the auth method this package exists for. OpenBao's approle login
+// sets Alias{Name: role.RoleID, Metadata: metadata} from the presenting SecretID's OWN metadata,
+// which is arbitrary key/value supplied when the SecretID was created. So wherever a unit may create
+// its own SecretIDs — self-rotation, or a CI job that both issues and consumes them — that unit can
+// write cloud_creds_parent_entity_id naming any live service, and live_parent will accept it. The
+// same fact stated from the other side is in docs/decisions.md: the value is self-asserted, approle
+// validates nothing, and authenticity needs a wrapper in front of the credential's CREATION rather
+// than a check at the mint.
+//
+// Source is recorded on every record for exactly this reason, so a report can tell a deliberate
+// claim from a login-supplied one rather than having to trust both equally. Restricting live_parent
+// to custom_metadata is deliberately NOT done here: it would make the requirement unusable on any
+// substrate that publishes the parent at login, which is a design decision with its own trade-off —
+// noted as a possible follow-up in docs/decisions.md.
 //
 // The identity store is also the only substrate available: mount storage is barrier-isolated, so a
 // registry kept by another mount is unreadable here, while SystemView.EntityInfo is readable by every

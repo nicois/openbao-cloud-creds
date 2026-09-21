@@ -10,6 +10,8 @@ use (
 	./pkg/cloudreal
 	./pkg/clusterrole
 	./pkg/credenvelope
+	./pkg/issuedlist
+	./pkg/lineage
 	./pkg/localexpiry
 	./pkg/minteraffinity
 	./pkg/mintercapacity
@@ -18,8 +20,6 @@ use (
 	./pkg/plugintest
 	./pkg/reconciler
 	./pkg/recovery
-	./pkg/issuedlist
-	./pkg/lineage
 	./pkg/requester
 	./pkg/telemetry
 	./pkg/totp
